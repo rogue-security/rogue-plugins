@@ -24,6 +24,14 @@
 # The ONE exception is the file pre-image (see `augment_with_pre_image`), which
 # adds a field the payload cannot express and never removes or rewrites one.
 #
+# Subagent identity rides in HEADERS for exactly that reason. A Cursor subagent's
+# own events name only themselves, so `resolve_parent_session` reads the payload
+# LOCALLY, looks the child's conversation id up as a FILENAME under Cursor's own
+# transcript tree, and sends the parent id plus the child id as
+# `x-rogue-parent-session-id` / `x-rogue-agent-id`. The parse result never
+# reaches the POST, so the relayed body stays byte-for-byte what Cursor sent and
+# `rogueFilePreImageB64` remains the single body exception.
+#
 # Fail-open everywhere: missing API key, missing curl, network error, non-200,
 # empty body all yield `{}` on stdout, exit 0. Cursor
 # must never block because Rogue infrastructure is unavailable.
@@ -261,20 +269,230 @@ if [ "$event" = "preToolUse" ]; then
   PAYLOAD="$(augment_with_pre_image "$PAYLOAD")"
 fi
 
+# ── Subagent -> parent session attribution (headers only) ──────────────────
+# A Cursor subagent's preToolUse / postToolUse / afterFileEdit /
+# beforeShellExecution all fire hooks and all arrive with
+# conversation_id == session_id == THE CHILD'S OWN id. No payload field names the
+# parent, so persisted verbatim each subagent becomes its own orphaned session.
+#
+# The one place the link exists is Cursor's transcript tree, where THE CHILD'S ID
+# IS THE FILENAME:
+#
+#   ~/.cursor/projects/<slug>/agent-transcripts/<parent>/subagents/<child>.jsonl
+#
+# so the parent is basename(dirname(dirname(hit))). That makes this a KEY LOOKUP,
+# not a search: two concurrent subagents each carry their own id and each find
+# their own file. Never rank by mtime, never "pick the newest file" — that is the
+# one change that could attribute a child to the wrong parent.
+#
+# `transcript_path` is deliberately never read: it is JSON-null on ordinary
+# parent events too (1,238 raw entries across 25+ real sessions), so branching on
+# it would re-attribute main-agent traffic.
+CURSOR_PROJECTS_DIR="$HOME/.cursor/projects"
+PARENT_CACHE_DIR="$HOME/.rogue/cursor-parent"
+SPAWN_MARKER_DIR="$HOME/.rogue/cursor-spawn"
+SPAWN_MARKER_TTL=30          # seconds; the observed subagentStart lead is 3.96-6.45s
+PARENT_ID=""
+CHILD_ID=""
+
+# `workspace_roots` is an ARRAY, so it needs its own reader rather than
+# _json_string_field. jq when available; otherwise match the first string inside
+# the array literal.
+_workspace_root() {
+  if command -v jq >/dev/null 2>&1; then
+    if _wr=$(printf '%s' "$1" | jq -r '.workspace_roots[0] // empty' 2>/dev/null); then
+      [ -n "$_wr" ] && { printf '%s' "$_wr"; return; }
+    fi
+  fi
+  printf '%s' "$1" \
+    | grep -o '"workspace_roots"[[:space:]]*:[[:space:]]*\[[[:space:]]*"[^"]*"' 2>/dev/null \
+    | head -1 \
+    | sed -e 's/.*"\([^"]*\)"$/\1/'
+}
+
+# Cursor's project-directory slug: the workspace path with the leading "/"
+# stripped and every "/" and "." turned into "-".
+_slugify_root() { printf '%s' "${1#/}" | tr '/.' '--'; }
+
+# A conversation id is a uuid. Anything outside that charset is not one, and it
+# would also be interpolated into a path — so reject it rather than glob with it.
+_is_conversation_id() {
+  case "$1" in
+    ''|*[!A-Za-z0-9-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# $1 = child conversation id, $2 = workspace slug (may be empty). Echoes the
+# parent conversation id. Slug-scoping is an OPTIMIZATION, not the mechanism:
+# slug derivation has real exceptions on disk (numeric slugs, `empty-window`,
+# `.code-workspace`-derived names), so a miss falls back to a global glob that
+# returns the SAME answer because the filename is the key.
+_lookup_parent() {
+  _lp_id="$1"
+  if [ -n "$2" ]; then
+    for _lp in "$CURSOR_PROJECTS_DIR/$2"/agent-transcripts/*/subagents/"$_lp_id.jsonl"; do
+      [ -e "$_lp" ] || continue
+      basename "$(dirname "$(dirname "$_lp")")"
+      return 0
+    done
+  fi
+  for _lp in "$CURSOR_PROJECTS_DIR"/*/agent-transcripts/*/subagents/"$_lp_id.jsonl"; do
+    [ -e "$_lp" ] || continue
+    basename "$(dirname "$(dirname "$_lp")")"
+    return 0
+  done
+  return 1
+}
+
+# Seconds since epoch for a file's mtime. GNU stat first (it rejects -f cleanly
+# on BSD, whereas BSD's -f would print a bogus value under GNU).
+_mtime() {
+  _mt=$(stat -c %Y "$1" 2>/dev/null) || _mt=$(stat -f %m "$1" 2>/dev/null) || return 1
+  case "$_mt" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$_mt"
+}
+
+_marker_live_in() {
+  [ -d "$1" ] || return 1
+  _now=$(date +%s 2>/dev/null)
+  case "$_now" in ''|*[!0-9]*) return 1 ;; esac
+  for _mk in "$1"/*; do
+    [ -f "$_mk" ] || continue
+    _mkt=$(_mtime "$_mk") || continue
+    _age=$((_now - _mkt))
+    [ "$_age" -ge 0 ] && [ "$_age" -le "$SPAWN_MARKER_TTL" ] && return 0
+  done
+  return 1
+}
+
+# Any live marker under this workspace. The check is "is SOMETHING spawning",
+# never "is MY parent spawning" — a child cannot know its parent before the
+# lookup succeeds. Scoped per workspace because both sides derive the slug the
+# same way from workspace_roots; unscoped only when this payload has no root.
+_marker_live() {
+  if [ -n "$1" ]; then _marker_live_in "$SPAWN_MARKER_DIR/$1"; return $?; fi
+  for _md in "$SPAWN_MARKER_DIR"/*; do
+    [ -d "$_md" ] || continue
+    _marker_live_in "$_md" && return 0
+  done
+  return 1
+}
+
+# subagentStart fires ON THE PARENT (conversation_id == the parent's id, verified
+# on all 9 real payloads) and 3.96-6.45s BEFORE the child's subagents/ file
+# exists. That window is exactly what the marker covers: it tells a later,
+# unresolved event that waiting is worth it. Every step is best-effort — a lost
+# marker costs a wait that would not have happened, never a wrong answer.
+mark_spawn() {
+  [ -n "${HOME:-}" ] || return 0
+  _ms_id=$(_json_string_field "$PAYLOAD" '.conversation_id' conversation_id)
+  _is_conversation_id "$_ms_id" || return 0
+  _ms_slug=$(_slugify_root "$(_workspace_root "$PAYLOAD")")
+  [ -n "$_ms_slug" ] || _ms_slug="_"
+  mkdir -p "$SPAWN_MARKER_DIR/$_ms_slug" 2>/dev/null || return 0
+  : > "$SPAWN_MARKER_DIR/$_ms_slug/$_ms_id" 2>/dev/null || return 0
+  dbg "spawn marker $_ms_slug/$_ms_id"
+}
+
+# Best-effort only. subagentStop carries no subagent_id and a killed subagent
+# never emits one, so nothing may depend on this running; the TTL is what
+# actually retires a marker.
+clear_spawn() {
+  [ -n "${HOME:-}" ] || return 0
+  _cs_id=$(_json_string_field "$PAYLOAD" '.conversation_id' conversation_id)
+  _is_conversation_id "$_cs_id" || return 0
+  _cs_slug=$(_slugify_root "$(_workspace_root "$PAYLOAD")")
+  [ -n "$_cs_slug" ] || _cs_slug="_"
+  rm -f "$SPAWN_MARKER_DIR/$_cs_slug/$_cs_id" 2>/dev/null
+  return 0
+}
+
+# Sets PARENT_ID/CHILD_ID when this event belongs to a subagent. Fail-open in
+# every branch: unresolved leaves both empty and the POST is exactly today's.
+resolve_parent_session() {
+  [ -n "${HOME:-}" ] || return 0
+  _rp_id=$(_json_string_field "$PAYLOAD" '.conversation_id' conversation_id)
+  _is_conversation_id "$_rp_id" || return 0
+
+  # Cache, mirroring the Copilot dispatcher's submap: a subagent fires 18-223
+  # hooks per spawn and Cursor REUSES a child id across re-spawns, so the scan
+  # runs once per subagent, ever. Only a subagent's first hook can miss.
+  _rp_cache="$PARENT_CACHE_DIR/$_rp_id"
+  if [ -r "$_rp_cache" ]; then
+    PARENT_ID=$(cat "$_rp_cache" 2>/dev/null)
+    if [ -n "$PARENT_ID" ]; then
+      CHILD_ID="$_rp_id"
+      dbg "parent cache hit"
+      return 0
+    fi
+  fi
+
+  _rp_slug=$(_slugify_root "$(_workspace_root "$PAYLOAD")")
+  PARENT_ID=$(_lookup_parent "$_rp_id" "$_rp_slug") || PARENT_ID=""
+  if [ -z "$PARENT_ID" ]; then
+    # The child's file is born 0.811-1.627s after its first hook, and its
+    # creation is INDEPENDENT of hook returns (one spawn's file appeared 2.40s
+    # before any blocking hook fired), so this wait cannot self-deadlock.
+    # hooks.json allows 120s per hook, so ~3s is 2.5% of the budget.
+    #
+    # NEVER spin without a live marker: a brand-new TOP-LEVEL conversation has no
+    # directory of its own for ~9s and so looks exactly like an unresolved child.
+    # Setting the ceiling to 0 rather than branching mirrors Copilot's
+    # `[ -d "$COPILOT_STATE_DIR" ] || _max=0`.
+    _rp_n=0
+    _rp_max=${ROGUE_CURSOR_PARENT_ITERS:-30}   # ~3s at 0.1s/iter
+    _marker_live "$_rp_slug" || _rp_max=0
+    while [ "$_rp_n" -lt "$_rp_max" ]; do
+      sleep 0.1
+      PARENT_ID=$(_lookup_parent "$_rp_id" "$_rp_slug") && [ -n "$PARENT_ID" ] && break
+      PARENT_ID=""
+      _rp_n=$((_rp_n + 1))
+    done
+  fi
+
+  [ -n "$PARENT_ID" ] || return 0
+  CHILD_ID="$_rp_id"
+  mkdir -p "$PARENT_CACHE_DIR" 2>/dev/null
+  printf '%s' "$PARENT_ID" > "$_rp_cache" 2>/dev/null
+  return 0
+}
+
+# Only the events a subagent actually fires resolve. sessionStart / sessionEnd /
+# subagentStart / subagentStop are parent-side: they already carry the parent's
+# own conversation id, so resolving would be pointless and waiting would tax
+# every session start.
+case "$event" in
+  subagentStart)           mark_spawn ;;
+  subagentStop)            clear_spawn ;;
+  sessionStart|sessionEnd) : ;;
+  *)                       resolve_parent_session ;;
+esac
+
 # ── POST (fail-open) ───────────────────────────────────────────────────────
 command -v curl >/dev/null 2>&1 || { dbg "curl not found -> {}"; printf '{}'; exit 0; }
 
 URL="$BASE_URL/api/v1/hooks/cursor"
-dbg "POST $URL actor=$actor_email"
-# -f makes curl emit nothing and exit non-zero on HTTP >= 400, giving us
-# fail-open on non-200 for free.
-RESP="$(printf '%s' "$PAYLOAD" | curl -fsS --max-time 10 -X POST \
-  -H 'Content-Type: application/json' \
+dbg "POST $URL actor=$actor_email parent=${PARENT_ID:-none}"
+# The two identity headers are appended as ARGUMENTS, never as conditional
+# VALUES: to curl `-H "x-rogue-parent-session-id: "` means "send it empty" and
+# `-H "x-rogue-parent-session-id:"` means "suppress this header entirely", so
+# neither spelling can express "do not send it". Rebuilding the argument list
+# with `set --` is the only shape that omits the header. They are always sent
+# together or not at all, and never on a main-agent event.
+set -- -H 'Content-Type: application/json' \
   -H "x-rogue-api-key: $API_KEY" \
   -H "x-rogue-event: $event" \
   -H "x-rogue-actor-email: $actor_email" \
   -H "x-rogue-actor-name: $actor_name" \
-  -H 'x-rogue-source: cursor' \
+  -H 'x-rogue-source: cursor'
+if [ -n "$PARENT_ID" ] && [ -n "$CHILD_ID" ]; then
+  set -- "$@" -H "x-rogue-parent-session-id: $PARENT_ID" -H "x-rogue-agent-id: $CHILD_ID"
+fi
+# -f makes curl emit nothing and exit non-zero on HTTP >= 400, giving us
+# fail-open on non-200 for free.
+RESP="$(printf '%s' "$PAYLOAD" | curl -fsS --max-time 10 -X POST \
+  "$@" \
   --data-binary @- "$URL" 2>/dev/null)"; _rc=$?
 dbg "curl rc=$_rc resp_len=${#RESP}"
 [ "$_rc" -eq 0 ] || RESP=""

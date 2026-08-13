@@ -92,9 +92,10 @@ jobs:
             exit $bad'
 
       - name: PowerShell unit tests
-        # Both load their dispatcher through the ROGUE_PS_LIB_ONLY seam, so the
+        # Each loads its dispatcher through the ROGUE_PS_LIB_ONLY seam, so the
         # functions run on Linux even though the main body stands down there.
         run: |
           set -euo pipefail
           pwsh -NoProfile -File tests/test_hook_ps1.ps1
           pwsh -NoProfile -File tests/test_hook_ps1_copilot.ps1
+          pwsh -NoProfile -File tests/test_hook_ps1_cursor.ps1

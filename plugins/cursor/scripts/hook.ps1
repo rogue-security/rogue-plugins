@@ -21,6 +21,11 @@
 # Fail-open everywhere: missing API key, network error, non-200, empty body, or
 # non-JSON response all yield `{}` on stdout, exit 0.
 #
+# The relayed body is byte-for-byte what Cursor sent, with the single
+# `rogueFilePreImageB64` exception (see Add-FilePreImage). Subagent identity
+# therefore rides in HEADERS: `x-rogue-parent-session-id` / `x-rogue-agent-id`,
+# resolved from Cursor's own transcript tree (see Resolve-RogueParentSession).
+#
 # Set ROGUE_DEBUG=1 (process/user env var) to emit diagnostics to stderr;
 # Cursor shows stderr in its hook log without treating it as the response.
 #
@@ -285,6 +290,214 @@ function Add-FilePreImage {
     }
 }
 
+# ── Subagent -> parent session attribution — lockstep with hook.sh ─────────
+# A Cursor subagent's preToolUse / postToolUse / afterFileEdit /
+# beforeShellExecution all arrive with conversation_id == session_id == THE
+# CHILD'S OWN id, and no payload field names the parent. The one place the link
+# exists is Cursor's transcript tree, where THE CHILD'S ID IS THE FILENAME:
+#
+#   %USERPROFILE%\.cursor\projects\<slug>\agent-transcripts\<parent>\subagents\<child>.jsonl
+#
+# so the parent is the grandparent directory's name. That makes this a KEY
+# LOOKUP, not a search: two concurrent subagents each carry their own id and each
+# find their own file. Never rank by mtime, never "pick the newest file".
+#
+# `transcript_path` is deliberately never read: it is JSON-null on ordinary
+# parent events too, so branching on it would re-attribute main-agent traffic.
+#
+# Nothing here touches the payload. The resolved ids leave as headers only, so
+# the relayed body stays byte-for-byte what Cursor sent.
+$RogueSpawnMarkerTtlSeconds = 30   # observed subagentStart lead is 3.96-6.45s
+
+function Get-RogueUserHome {
+    if ($env:USERPROFILE) { return $env:USERPROFILE }
+    return $env:HOME
+}
+function Get-RogueCursorProjectsDir {
+    return [System.IO.Path]::Combine((Get-RogueUserHome), '.cursor', 'projects')
+}
+function Get-RogueParentCacheDir {
+    return [System.IO.Path]::Combine((Get-RogueUserHome), '.rogue', 'cursor-parent')
+}
+function Get-RogueSpawnMarkerDir {
+    return [System.IO.Path]::Combine((Get-RogueUserHome), '.rogue', 'cursor-spawn')
+}
+
+# A conversation id is a uuid. Anything outside that charset is not one, and it
+# would also become a path component — so reject it rather than look it up.
+function Test-RogueConversationId {
+    param([string]$Id)
+    if (-not $Id) { return $false }
+    return ($Id -match '^[A-Za-z0-9-]+$')
+}
+
+# `workspace_roots` is an ARRAY, so it needs its own reader rather than
+# Get-RogueJsonStringField. Lockstep with hook.sh's _workspace_root.
+function Get-RogueWorkspaceRoot {
+    param([string]$Body)
+    $viaJq = Invoke-RogueJq $Body @('-r', '.workspace_roots[0] // empty')
+    if ($viaJq) { return $viaJq.Trim() }
+    $m = [regex]::Match($Body, '"workspace_roots"\s*:\s*\[\s*"([^"]*)"')
+    if (-not $m.Success) { return '' }
+    return $m.Groups[1].Value.Replace('\\', '\').Replace('\/', '/')
+}
+
+# Cursor's project-directory slug: the workspace path with the leading separator
+# stripped and every "/" and "." turned into "-".
+function Get-RogueWorkspaceSlug {
+    param([string]$Body)
+    $root = Get-RogueWorkspaceRoot $Body
+    if (-not $root) { return '' }
+    return ($root.TrimStart('/').Replace('/', '-').Replace('.', '-'))
+}
+
+# $ChildId's transcript file, if Cursor has written it. Slug-scoping is an
+# OPTIMIZATION, not the mechanism: slug derivation has real exceptions on disk
+# (numeric slugs, `empty-window`, `.code-workspace`-derived names), so a miss
+# falls back to a scan of every project dir, which returns the SAME answer
+# because the filename is the key.
+function Get-RogueCursorParent {
+    param([string]$ChildId, [string]$Slug)
+    try {
+        $projects = Get-RogueCursorProjectsDir
+        $roots = @()
+        if ($Slug) { $roots += [System.IO.Path]::Combine($projects, $Slug) }
+        if (Test-Path -LiteralPath $projects) {
+            foreach ($p in (Get-ChildItem -LiteralPath $projects -Directory -ErrorAction SilentlyContinue)) {
+                if ($Slug -and $p.Name -eq $Slug) { continue }   # already first in line
+                $roots += $p.FullName
+            }
+        }
+        foreach ($r in $roots) {
+            $transcripts = [System.IO.Path]::Combine($r, 'agent-transcripts')
+            if (-not (Test-Path -LiteralPath $transcripts)) { continue }
+            foreach ($d in (Get-ChildItem -LiteralPath $transcripts -Directory -ErrorAction SilentlyContinue)) {
+                $f = [System.IO.Path]::Combine($d.FullName, 'subagents', ($ChildId + '.jsonl'))
+                if (Test-Path -LiteralPath $f -PathType Leaf) { return $d.Name }
+            }
+        }
+    } catch { Dbg "parent lookup failed: $($_.Exception.Message)" }
+    return $null
+}
+
+# Any live marker under this workspace. The check is "is SOMETHING spawning",
+# never "is MY parent spawning" — a child cannot know its parent before the
+# lookup succeeds. Scoped per workspace because both sides derive the slug the
+# same way from workspace_roots; unscoped only when this payload has no root.
+function Test-RogueSpawnMarkerLive {
+    param([string]$Slug)
+    try {
+        $root = Get-RogueSpawnMarkerDir
+        if (-not (Test-Path -LiteralPath $root)) { return $false }
+        $dirs = @()
+        if ($Slug) {
+            $dirs += [System.IO.Path]::Combine($root, $Slug)
+        } else {
+            foreach ($d in (Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
+                $dirs += $d.FullName
+            }
+        }
+        $cutoff = (Get-Date).AddSeconds(-$RogueSpawnMarkerTtlSeconds)
+        foreach ($d in $dirs) {
+            if (-not (Test-Path -LiteralPath $d)) { continue }
+            foreach ($f in (Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue)) {
+                if ($f.LastWriteTime -ge $cutoff) { return $true }
+            }
+        }
+    } catch { Dbg "marker check failed: $($_.Exception.Message)" }
+    return $false
+}
+
+# subagentStart fires ON THE PARENT (conversation_id == the parent's id, verified
+# on all 9 real payloads) and 3.96-6.45s BEFORE the child's subagents file
+# exists. That window is exactly what the marker covers. Every step is
+# best-effort: a lost marker costs a wait that would not have happened, never a
+# wrong answer.
+function Write-RogueSpawnMarker {
+    param([string]$Body)
+    try {
+        $id = Get-RogueJsonStringField $Body '.conversation_id' 'conversation_id'
+        if (-not (Test-RogueConversationId $id)) { return }
+        $slug = Get-RogueWorkspaceSlug $Body
+        if (-not $slug) { $slug = '_' }
+        $dir = [System.IO.Path]::Combine((Get-RogueSpawnMarkerDir), $slug)
+        if (-not (Test-Path -LiteralPath $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+        $file = [System.IO.Path]::Combine($dir, $id)
+        [System.IO.File]::WriteAllText($file, '')
+        Dbg "spawn marker $slug/$id"
+    } catch { Dbg "spawn marker failed: $($_.Exception.Message)" }
+}
+
+# Best-effort only. subagentStop carries no subagent_id and a killed subagent
+# never emits one, so nothing may depend on this running; the TTL is what
+# actually retires a marker.
+function Remove-RogueSpawnMarker {
+    param([string]$Body)
+    try {
+        $id = Get-RogueJsonStringField $Body '.conversation_id' 'conversation_id'
+        if (-not (Test-RogueConversationId $id)) { return }
+        $slug = Get-RogueWorkspaceSlug $Body
+        if (-not $slug) { $slug = '_' }
+        $file = [System.IO.Path]::Combine((Get-RogueSpawnMarkerDir), $slug, $id)
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+    } catch { Dbg "spawn marker cleanup failed: $($_.Exception.Message)" }
+}
+
+# Returns @{ Parent = <parent id>; Child = <child id> } or $null. Fail-open in
+# every branch: unresolved means no headers and today's POST exactly.
+function Resolve-RogueParentSession {
+    param([string]$Body)
+    try {
+        $id = Get-RogueJsonStringField $Body '.conversation_id' 'conversation_id'
+        if (-not (Test-RogueConversationId $id)) { return $null }
+
+        # Cache, mirroring the Copilot dispatcher's submap: a subagent fires
+        # 18-223 hooks per spawn and Cursor REUSES a child id across re-spawns,
+        # so the scan runs once per subagent, ever. Only a subagent's first hook
+        # can miss.
+        $cacheDir = Get-RogueParentCacheDir
+        $cacheFile = [System.IO.Path]::Combine($cacheDir, $id)
+        if (Test-Path -LiteralPath $cacheFile -PathType Leaf) {
+            $cached = ([System.IO.File]::ReadAllText($cacheFile)).Trim()
+            if ($cached) { Dbg 'parent cache hit'; return @{ Parent = $cached; Child = $id } }
+        }
+
+        $slug = Get-RogueWorkspaceSlug $Body
+        $parent = Get-RogueCursorParent $id $slug
+        if (-not $parent) {
+            # The child's file is born 0.811-1.627s after its first hook, and its
+            # creation is INDEPENDENT of hook returns (one spawn's file appeared
+            # 2.40s before any blocking hook fired), so this wait cannot
+            # self-deadlock. hooks.json allows 120s per hook, so ~3s is 2.5% of
+            # the budget.
+            #
+            # NEVER spin without a live marker: a brand-new TOP-LEVEL
+            # conversation has no directory of its own for ~9s and so looks
+            # exactly like an unresolved child.
+            $max = 30   # ~3s at 100ms/iter
+            if ($env:ROGUE_CURSOR_PARENT_ITERS) { $max = [int]$env:ROGUE_CURSOR_PARENT_ITERS }
+            if (-not (Test-RogueSpawnMarkerLive $slug)) { $max = 0 }
+            for ($n = 0; $n -lt $max; $n++) {
+                Start-Sleep -Milliseconds 100
+                $parent = Get-RogueCursorParent $id $slug
+                if ($parent) { break }
+            }
+        }
+        if (-not $parent) { return $null }
+
+        if (-not (Test-Path -LiteralPath $cacheDir)) {
+            New-Item -ItemType Directory -Path $cacheDir -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+        try { [System.IO.File]::WriteAllText($cacheFile, $parent) } catch {}
+        return @{ Parent = $parent; Child = $id }
+    } catch {
+        Dbg "parent resolution failed: $($_.Exception.Message)"
+        return $null
+    }
+}
+
 # Test seam: dot-sourcing with ROGUE_PS_LIB_ONLY=1 loads the functions above
 # (e.g. ConvertFrom-ShellQuoted) without running the dispatcher. Production
 # never sets this, so the hook always runs its main body.
@@ -395,6 +608,19 @@ $payload = Repair-DoubleEncodedUtf8 $payload
 # byte-identical.
 if ($EventName -eq 'preToolUse') { $payload = Add-FilePreImage $payload }
 
+# Only the events a subagent actually fires resolve. sessionStart / sessionEnd /
+# subagentStart / subagentStop are parent-side: they already carry the parent's
+# own conversation id, so resolving would be pointless and waiting would tax
+# every session start.
+$attribution = $null
+switch ($EventName) {
+    'subagentStart'  { Write-RogueSpawnMarker $payload }
+    'subagentStop'   { Remove-RogueSpawnMarker $payload }
+    'sessionStart'   { }
+    'sessionEnd'     { }
+    default          { $attribution = Resolve-RogueParentSession $payload }
+}
+
 # ── POST (fail-open) ───────────────────────────────────────────────────────
 $headers = @{
     'x-rogue-api-key'     = $apiKey
@@ -403,9 +629,18 @@ $headers = @{
     'x-rogue-actor-name'  = $actorName
     'x-rogue-source'      = 'cursor'
 }
+# Added CONDITIONALLY, and always as a pair: a subagent's events carry the
+# parent's session id plus the child's own conversation id, a main agent's carry
+# neither. Never add a key with an empty value — the backend prefers this header
+# over the body's conversation_id, so an empty one would resolve to nothing.
+if ($attribution) {
+    $headers['x-rogue-parent-session-id'] = $attribution.Parent
+    $headers['x-rogue-agent-id']          = $attribution.Child
+}
 
 $url = "$baseUrl/api/v1/hooks/cursor"
-Dbg "POST $url actor=$actorEmail"
+$parentDbg = if ($attribution) { $attribution.Parent } else { 'none' }
+Dbg "POST $url actor=$actorEmail parent=$parentDbg"
 # Send an explicit UTF-8 byte array: Windows PowerShell 5.1's Invoke-WebRequest
 # re-encodes a string body (commonly to Latin-1), which corrupts non-ASCII
 # prompt content and can reintroduce a BOM. GetBytes() never emits a BOM.
