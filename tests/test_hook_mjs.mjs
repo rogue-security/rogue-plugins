@@ -47,15 +47,25 @@ function runHook(event, payload, env) {
 }
 
 // Start a one-shot server that records the request and replies with `body`.
+// `seen.raw` keeps the inbound bytes UNDECODED — the subagent-attribution tests
+// assert the POSTed body is byte-identical to what was piped in on stdin.
 function startServer(status, body) {
   return new Promise((resolve) => {
     const seen = {};
     const server = http.createServer((req, res) => {
-      seen.headers = req.headers;
-      let b = "";
-      req.on("data", (c) => (b += c));
+      // SessionStart also spawns the DETACHED heartbeat (hook.mjs fireHeartbeat),
+      // which POSTs its own body to /api/v1/hooks/status and races the event
+      // POST. Answer it, but never let it overwrite what the event POST recorded,
+      // or a SessionStart assertion reads the heartbeat's body instead.
+      const isHeartbeat = (req.url || "").endsWith("/hooks/status");
+      if (!isHeartbeat) seen.headers = req.headers;
+      const chunks = [];
+      req.on("data", (c) => chunks.push(c));
       req.on("end", () => {
-        seen.body = b;
+        if (!isHeartbeat) {
+          seen.raw = Buffer.concat(chunks);
+          seen.body = seen.raw.toString("utf8");
+        }
         res.writeHead(status, { "Content-Type": "application/json" });
         res.end(body);
       });
@@ -278,5 +288,310 @@ test("SessionEnd → POSTs with x-rogue-event SessionEnd", async () => {
     assert.equal(out, "{}");
   } finally {
     server.close();
+  }
+});
+
+// ── Subagent attribution (x-rogue-agent-id) ─────────────────────────────────
+// The dispatcher resolves the running delegation as (subagent files present)
+// minus (delegations the parent transcript records as finished), and sends the
+// single remaining session UUID as x-rogue-agent-id. These fixtures are literal
+// transcript records copied in shape from a real Gemini 0.55.1 session; NO
+// timestamp, mtime or ordering is manipulated anywhere, because the rule reads
+// none.
+
+const SESSION_ID = "d0fc529c-7537-40db-8302-ae175ef23655";
+const SUB_A = "f2401533-ab7c-4e7c-9a75-603c29d9e9c6";
+const SUB_B = "9db87efe-1f9e-4b8a-a41b-9367fb677095";
+const PROMPT_A = "How do I create a custom subagent?\nGive me the details.";
+const PROMPT_B = "Write a poem about the sea.";
+
+// The parent's completed invoke_agent record. recordCompletedToolCalls stamps
+// `agentId` with the subagent's session UUID; an abnormally terminated
+// delegation is recorded WITHOUT it (agentId comes from the tool response).
+function completionRecord(prompt, agentId) {
+  return JSON.stringify({
+    id: "3cd90726-47e3-432a-ba34-bb9ccbbced71",
+    timestamp: "2026-08-13T09:25:14.818Z",
+    type: "gemini",
+    content: "",
+    toolCalls: [
+      {
+        id: "invoke_agent__call_500699",
+        name: "invoke_agent",
+        args: { agent_name: "cli_help", prompt, wait_for_previous: true },
+        status: "success",
+        ...(agentId ? { agentId } : {}),
+      },
+    ],
+  });
+}
+
+// A subagent transcript: its header plus the first `user` record, which embeds
+// the delegated prompt verbatim inside the context preamble. Nothing else in
+// the file is ever read.
+function subagentFile(uuid, prompt) {
+  return `${JSON.stringify({
+    sessionId: uuid,
+    projectHash: "52b218b5",
+    startTime: "2026-08-13T09:27:02.187Z",
+    lastUpdated: "2026-08-13T09:27:02.187Z",
+    kind: "subagent",
+    directories: ["/tmp/project"],
+  })}\n${JSON.stringify({
+    id: "e4da2b35-0de8-419f-acdb-d37187939a9f",
+    timestamp: "2026-08-13T09:27:05.698Z",
+    type: "user",
+    content: [{ text: `\n<loaded_context>\n...\n</loaded_context>\n${prompt}` }],
+  })}\n`;
+}
+
+// Build chats/<parent>.jsonl + chats/<session id>/<uuid>.jsonl and return the
+// transcript path. `subagents` is a list of [uuid, prompt] pairs.
+function makeChats(parentRecords, subagents, { noSubDir = false } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "rogue-gem-chats-"));
+  const chats = path.join(root, "chats");
+  fs.mkdirSync(chats, { recursive: true });
+  if (!noSubDir) {
+    fs.mkdirSync(path.join(chats, SESSION_ID));
+    for (const [uuid, prompt] of subagents) {
+      fs.writeFileSync(
+        path.join(chats, SESSION_ID, `${uuid}.jsonl`),
+        subagentFile(uuid, prompt),
+      );
+    }
+  }
+  const transcript = path.join(chats, "session-2026-08-13T09-24-d0fc529c.jsonl");
+  fs.writeFileSync(transcript, parentRecords.map((r) => `${r}\n`).join(""));
+  return { root, transcript };
+}
+
+// POST one event and return the x-rogue-agent-id header (undefined = not sent).
+// Asserts on every call that the body relayed is byte-identical to stdin.
+async function agentIdFor(event, payload) {
+  const { server, seen, port } = await startServer(200, "{}");
+  try {
+    await runHook(event, payload, {
+      ROGUE_API_KEY: "rsk_test",
+      ROGUE_BASE_URL: `http://127.0.0.1:${port}`,
+    });
+    assert.deepEqual(
+      seen.raw,
+      Buffer.from(payload, "utf8"),
+      "the POSTed body must be the stdin bytes, unmodified",
+    );
+    return seen.headers["x-rogue-agent-id"];
+  } finally {
+    server.close();
+  }
+}
+
+// Standard tool-event payload: only the base fields Gemini actually sends.
+function toolPayload(transcript, toolName) {
+  return JSON.stringify({
+    session_id: SESSION_ID,
+    transcript_path: transcript,
+    cwd: "/tmp/project",
+    hook_event_name: "BeforeTool",
+    tool_name: toolName,
+    tool_input: { command: "ls" },
+  });
+}
+
+test("one live delegation → sends its UUID as x-rogue-agent-id", async () => {
+  const { root, transcript } = makeChats([], [[SUB_A, PROMPT_A]]);
+  try {
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "run_shell_command")),
+      SUB_A,
+    );
+    assert.equal(
+      await agentIdFor("BeforeTool", toolPayload(transcript, "run_shell_command")),
+      SUB_A,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("two live delegations → no header (concurrency is unattributable)", async () => {
+  const { root, transcript } = makeChats(
+    [],
+    [
+      [SUB_A, PROMPT_A],
+      [SUB_B, PROMPT_B],
+    ],
+  );
+  try {
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "run_shell_command")),
+      undefined,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("delegation recorded in the parent (agentId) → finished, no header", async () => {
+  const { root, transcript } = makeChats(
+    [completionRecord(PROMPT_A, SUB_A)],
+    [[SUB_A, PROMPT_A]],
+  );
+  try {
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "run_shell_command")),
+      undefined,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("finished delegation + one live one → only the live UUID", async () => {
+  const { root, transcript } = makeChats(
+    [completionRecord(PROMPT_A, SUB_A)],
+    [
+      [SUB_A, PROMPT_A],
+      [SUB_B, PROMPT_B],
+    ],
+  );
+  try {
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "run_shell_command")),
+      SUB_B,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("abnormal termination (record without agentId) → prompt marks it finished", async () => {
+  // The delegation is recorded but carries no agentId (errored / cancelled /
+  // max-turns). Without the args.prompt fallback it would look live forever and
+  // mis-tag every later main-agent tool call.
+  const { root, transcript } = makeChats(
+    [completionRecord(PROMPT_A, null)],
+    [[SUB_A, PROMPT_A]],
+  );
+  try {
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "run_shell_command")),
+      undefined,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("no subagent directory → no header", async () => {
+  const { root, transcript } = makeChats([], [], { noSubDir: true });
+  try {
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "run_shell_command")),
+      undefined,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("parent transcript missing or oversized → no header", async () => {
+  const missing = makeChats([], [[SUB_A, PROMPT_A]]);
+  try {
+    fs.rmSync(missing.transcript);
+    assert.equal(
+      await agentIdFor(
+        "AfterTool",
+        toolPayload(missing.transcript, "run_shell_command"),
+      ),
+      undefined,
+      "unreadable parent → finished is uncomputable → no header",
+    );
+  } finally {
+    fs.rmSync(missing.root, { recursive: true, force: true });
+  }
+
+  const big = makeChats([], [[SUB_A, PROMPT_A]]);
+  try {
+    // Sparse grow past the 32 MB cap; only statSync().size is consulted.
+    fs.truncateSync(big.transcript, 32 * 1024 * 1024 + 1);
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(big.transcript, "run_shell_command")),
+      undefined,
+    );
+  } finally {
+    fs.rmSync(big.root, { recursive: true, force: true });
+  }
+});
+
+test("invoke_agent: BeforeTool sends no header, AfterTool sends the id", async () => {
+  // BeforeTool invoke_agent is the MAIN agent's delegation request, and in a
+  // parallel batch the first delegation's file already exists when the second's
+  // BeforeTool fires — tagging it would attribute agent 1's id to agent 2.
+  const { root, transcript } = makeChats([], [[SUB_A, PROMPT_A]]);
+  try {
+    assert.equal(
+      await agentIdFor("BeforeTool", toolPayload(transcript, "invoke_agent")),
+      undefined,
+    );
+    assert.equal(
+      await agentIdFor("AfterTool", toolPayload(transcript, "invoke_agent")),
+      SUB_A,
+      "the delegation report IS the subagent's own output",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("non-tool events never carry the tag", async () => {
+  const { root, transcript } = makeChats([], [[SUB_A, PROMPT_A]]);
+  const payload = JSON.stringify({
+    session_id: SESSION_ID,
+    transcript_path: transcript,
+    cwd: "/tmp/project",
+  });
+  try {
+    for (const event of ["SessionStart", "BeforeAgent", "AfterAgent", "BeforeModel"]) {
+      assert.equal(await agentIdFor(event, payload), undefined, event);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed / minimal payloads resolve to no header, never a failed POST", async () => {
+  assert.equal(await agentIdFor("AfterTool", "not json at all"), undefined);
+  assert.equal(await agentIdFor("AfterTool", '{"tool_name":"x"}'), undefined);
+  assert.equal(
+    await agentIdFor("AfterTool", '{"session_id":123,"transcript_path":null}'),
+    undefined,
+  );
+});
+
+test("body stays byte-identical even when a header is added", async () => {
+  const { root, transcript } = makeChats([], [[SUB_A, PROMPT_A]]);
+  // Pretty-printed, non-ASCII, trailing newline: anything re-serialized would
+  // come back compacted and/or re-escaped.
+  const payload = `${JSON.stringify(
+    {
+      session_id: SESSION_ID,
+      transcript_path: transcript,
+      tool_name: "run_shell_command",
+      tool_input: { command: "echo 'héllo — 世界' # \\u0041" },
+    },
+    null,
+    2,
+  )}\n`;
+  const { server, seen, port } = await startServer(200, "{}");
+  try {
+    await runHook("AfterTool", payload, {
+      ROGUE_API_KEY: "rsk_test",
+      ROGUE_BASE_URL: `http://127.0.0.1:${port}`,
+    });
+    assert.equal(seen.headers["x-rogue-agent-id"], SUB_A);
+    assert.deepEqual(seen.raw, Buffer.from(payload, "utf8"));
+  } finally {
+    server.close();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
