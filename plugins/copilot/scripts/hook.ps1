@@ -255,85 +255,8 @@ try {
     } catch { Dbg "notify failed: $($_.Exception.Message)" }
 }
 
-# ── Subagent body tag (mirrors hook.sh augment_with_agent_tag) ─────────────
-# Add the subagent tag to the BODY of a re-attributed event: "agentId" (the bare
-# tool-call id) and "agentNameB64" (base64 of the UTF-8 display name). The name is
-# arbitrary vendor text — one '"' or '\' would corrupt the payload — so it travels
-# base64-encoded, the same trick as transcriptTailB64; base64 has no JSON-special
-# characters, so appending it by re-closing the object is safe. Omitted when the
-# name is unknown. The backend reads both fields off the payload (they used to
-# ride as x-rogue-agent-* headers).
-#
-# TWO mutation paths, which must agree byte-for-byte with hook.sh's on a compact
-# payload (only one ever runs on a given machine):
-#   1. jq when it is on PATH — a real JSON edit. jq re-serializes, so a
-#      pretty-printed vendor payload comes back compacted; semantically identical,
-#      and Copilot sends compact JSON.
-#   2. otherwise the same string concat used for transcriptTailB64 — no parse, so
-#      the vendor's bytes are preserved exactly.
-# Deliberately NOT ConvertTo-Json on the whole payload: a full parse + reserialize
-# could alter the vendor's JSON in ways we don't control (ConvertTo-Json also
-# truncates below its default -Depth 2). Fail-open everywhere: a bad id, a jq
-# failure, or a body that is not an object returns the body unchanged (we lose
-# attribution, never the relay).
-function Add-AgentTag {
-    param([string]$Body, [string]$Id, [string]$Name)
-    try {
-        # The id is a bare token from Copilot (toolu_… / call_…). Anything outside
-        # the token charset is not one — skip BOTH fields rather than risk a
-        # corrupt body.
-        if (-not $Id -or ($Id -notmatch '^[A-Za-z0-9_-]+$')) { return $Body }
-        $nb64 = ''
-        if ($Name) { $nb64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Name)) }
-
-        if (Get-Command jq -ErrorAction SilentlyContinue) {
-            # Pipe/read as UTF-8 explicitly: the default native-command encoding is
-            # the OEM code page on PS 5.1, which would mangle non-ASCII payload text
-            # on the round trip through jq — a silent body corruption.
-            $prevOut = $OutputEncoding
-            $prevConsole = $null
-            try { $prevConsole = [Console]::OutputEncoding } catch {}
-            $out = ''
-            try {
-                $utf8 = New-Object System.Text.UTF8Encoding($false)
-                $OutputEncoding = $utf8
-                try { [Console]::OutputEncoding = $utf8 } catch {}
-                # Values are double-quoted so PowerShell passes them as single
-                # literal arguments (base64 carries '+', '/' and '='); the jq filter
-                # is single-quoted so PS leaves its $id/$nb64 refs alone.
-                if ($nb64) {
-                    $out = ($Body | & jq -c --arg id "$Id" --arg nb64 "$nb64" '. + {agentId:$id,agentNameB64:$nb64}' 2>$null) -join ''
-                } else {
-                    $out = ($Body | & jq -c --arg id "$Id" '. + {agentId:$id}' 2>$null) -join ''
-                }
-            } finally {
-                $OutputEncoding = $prevOut
-                if ($prevConsole) { try { [Console]::OutputEncoding = $prevConsole } catch {} }
-            }
-            # Only trust a complete object back; anything else (invalid JSON in, jq
-            # error, a non-object payload) falls through to the concat path.
-            if ($out -and $out.StartsWith('{') -and $out.EndsWith('}')) { return $out }
-        }
-
-        # Trim trailing whitespace so the single-'}' strip lands on the real closing
-        # brace, then strip exactly ONE '}' (TrimEnd('}') would strip ALL of them and
-        # corrupt a body ending in "}}") — mirrors hook.sh.
-        $p = $Body.TrimEnd()
-        if (-not $p.EndsWith('}')) { return $Body }   # not an object → leave it alone
-        $p = $p.Substring(0, $p.Length - 1)
-        # An empty object needs no separator ({} → {"agentId":…}); jq agrees.
-        $sep = ','
-        if ($p -eq '{') { $sep = '' }
-        if ($nb64) { return $p + $sep + '"agentId":"' + $Id + '","agentNameB64":"' + $nb64 + '"}' }
-        return $p + $sep + '"agentId":"' + $Id + '"}'
-    } catch {
-        Dbg "agent tag failed: $($_.Exception.Message)"
-        return $Body
-    }
-}
-
 # Test seam: dot-sourcing with ROGUE_PS_LIB_ONLY=1 loads the functions above
-# (Sanitize, Log, Test-JetBrainsIde, Show-BlockNotification, Add-AgentTag,
+# (Sanitize, Log, Test-JetBrainsIde, Show-BlockNotification,
 # ConvertFrom-ShellQuoted) without running the dispatcher. Production never sets
 # this, so the hook always runs its main body.
 if ($env:ROGUE_PS_LIB_ONLY) { return }
@@ -426,9 +349,9 @@ $payload = $payload.TrimStart([char]0xFEFF)
 # they orphan into a separate audit log. The parent link lives only in the
 # parent session's events.jsonl (a subagent.started line naming this id; the
 # parent id IS that transcript's directory name). Resolve it, rewrite the
-# outgoing sessionId, and tag with the agentId/agentNameB64 BODY fields (see
-# Add-AgentTag — the tag used to travel as x-rogue-agent-* headers). Fail-open:
-# unresolved → body untouched (today's orphaned behavior — never worse).
+# outgoing sessionId, and tag via the x-rogue-agent-id / x-rogue-agent-name-b64
+# headers (see the POST below). Fail-open: unresolved → body untouched (today's
+# orphaned behavior — never worse).
 $subagentId = ''
 $subagentName = ''
 $copilotStateDir = $env:ROGUE_COPILOT_STATE_DIR
@@ -492,10 +415,6 @@ try {
             $subagentId = $sid
             $subagentName = $map.Name
             $payload = $payload -replace ('"sessionId"\s*:\s*"' + [regex]::Escape($sid) + '"'), ('"sessionId":"' + $map.Parent + '"')
-            # Tag the (now correctly-attributed) body so the backend can mark these
-            # rows as a subagent's. Before the tail append, so the field order is
-            # stable across events (mirrors hook.sh).
-            $payload = Add-AgentTag $payload $subagentId $subagentName
             Log "subagent=$sid parent=$($map.Parent)"
         } else {
             Log "subagent=$sid outcome=unresolved"
@@ -676,11 +595,27 @@ $headers = @{
     'x-rogue-version'     = $pluginVersion
     'x-rogue-agent'       = 'github_copilot'
 }
-# The subagent tag rides in the BODY (agentId/agentNameB64 — see Add-AgentTag), so
-# every event POSTs the same fixed headers. The local $subagent* variables keep
-# Copilot's own terminology, since Copilot is what calls these subagents; the wire
-# field names match the backend's agentId/agentName and the
-# aidr_message.agent_id/agent_name columns they land in.
+# Every event POSTs the same seven headers; a re-attributed subagent event adds the
+# agent tag as two more — x-rogue-agent-id and x-rogue-agent-name-b64, the same
+# pair the Antigravity dispatcher sends. In HEADERS and not in the body so the
+# POSTed event stays the vendor's own bytes. The name is base64 because a display
+# name is arbitrary vendor text and HTTP header values are ISO-8859-1 by spec, so
+# an accent or an emoji sent raw is undefined behavior across proxies. Both are
+# omitted entirely, never sent empty, on a main-agent event. The local $subagent*
+# variables keep Copilot's own terminology, since Copilot is what calls these
+# subagents; the wire names match the aidr_message.agent_id/agent_name columns
+# they land in. Mirrors hook.sh.
+#
+# The id is a bare token from Copilot (toolu_… / call_…); anything outside the
+# token charset is not one, so BOTH headers are skipped rather than emitting a
+# junk value.
+if ($subagentId -and ($subagentId -match '^[A-Za-z0-9_-]+$')) {
+    $headers['x-rogue-agent-id'] = $subagentId
+    if ($subagentName) {
+        $headers['x-rogue-agent-name-b64'] =
+            [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($subagentName))
+    }
+}
 $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 $resp = ''
 try {

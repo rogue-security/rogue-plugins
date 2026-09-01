@@ -7,7 +7,7 @@
 # cross-bridge round-trip of ~/.rogue-env. This one covers the Copilot-only
 # JetBrains silent-block alert — the single out-of-band exception to pure relay —
 # and must stay in lockstep with tests/test_hook_sh_copilot.sh cases 4b-4e, plus
-# the subagent body tag (Add-AgentTag), in lockstep with that file's cases 14-16.
+# the subagent agent-tag HEADERS, in lockstep with that file's cases 14-16.
 #
 # These are the ONLY automated checks that ever execute hook.ps1's alert code:
 # a parse or logic error there is not a graceful degradation, because the
@@ -174,65 +174,69 @@ $env:COPILOT_CLI_BINARY_VERSION = '1.0.75'
 Assert-True (-not (Test-JetBrainsIde)) 'fallback: version SET + no markers => not IDE'
 Clear-AlertEnv
 
-# ── Add-AgentTag: the subagent body tag ────────────────────────────────────
-# A re-attributed subagent event gets agentId + agentNameB64 added to the POST
-# body (the tag used to ride as x-rogue-agent-* headers). Mirrors hook.sh's
-# augment_with_agent_tag and tests/test_hook_sh_copilot.sh cases 14-16 — the two
-# dispatchers must emit the SAME bytes, so the expected literals here are the same
-# ones asserted there.
-$BODY = '{"sessionId":"p1","toolName":"bash"}'
+# ── The subagent agent tag rides in HEADERS ────────────────────────────────
+# A re-attributed subagent event is tagged with x-rogue-agent-id +
+# x-rogue-agent-name-b64 (the same pair the Antigravity dispatcher sends) and the
+# POSTed body carries only the sessionId rewrite. Mirrors hook.sh and
+# tests/test_hook_sh_copilot.sh cases 14-16.
+#
+# The emit site lives in the dispatcher's MAIN body, which cannot run here (it
+# stands down on non-Windows, and there is no stdin/server to drive it), so these
+# are source-level assertions over hook.ps1 plus the value computations the two
+# headers depend on. What they protect is the migration itself: any regrowth of
+# the body tagger — the jq round-trip over arbitrary toolArgs — fails them.
+$src = Get-Content -Raw -LiteralPath $hook
 
-Assert-Eq (Add-AgentTag $BODY 'call_A' 'Task Agent') `
-    '{"sessionId":"p1","toolName":"bash","agentId":"call_A","agentNameB64":"VGFzayBBZ2VudA=="}' `
-    'tag adds agentId + base64 display name'
+Assert-True ($src -notmatch 'Add-AgentTag') 'Add-AgentTag is gone (definition and call site)'
+Assert-True ($src -notmatch 'agentNameB64') 'no agentNameB64 body field remains'
+Assert-True ($src -notmatch '"agentId":"') 'no agentId body field remains'
+Assert-True ($src -notmatch '&\s+jq\b') 'no jq round-trip of the vendor payload remains'
+# The one surviving body mutation on a subagent event (plus transcriptTailB64 on
+# the two stop events, which is synthesised content and not a rewrite).
+Assert-True ($src -match '\$payload\s+-replace\s+\(''"sessionId"') 'the sessionId rewrite is still there'
 
-# The point of base64: a display name is arbitrary vendor text, and a raw '"' or
-# '\' concatenated into the body would corrupt the JSON. Mirrors sh case 14b.
-Assert-Eq (Add-AgentTag $BODY 'call_NASTYNAME' ('Task "Agent" ' + $BS + ' v2')) `
-    '{"sessionId":"p1","toolName":"bash","agentId":"call_NASTYNAME","agentNameB64":"VGFzayAiQWdlbnQiIFwgdjI="}' `
-    'a name with " and \ is base64-encoded, not concatenated raw'
+$idKey = $src.IndexOf("'x-rogue-agent-id'")
+$nameKey = $src.IndexOf("'x-rogue-agent-name-b64'")
+$idGuard = $src.IndexOf('if ($subagentId -and')
+$nameGuard = $src.IndexOf('if ($subagentName)')
+Assert-True ($idKey -gt 0) 'x-rogue-agent-id is added to $headers'
+Assert-True ($nameKey -gt 0) 'x-rogue-agent-name-b64 is added to $headers'
+# Both keys are nested inside the id check, and the name inside its own check, so
+# neither is ever sent empty on a main-agent event.
+Assert-True ($idGuard -gt 0 -and $idGuard -lt $idKey) 'the id header is guarded by $subagentId'
+Assert-True ($nameGuard -gt $idGuard -and $nameGuard -lt $nameKey) 'the name header is nested inside both checks'
+Assert-True ($src -match "x-rogue-agent-name-b64'\]\s*=\s*(\r?\n\s*)?\[Convert\]::ToBase64String") `
+    'the name header value is base64, never raw vendor text'
 
-# An unknown name omits the field entirely rather than shipping an empty string.
-Assert-Eq (Add-AgentTag $BODY 'call_A' '') `
-    '{"sessionId":"p1","toolName":"bash","agentId":"call_A"}' `
-    'empty display name omits agentNameB64'
-Assert-Eq (Add-AgentTag $BODY 'call_A' $null) `
-    '{"sessionId":"p1","toolName":"bash","agentId":"call_A"}' `
-    'null display name omits agentNameB64'
+# The id charset gate moved from the deleted tagger to the emit site. Pull the
+# pattern out of the source and hold it to the same truth table the body tagger
+# had: a bare Copilot token passes, anything else skips BOTH headers.
+$gate = [regex]::Match($src, "\`$subagentId -match '([^']+)'")
+Assert-True ($gate.Success) 'the emit site still gates the id on a charset pattern'
+$pat = $gate.Groups[1].Value
+Assert-Eq $pat '^[A-Za-z0-9_-]+$' 'the gate is the bare Copilot token charset'
+Assert-True ('toolu_bdrk_TESTSUB' -match $pat) 'a toolu_ id passes the gate'
+Assert-True ('call_NASTYNAME' -match $pat) 'a call_ id passes the gate'
+Assert-True (-not ('call_"evil' -match $pat)) 'a quote in the id fails the gate'
+Assert-True (-not (('call' + $BS + 'x') -match $pat)) 'a backslash in the id fails the gate'
+Assert-True (-not ('call A' -match $pat)) 'a space in the id fails the gate'
+Assert-True (-not ('' -match $pat)) 'an empty id fails the gate'
 
-# Fail-open: the id is a bare Copilot token, so anything outside [A-Za-z0-9_-]
-# skips BOTH fields — losing attribution is fine, a corrupt body is not.
-Assert-Eq (Add-AgentTag $BODY 'call_"evil' 'n') $BODY 'a quote in the id skips the tag'
-Assert-Eq (Add-AgentTag $BODY ('call' + $BS + 'x') 'n') $BODY 'a backslash in the id skips the tag'
-Assert-Eq (Add-AgentTag $BODY 'call A' 'n') $BODY 'a space in the id skips the tag'
-Assert-Eq (Add-AgentTag $BODY '' 'n') $BODY 'an empty id skips the tag'
-Assert-Eq (Add-AgentTag 'not json at all' 'call_A' 'n') 'not json at all' 'a non-object body is left alone'
-
-# Only ONE '}' is stripped (TrimEnd('}') would eat both and corrupt this body),
-# and trailing whitespace is trimmed first so the strip lands on the real brace.
-Assert-Eq (Add-AgentTag '{"a":{"b":1}}' 'call_A' $null) `
-    '{"a":{"b":1},"agentId":"call_A"}' 'a body ending in "}}" keeps its nested object'
-Assert-Eq (Add-AgentTag "{`"a`":1}`n" 'call_A' $null) `
-    '{"a":1,"agentId":"call_A"}' 'trailing newline is trimmed before the brace strip'
-# An empty object needs no comma separator.
-Assert-Eq (Add-AgentTag '{}' 'call_A' $null) '{"agentId":"call_A"}' 'an empty object gets no stray comma'
-
-# ── Add-AgentTag: jq path == concat path ───────────────────────────────────
-# jq is used when it is on PATH (macOS 26 ships /usr/bin/jq) and the string concat
-# otherwise. Only one runs on a given machine, so what keeps the untested path
-# honest is that both emit the same bytes. Force the concat path by emptying PATH.
-$prevPath = $env:PATH
-try {
-    $env:PATH = ''
-    $concat = Add-AgentTag $BODY 'call_A' 'Task Agent'
-} finally { $env:PATH = $prevPath }
-Assert-Eq $concat '{"sessionId":"p1","toolName":"bash","agentId":"call_A","agentNameB64":"VGFzayBBZ2VudA=="}' `
-    'concat path (no jq on PATH) emits the documented bytes'
-if (Get-Command jq -ErrorAction SilentlyContinue) {
-    Assert-Eq (Add-AgentTag $BODY 'call_A' 'Task Agent') $concat 'jq path and concat path are byte-identical'
-} else {
-    Write-Host '  skip: jq not installed - jq path not exercised'
-}
+# The two dispatchers must agree on the header VALUES, so these are the exact
+# base64 strings tests/test_hook_sh_copilot.sh decodes on the sh side.
+function Get-NameB64 { param([string]$N) [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($N)) }
+Assert-Eq (Get-NameB64 'Task Agent') 'VGFzayBBZ2VudA==' 'display name base64 matches the sh dispatcher'
+Assert-Eq (Get-NameB64 ('Task "Agent" ' + $BS + ' v2')) 'VGFzayAiQWdlbnQiIFwgdjI=' `
+    'a name with " and \ round-trips through base64'
+Assert-Eq (Get-NameB64 'Stop Agent') 'U3RvcCBBZ2VudA==' 'the stop-event display name matches the sh dispatcher'
+# UTF-8 before base64, so a non-ASCII name cannot produce an invalid header value
+# (HTTP header values are ISO-8859-1 by spec — the whole reason for the encoding).
+# Built from codepoints, not a literal: Windows PowerShell 5.1 reads a BOM-less
+# file as ANSI, so a non-ASCII literal here decodes to mojibake and can terminate
+# the string early (it did - the 5.1 job failed to parse this file at all). The
+# source stays pure ASCII; the VALUE under test is still non-ASCII.
+$JP = -join @(0x30A8, 0x30FC, 0x30B8, 0x30A7, 0x30F3, 0x30C8 | ForEach-Object { [char]$_ })
+Assert-Eq (Get-NameB64 $JP) '44Ko44O844K444Kn44Oz44OI' 'a non-ASCII name is UTF-8 base64'
 
 if ($fails -gt 0) {
     Write-Host ""

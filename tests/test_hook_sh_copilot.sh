@@ -26,8 +26,6 @@ ENV_FILE="$(mktemp)"
 OUT_FILE="$(mktemp)"
 # Optional directory prepended to the dispatcher's PATH (see make_ps_shim).
 TEST_BIN=""
-# Optional REPLACEMENT for the dispatcher's whole PATH (see make_nojq_path).
-TEST_PATH=""
 
 cleanup() {
   [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null || true
@@ -66,7 +64,7 @@ run_dispatcher() {
     ROGUE_FLUSH_WAIT_ITERS="${ROGUE_FLUSH_WAIT_ITERS:-}" \
     ROGUE_COPILOT_STATE_DIR="${ROGUE_COPILOT_STATE_DIR:-}" \
     ROGUE_SUBAGENT_RESOLVE_ITERS="${ROGUE_SUBAGENT_RESOLVE_ITERS:-}" \
-    PATH="${TEST_BIN:+$TEST_BIN:}${TEST_PATH:-$PATH}" \
+    PATH="${TEST_BIN:+$TEST_BIN:}$PATH" \
     "$SH" "$HOOK" "$1" <<< "$2" > "$OUT_FILE"
   rc=$?
   set -e
@@ -92,26 +90,6 @@ esac
 exit 0
 EOF
   chmod +x "$d/ps"
-  printf '%s' "$d"
-}
-
-# Build a PATH that has everything the dispatcher needs EXCEPT jq, so its concat
-# fallback runs. jq (on macOS 26: /usr/bin/jq) sits in the same directory as the
-# rest of the toolchain, so hiding it means rebuilding PATH as a symlink farm
-# rather than dropping a directory. A missing entry can't cause a false pass: the
-# dispatcher would fail-open and the byte-identical assertion below would fail.
-# Echoes the farm dir; the caller sets TEST_PATH and removes it afterwards.
-make_nojq_path() {
-  local d b src
-  d="$(mktemp -d)"
-  for b in "$SH" sh dirname basename date mkdir cat sed grep tr tail head base64 sleep curl; do
-    src="$(command -v "$b" 2>/dev/null || true)"
-    if [ -z "$src" ]; then echo "FAIL [nojq farm]: '$b' is not on PATH" >&2; exit 1; fi
-    ln -s "$src" "$d/$(basename "$src")" 2>/dev/null || true
-  done
-  if PATH="$d" command -v jq >/dev/null 2>&1; then
-    echo "FAIL [nojq farm]: jq is still reachable" >&2; exit 1
-  fi
   printf '%s' "$d"
 }
 
@@ -146,10 +124,15 @@ assert_eq() {
   echo "  ok: $3"
 }
 
+# One inbound header of the last POST ('' when absent). mock_server.py records
+# them lowercased, which is what curl sends anyway.
+header_value() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["headers"].get(sys.argv[2], ""))' "$HEADERS_FILE" "$1"
+}
+
 assert_header() {
-  local key="$1" expected="$2" label="$3" actual
-  actual=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["headers"].get(sys.argv[2], ""))' "$HEADERS_FILE" "$key")
-  assert_eq "$actual" "$expected" "$label"
+  local key="$1" expected="$2" label="$3"
+  assert_eq "$(header_value "$key")" "$expected" "$label"
 }
 
 assert_no_header() {
@@ -489,8 +472,8 @@ rm -rf "$TDIR"
 # A subagent's own preToolUse arrives with sessionId = the model tool-call id
 # (toolu_…/call_…). The dispatcher must resolve the parent from the parent
 # transcript's subagent.started line, rewrite the POST body's sessionId to the
-# parent, and tag the BODY with agentId + agentNameB64 (base64 of the display
-# name). The tag used to ride as x-rogue-agent-* headers — those must be GONE.
+# parent, and send the tag as the x-rogue-agent-id / x-rogue-agent-name-b64
+# HEADERS (the same pair the Antigravity dispatcher emits) — never as body fields.
 SDIR="$(mktemp -d)"
 PARENT="11111111-2222-3333-4444-555555555555"
 mkdir -p "$SDIR/$PARENT"
@@ -501,87 +484,66 @@ printf '%s\n' \
 restart_mock '{}'
 export ROGUE_COPILOT_STATE_DIR="$SDIR"
 export ROGUE_SUBAGENT_RESOLVE_ITERS=3
-set +e; run_dispatcher preToolUse '{"sessionId":"toolu_bdrk_TESTSUB","toolName":"bash","toolArgs":{"command":"ls"}}'; LAST_RC=$?; set -e
+# toolArgs is arbitrary tool input, so it carries the two values a JSON round-trip
+# would rewrite: an integer wider than a double and a float that does not survive
+# reformatting. This payload is what Case 14a below diffs against.
+SUB_STDIN='{"sessionId":"toolu_bdrk_TESTSUB","toolName":"bash","toolArgs":{"command":"ls","id":12345678901234567890,"ratio":0.10}}'
+set +e; run_dispatcher preToolUse "$SUB_STDIN"; LAST_RC=$?; set -e
 unset ROGUE_COPILOT_STATE_DIR ROGUE_SUBAGENT_RESOLVE_ITERS
 assert_eq "$LAST_RC" "0" "re-attributed subagent event exits 0"
 assert_eq "$(posted_field sessionId)" "$PARENT" "subagent event sessionId rewritten to the parent session"
-assert_eq "$(posted_field agentId)" "toolu_bdrk_TESTSUB" "body agentId carries the real subagent id"
-assert_eq "$(posted_field agentNameB64 | base64 -d)" "Task Agent" "body agentNameB64 decodes to the display name"
-# The rest of the vendor payload must survive the mutation untouched.
-assert_eq "$(posted_field toolName)" "bash" "tagged body keeps the vendor fields"
-assert_no_header "x-rogue-agent-id"   "x-rogue-agent-id header removed (tag moved into the body)"
-assert_no_header "x-rogue-agent-name" "x-rogue-agent-name header removed (tag moved into the body)"
+assert_header "x-rogue-agent-id" "toolu_bdrk_TESTSUB" "x-rogue-agent-id carries the real subagent id"
+assert_eq "$(header_value x-rogue-agent-name-b64 | base64 -d)" "Task Agent" \
+  "x-rogue-agent-name-b64 decodes to the display name"
+# The tag must NOT also ride in the body: those fields are the legacy transport.
+has=$(posted_body | python3 -c 'import json,sys; d=json.load(sys.stdin); print("agentId" in d or "agentNameB64" in d)')
+assert_eq "$has" "False" "no agentId/agentNameB64 body fields (the tag is header-borne)"
+
+# ── Case 14a: the POSTed body differs from stdin ONLY in sessionId ──────────
+# The whole point of the header migration: the re-attribution sed is the one and
+# only edit, so the vendor's own bytes (whitespace, escaping, number formatting
+# inside toolArgs) reach the backend untouched. A re-serializing tagger would
+# rewrite 12345678901234567890 and 0.10 here and fail this byte comparison.
+EXPECTED_BODY="$(printf '%s' "$SUB_STDIN" | sed "s/toolu_bdrk_TESTSUB/$PARENT/")"
+assert_eq "$(posted_body)" "$EXPECTED_BODY" \
+  "re-attributed subagent body differs from the vendor's stdin only in sessionId"
 rm -rf "$SDIR"
 
-# ── Case 14b/14c: BOTH mutation paths, byte-identical ───────────────────────
-# The tag is added with jq when it is on PATH (macOS 26 ships /usr/bin/jq) and by
-# string concat otherwise — only ONE of those ever runs on a given machine, so the
-# only thing keeping the untested path honest is that both produce the SAME bytes.
-# The display name here carries a '"' and a '\': the exact characters that would
-# corrupt the payload if the name were concatenated raw, and the whole reason it
-# travels base64-encoded. (It is seeded through the submap cache because the
-# transcript scraper's "[^"]*" regex can never yield a quote.)
+# ── Case 14b: a display name with " and \ survives as base64 ────────────────
+# A display name is arbitrary vendor text, and HTTP header values are ISO-8859-1
+# by spec — which is why the name is base64-encoded rather than sent raw. (It is
+# seeded through the submap cache because the transcript scraper's "[^"]*" regex
+# can never yield a quote.)
 NASTY_NAME='Task "Agent" \ v2'
 SUB_ID="call_NASTYNAME"
 SEED_VALUE="$(printf '%s\n%s' "$PARENT" "$NASTY_NAME")"
 
 restart_mock '{}'
-if ! command -v jq >/dev/null 2>&1; then
-  echo "FAIL [Case 14b]: jq is not installed, so the jq mutation path cannot be" >&2
-  echo "  compared against the concat fallback. Install jq (macOS 26 ships" >&2
-  echo "  /usr/bin/jq; 'brew install jq' / 'apt-get install jq' otherwise)." >&2
-  exit 1
-fi
 set +e
 SEED_SUBMAP_ID="$SUB_ID" SEED_SUBMAP_VALUE="$SEED_VALUE" \
   run_dispatcher preToolUse "{\"sessionId\":\"$SUB_ID\",\"toolName\":\"bash\",\"toolArgs\":{\"command\":\"ls\"}}"
 LAST_RC=$?; set -e
-assert_eq "$LAST_RC" "0" "jq-path tag exits 0"
-BODY_JQ="$(posted_body)"
-valid=$(printf '%s' "$BODY_JQ" | python3 -c 'import json,sys; json.load(sys.stdin); print("True")')
-assert_eq "$valid" "True" "jq-path body is valid JSON"
-assert_eq "$(posted_field agentId)" "$SUB_ID" "jq path sets agentId"
-assert_eq "$(posted_field agentNameB64 | base64 -d)" "$NASTY_NAME" 'jq path round-trips a name with " and \'
+assert_eq "$LAST_RC" "0" "subagent event with a quoted display name exits 0"
+assert_header "x-rogue-agent-id" "$SUB_ID" "x-rogue-agent-id set for the seeded subagent"
+assert_eq "$(header_value x-rogue-agent-name-b64 | base64 -d)" "$NASTY_NAME" \
+  'x-rogue-agent-name-b64 round-trips a name with " and \'
+assert_eq "$(posted_body)" "{\"sessionId\":\"$PARENT\",\"toolName\":\"bash\",\"toolArgs\":{\"command\":\"ls\"}}" \
+  "body carries only the sessionId rewrite, whatever the name contains"
 
-NOJQ="$(make_nojq_path)"
-restart_mock '{}'
-set +e
-TEST_PATH="$NOJQ" SEED_SUBMAP_ID="$SUB_ID" SEED_SUBMAP_VALUE="$SEED_VALUE" \
-  run_dispatcher preToolUse "{\"sessionId\":\"$SUB_ID\",\"toolName\":\"bash\",\"toolArgs\":{\"command\":\"ls\"}}"
-LAST_RC=$?; set -e
-rm -rf "$NOJQ"
-assert_eq "$LAST_RC" "0" "concat-path tag exits 0 (jq hidden from PATH)"
-BODY_NOJQ="$(posted_body)"
-valid=$(printf '%s' "$BODY_NOJQ" | python3 -c 'import json,sys; json.load(sys.stdin); print("True")')
-assert_eq "$valid" "True" "concat-path body is valid JSON"
-assert_eq "$(posted_field agentNameB64 | base64 -d)" "$NASTY_NAME" 'concat path round-trips a name with " and \'
-assert_eq "$BODY_NOJQ" "$BODY_JQ" "jq path and concat fallback emit byte-identical bodies"
-
-# A resolved parent with an UNKNOWN display name omits agentNameB64 entirely
-# (rather than shipping an empty string) — on both paths.
+# ── Case 14c: an UNKNOWN display name omits the name header entirely ────────
+# Never sent empty: the id header alone still attributes the rows.
 restart_mock '{}'
 set +e
 SEED_SUBMAP_ID="$SUB_ID" SEED_SUBMAP_VALUE="$PARENT" \
   run_dispatcher preToolUse "{\"sessionId\":\"$SUB_ID\",\"toolName\":\"bash\"}"
 LAST_RC=$?; set -e
-assert_eq "$LAST_RC" "0" "nameless subagent tag exits 0"
-BODY_JQ="$(posted_body)"
-has=$(printf '%s' "$BODY_JQ" | python3 -c 'import json,sys; print("agentNameB64" in json.load(sys.stdin))')
-assert_eq "$has" "False" "no agentNameB64 when the display name is unknown"
-assert_eq "$(posted_field agentId)" "$SUB_ID" "agentId still set without a name"
-NOJQ="$(make_nojq_path)"
-restart_mock '{}'
-set +e
-TEST_PATH="$NOJQ" SEED_SUBMAP_ID="$SUB_ID" SEED_SUBMAP_VALUE="$PARENT" \
-  run_dispatcher preToolUse "{\"sessionId\":\"$SUB_ID\",\"toolName\":\"bash\"}"
-LAST_RC=$?; set -e
-rm -rf "$NOJQ"
-assert_eq "$LAST_RC" "0" "nameless subagent tag exits 0 (concat path)"
-assert_eq "$(posted_body)" "$BODY_JQ" "nameless tag is byte-identical on both paths"
+assert_eq "$LAST_RC" "0" "nameless subagent event exits 0"
+assert_header "x-rogue-agent-id" "$SUB_ID" "x-rogue-agent-id still set without a name"
+assert_no_header "x-rogue-agent-name-b64" "no x-rogue-agent-name-b64 when the display name is unknown"
 
-# ── Case 14d: a subagent agentStop carries BOTH body mutations ──────────────
-# The tag goes on before the transcript tail, so a re-attributed stop event ships
-# agentId + agentNameB64 + transcriptTailB64 and is still valid JSON.
+# ── Case 14d: a subagent agentStop carries the tag AND the tail ─────────────
+# The headers are independent of the body enrichment, so a re-attributed stop
+# event ships the two agent headers and a transcriptTailB64 body.
 SDIR="$(mktemp -d)"
 mkdir -p "$SDIR/$PARENT"
 printf '%s\n' \
@@ -597,9 +559,11 @@ run_dispatcher agentStop "$(printf '{"sessionId":"toolu_bdrk_STOPSUB","timestamp
 LAST_RC=$?; set -e
 unset ROGUE_COPILOT_STATE_DIR ROGUE_SUBAGENT_RESOLVE_ITERS
 assert_eq "$LAST_RC" "0" "re-attributed agentStop exits 0"
-both=$(posted_body | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("agentId")=="toolu_bdrk_STOPSUB" and "transcriptTailB64" in d and d.get("sessionId")==sys.argv[1])' "$PARENT")
-assert_eq "$both" "True" "re-attributed agentStop body is valid JSON with the tag AND the tail"
-assert_eq "$(posted_field agentNameB64 | base64 -d)" "Stop Agent" "re-attributed agentStop carries the display name"
+both=$(posted_body | python3 -c 'import json,sys; d=json.load(sys.stdin); print("agentId" not in d and "transcriptTailB64" in d and d.get("sessionId")==sys.argv[1])' "$PARENT")
+assert_eq "$both" "True" "re-attributed agentStop body is valid JSON with the tail and no body tag"
+assert_header "x-rogue-agent-id" "toolu_bdrk_STOPSUB" "re-attributed agentStop carries the id header"
+assert_eq "$(header_value x-rogue-agent-name-b64 | base64 -d)" "Stop Agent" \
+  "re-attributed agentStop carries the display name header"
 rm -rf "$SDIR"
 
 # ── Case 15: unresolvable subagent id → fail-open (orphaned, never worse) ────
@@ -616,18 +580,21 @@ unset ROGUE_COPILOT_STATE_DIR ROGUE_SUBAGENT_RESOLVE_ITERS
 assert_eq "$LAST_RC" "0" "unresolved subagent event exits 0"
 assert_eq "$(posted_body)" '{"sessionId":"call_UNKNOWNSUB","toolName":"bash","toolArgs":{"command":"ls"}}' \
   "unresolved subagent event POSTs the body unchanged (fail-open, no tag)"
-assert_no_header "x-rogue-agent-id" "no x-rogue-agent-id header when unresolved"
+assert_no_header "x-rogue-agent-id"        "no x-rogue-agent-id header when unresolved"
+assert_no_header "x-rogue-agent-name-b64"  "no x-rogue-agent-name-b64 header when unresolved"
 if [ "$ELAPSED" -le 3 ]; then echo "  ok: bounded resolve wait honored (${ELAPSED}s)"; else echo "FAIL [Case 15]: waited ${ELAPSED}s (unbounded?)" >&2; exit 1; fi
 rm -rf "$SDIR"
 
 # ── Case 16: a main-agent (UUID) session is never tagged ────────────────────
 # The tag exists only to repair a re-attributed subagent event; an ordinary event
-# must stay a verbatim relay.
+# must stay a verbatim relay with neither agent header present.
 restart_mock '{}'
 set +e; run_dispatcher preToolUse '{"sessionId":"11111111-2222-3333-4444-555555555555","toolName":"bash"}'; LAST_RC=$?; set -e
 assert_eq "$LAST_RC" "0" "main-agent event exits 0"
 assert_eq "$(posted_body)" '{"sessionId":"11111111-2222-3333-4444-555555555555","toolName":"bash"}' \
-  "main-agent event body is untouched (no agentId/agentNameB64)"
+  "main-agent event body is untouched"
+assert_no_header "x-rogue-agent-id"       "no x-rogue-agent-id header on a main-agent event"
+assert_no_header "x-rogue-agent-name-b64" "no x-rogue-agent-name-b64 header on a main-agent event"
 
 echo
 echo "All copilot hook.sh tests passed (SH=$SH)."
