@@ -217,21 +217,21 @@ full pipeline is healthy.
 Every hook in the plugin runs this preamble before POSTing the event:
 
 ```sh
-[ -r "${CLAUDE_PLUGIN_ROOT}/env" ] && . "${CLAUDE_PLUGIN_ROOT}/env"
-[ -r /etc/rogue/env ]              && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ]          && . "$HOME/.rogue-env"
+for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
+  if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+    . "$_env_file"; break
+  fi
+done
 ```
 
-Three credential sources, sourced in order. Later sources override earlier:
+Three candidates. The first that holds `ROGUE_API_KEY` is sourced alone; its
+values override the process environment, and a file without the key is skipped:
 
 | Source | Written by | Carries |
 | --- | --- | --- |
+| `/etc/rogue/env` | MDM script (Step 3) | Per-machine key; read only when it holds one |
 | `${CLAUDE_PLUGIN_ROOT}/env` | Compile script (Step 1) | Org API key, enforcement mode, auto-update pin |
-| `/etc/rogue/env` | MDM script (Step 3) | Per-user actor identity (and optionally a per-machine key) |
-| `~/.rogue-env` | User running `/rogue:setup` | Per-user override; not used in managed deployments |
-
-The hook payload comes out with: org API key (from bundle) + per-user actor
-(from MDM) + org enforcement mode (from bundle).
+| `~/.rogue-env` | User running `/rogue:setup` | Per-user; not used in managed deployments |
 
 ## Operations
 
@@ -241,9 +241,9 @@ The hook payload comes out with: org API key (from bundle) + per-user actor
 devices pick up the new key on next plugin sync (typically next session
 start).
 
-**Emergency path** — push a new `--key` value through the MDM script. Since
-`/etc/rogue/env` is sourced *after* the bundle, the MDM-supplied key wins
-on every hook fire. Useful if you suspect the bundled key is compromised
+**Emergency path** — push a new `--key` value through the MDM script.
+`/etc/rogue/env` is the first candidate, so once it holds a key it is the only
+file read on every hook fire. Useful if you suspect the bundled key is compromised
 and need same-hour mitigation; revoke the old key in the dashboard
 immediately afterward.
 

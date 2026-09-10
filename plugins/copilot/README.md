@@ -69,6 +69,7 @@ Copilot CLI, and run `/rogue:status` to verify.
 
 ## Credentials
 
-Shared `~/.rogue-env` (mode 600), read from disk at each invocation with the
-precedence `${PLUGIN_ROOT}/env` → `/etc/rogue/env` (`C:\ProgramData\rogue\env`) →
-`~/.rogue-env`. The same file is used by every Rogue plugin.
+Shared `~/.rogue-env` (mode 600), read from disk at each invocation. One env file
+is used: the first of `/etc/rogue/env` (`C:\ProgramData\rogue\env`),
+`${PLUGIN_ROOT}/env`, and `~/.rogue-env` that holds `ROGUE_API_KEY`. The same file
+is used by every Rogue plugin.
