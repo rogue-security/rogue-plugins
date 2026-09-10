@@ -290,26 +290,16 @@ parse_args() {
 }
 
 # ── stage 3: env files + knobs ─────────────────────────────────────────────
-# Same platform-aware chain as every dispatcher (later file wins; process env
-# wins over all files):
-#   <plugin-root>/env  ->  /etc/rogue/env (MDM)  ->  $HOME/.rogue-env
-# Process env is saved BEFORE sourcing, because `. file` overwrites it.
-SHIP_ENV_VARS='ROGUE_API_KEY ROGUE_BASE_URL ROGUE_ACTOR_EMAIL ROGUE_ACTOR_NAME
-ROGUE_LOG_FILE ROGUE_LOG_DIR ROGUE_SHIP_MIN_INTERVAL
-ROGUE_SHIP_MAX_BYTES ROGUE_SHIP_MAX_RUN_BYTES ROGUE_SHIP_MAX_LINE_BYTES
-ROGUE_SHIP_ALL'
-
+# Same platform-aware rule as every dispatcher: the first trusted env file holding
+# ROGUE_API_KEY is used alone, and its values override the process env:
+#   /etc/rogue/env (machine, MDM)  ->  <plugin-root>/env  ->  $HOME/.rogue-env
 load_env() {
   [ -r "$(dirname "$0")/env-file.sh" ] || return 0
   . "$(dirname "$0")/env-file.sh"
-  for _env_var_name in $SHIP_ENV_VARS; do
-    eval "_process_env_$_env_var_name=\${$_env_var_name:-}"
-  done
-  for _env_file in "$PLUGIN_ROOT/env" /etc/rogue/env "$HOME/.rogue-env"; do
-    rogue_source_env "$_env_file" 2>/dev/null
-  done
-  for _env_var_name in $SHIP_ENV_VARS; do
-    eval "[ -n \"\${_process_env_$_env_var_name:-}\" ] && $_env_var_name=\$_process_env_$_env_var_name"
+  for _env_file in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_env_file" && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file" 2>/dev/null; then
+      . "$_env_file"; break
+    fi
   done
   return 0
 }

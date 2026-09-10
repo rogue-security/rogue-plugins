@@ -7,8 +7,8 @@
 //
 // Usage: node setup.mjs <api-key> <email> <name>
 //
-// Hooks read credentials from (later wins): <ext>/env → /etc/rogue/env
-// (C:\ProgramData\rogue\env on Windows) → ~/.rogue-env (written here).
+// Hooks read the first of these that holds ROGUE_API_KEY, alone: /etc/rogue/env
+// (C:\ProgramData\rogue\env on Windows) → <ext>/env → ~/.rogue-env (written here).
 
 import fs from "node:fs";
 import os from "node:os";
@@ -21,7 +21,7 @@ if (!apiKey) {
 }
 
 const HOME = os.homedir() || process.env.HOME || process.env.USERPROFILE || ".";
-const ENV_FILE = process.env.ROGUE_ENV_FILE || path.join(HOME, ".rogue-env");
+const ENV_FILE = path.join(HOME, ".rogue-env");
 
 const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 

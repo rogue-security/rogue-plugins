@@ -31,10 +31,12 @@ case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*) exit 0 ;;
 esac
 
-# Same env precedence as hook.sh (later wins): bundled → MDM → per-user.
-[ -r "${CLAUDE_PLUGIN_ROOT:-}/env" ] && . "${CLAUDE_PLUGIN_ROOT}/env"
-[ -r /etc/rogue/env ]                && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ]            && . "$HOME/.rogue-env"
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
+  if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+    . "$_env_file"; break
+  fi
+done
 
 # Not configured → no-op (mirrors hook.sh fail-open on missing key).
 [ -n "${ROGUE_API_KEY:-}" ] || exit 0

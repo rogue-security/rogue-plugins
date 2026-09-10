@@ -38,9 +38,10 @@
 #
 # Logs every invocation to $ROGUE_LOG_FILE (default ~/.rogue/logs/cursor.log).
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. ${CURSOR_PLUGIN_ROOT}/env   (baked into a compiled customer plugin)
-#   2. /etc/rogue/env              (MDM-provisioned)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. /etc/rogue/env              (machine, MDM-provisioned)
+#   2. ${CURSOR_PLUGIN_ROOT}/env   (bundled into a compiled customer plugin)
 #   3. ~/.rogue-env                (user / installer-written)
 
 event="${1:-}"
@@ -75,29 +76,20 @@ esac
 [ -n "$event" ] || { printf '{}'; exit 0; }
 dbg "event=$event"
 
-# ── credential resolution (later file wins; process env wins over all) ─────
-_penv_ROGUE_API_KEY="${ROGUE_API_KEY:-}"
-_penv_ROGUE_ACTOR_EMAIL="${ROGUE_ACTOR_EMAIL:-}"
-_penv_ROGUE_ACTOR_NAME="${ROGUE_ACTOR_NAME:-}"
-_penv_ROGUE_BASE_URL="${ROGUE_BASE_URL:-}"
-
+# ── credential resolution ──────────────────────────────────────────────────
 PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-}"
 if [ -z "$PLUGIN_ROOT" ]; then
   PLUGIN_ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)" || PLUGIN_ROOT=""
 fi
 
 # Env files are bash-quoted (`export KEY=value`, written via printf %q), so
-# sourcing them is correct.
-for _f in "$PLUGIN_ROOT/env" /etc/rogue/env "$HOME/.rogue-env"; do
-  if [ -n "$_f" ] && [ -r "$_f" ]; then dbg "cred file found: $_f"; . "$_f" 2>/dev/null
-  else dbg "cred file absent: $_f"; fi
+# sourcing them is correct. The first file holding ROGUE_API_KEY is used alone:
+# machine, bundled, user.
+for _f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
+  if [ -r "$_f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_f"; then
+    dbg "cred file in use: $_f"; . "$_f" 2>/dev/null; break
+  else dbg "cred file skipped: $_f"; fi
 done
-
-# process env wins over file values
-[ -n "$_penv_ROGUE_API_KEY" ]     && ROGUE_API_KEY="$_penv_ROGUE_API_KEY"
-[ -n "$_penv_ROGUE_ACTOR_EMAIL" ] && ROGUE_ACTOR_EMAIL="$_penv_ROGUE_ACTOR_EMAIL"
-[ -n "$_penv_ROGUE_ACTOR_NAME" ]  && ROGUE_ACTOR_NAME="$_penv_ROGUE_ACTOR_NAME"
-[ -n "$_penv_ROGUE_BASE_URL" ]    && ROGUE_BASE_URL="$_penv_ROGUE_BASE_URL"
 
 # ── hook log ───────────────────────────────────────────────────────────────
 # `dbg` above only writes to stderr under ROGUE_DEBUG, which Cursor keeps in its

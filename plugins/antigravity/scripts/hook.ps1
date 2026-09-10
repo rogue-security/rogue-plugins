@@ -25,9 +25,10 @@
 # file), $PSCommandPath is empty — hooks.json passes the plugin root
 # ((Get-Location).Path) as the 2nd argument instead.
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. <PluginRoot>\env            (baked into a compiled customer plugin)
-#   2. C:\ProgramData\rogue\env    (MDM-provisioned; mirrors /etc/rogue/env)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. C:\ProgramData\rogue\env    (machine, MDM-provisioned; mirrors /etc/rogue/env)
+#   2. <PluginRoot>\env            (bundled into a compiled customer plugin)
 #   3. %USERPROFILE%\.rogue-env    (user / installer-written)
 
 param([string]$EventName = '', [string]$PluginRoot = '')
@@ -149,8 +150,8 @@ function Resolve-PluginRoot {
 # for a fleet that relocates logs by policy AND would make the log shipper and the
 # dispatcher disagree on the path.
 function Initialize-Logging {
-    # $Creds is the merged credential map (bundled env → MDM → per-user file, then
-    # process env last), so precedence is already correct by the time we read it.
+    # $Creds is the resolved credential map (process env, then the chosen env file
+    # over it), so precedence is already correct by the time we read it.
     # $HOME backs up USERPROFILE so this also works dot-sourced on macOS/Linux
     # through the ROGUE_PS_LIB_ONLY seam (tests) — without it $logFile resolves to
     # $null there and every line is silently dropped.
@@ -243,22 +244,25 @@ function Log {
     } catch {}
 }
 
-# ── credential resolution (later file wins; process env wins over all) ─────
+# ── credential resolution ──────────────────────────────────────────────────
 function Import-Credentials {
     $script:creds = @{}
-    foreach ($f in @((Join-Path $PluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-        foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $script:creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            }
-        }
-    }
-    # ROGUE_LOG_* ride the same list so a process-env value still beats the files,
-    # which is what makes the resolved precedence identical to hook.sh's load_env.
     foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL','ROGUE_API_URL',
                    'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
         $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $script:creds[$k] = $val }
+    }
+    # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+    foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $PluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+        $fileVals = @{}
+        foreach ($line in (Get-Content -LiteralPath $f)) {
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+                $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+            }
+        }
+        if (-not $fileVals['ROGUE_API_KEY']) { continue }
+        foreach ($k in $fileVals.Keys) { $script:creds[$k] = $fileVals[$k] }
+        break
     }
     $script:apiKey = $script:creds['ROGUE_API_KEY']
 }

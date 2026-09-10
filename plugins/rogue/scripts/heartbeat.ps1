@@ -5,8 +5,8 @@
 # Coding Agents roster and so the org learns which plugin version is running. Pure
 # side-effect: fire-and-forget, never blocks Claude Code, always exits 0.
 #
-# Credential resolution mirrors hook.ps1 (later file wins; process env over all):
-#   1. ${CLAUDE_PLUGIN_ROOT}\env   2. C:\ProgramData\rogue\env   3. %USERPROFILE%\.rogue-env
+# Credential resolution mirrors hook.ps1: the first env file holding ROGUE_API_KEY
+# is used alone (machine, bundled, user) and overrides the process env.
 #
 # TWO TRIGGERS, ONE SCRIPT, exactly as in heartbeat.sh. SessionStart fires once per
 # session; Stop fires once per TURN, so its beacon is throttled. Keep the two
@@ -135,19 +135,22 @@ if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { exit 0 }
 
 # -- credential resolution --------------------------------------------------
 $creds = @{}
-foreach ($f in @((Join-Path $pluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-    foreach ($line in (Get-Content -LiteralPath $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-            $creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-        }
-    }
-}
-# ROGUE_HEARTBEAT_MIN_INTERVAL rides this list so a process-env value still beats
-# the files, which is what makes the resolved precedence identical to hook.ps1's.
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                'ROGUE_HEARTBEAT_MIN_INTERVAL') {
     $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $creds[$k] = $val }
+}
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+    $fileVals = @{}
+    foreach ($line in (Get-Content -LiteralPath $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+            $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+        }
+    }
+    if (-not $fileVals['ROGUE_API_KEY']) { continue }
+    foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
+    break
 }
 
 # Resolved HERE - after the env files are parsed so they can set it, and before the

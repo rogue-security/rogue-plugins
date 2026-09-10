@@ -35,13 +35,16 @@ surface_row() { printf '  %-12s%s\n' "$1" "$2"; }
 # The first "<key>": "<string>" value in a JSON body, without jq.
 json_str() { printf '%s' "$2" | sed -nE 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' | head -n1; }
 
-# ── credentials (same precedence as hook.sh: bundled → MDM → per-user) ──────
+# ── credentials (same env file rule as hook.sh) ─────────────────────────────
 load_env() {
   [ -r "${PLUGIN_ROOT}/scripts/env-file.sh" ] || return 0
   . "${PLUGIN_ROOT}/scripts/env-file.sh"
-  rogue_source_env "${PLUGIN_ROOT}/env"
-  rogue_source_env /etc/rogue/env
-  rogue_source_env "$HOME/.rogue-env"
+  # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+  for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_env_file" && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
   ROGUE_BASE_URL="${ROGUE_BASE_URL:-https://api.rogue.security}"
   ROGUE_BASE_URL="${ROGUE_BASE_URL%/}"
   return 0

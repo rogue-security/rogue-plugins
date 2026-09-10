@@ -58,7 +58,7 @@ PLUGIN_NAME="rogue"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 STATUSLINE_PATH="$CONFIG_DIR/hooks/rogue-statusline.sh"
 SETTINGS_PATH="$CONFIG_DIR/settings.json"
-ENV_FILE="${ROGUE_ENV_FILE:-$HOME/.rogue-env}"
+ENV_FILE="$HOME/.rogue-env"
 
 NON_INTERACTIVE="${ROGUE_NON_INTERACTIVE:-0}"
 # Explicit agent selection via --claude/--codex/--cursor. Empty = auto-detect all.
@@ -685,9 +685,13 @@ configure_credentials() {
   local flag_name="${ROGUE_ACTOR_NAME:-}"
   local flag_base_url="$ROGUE_BASE_URL"
 
-  # Pull anything already on disk / in env into scope.
-  [ -r /etc/rogue/env ] && . /etc/rogue/env
-  [ -r "$ENV_FILE" ]    && . "$ENV_FILE"
+  # Pull anything already on disk into scope: the first env file holding
+  # ROGUE_API_KEY, as the hooks read it.
+  for _env_file in /etc/rogue/env "$ENV_FILE"; do
+    if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
 
   [ "$BASE_URL_EXPLICIT" = "1" ] && ROGUE_BASE_URL="$flag_base_url"
 
@@ -826,7 +830,7 @@ write_statusline_script() {
 # teal bracketed label: 🟢 [Rogue Security] configured, 🔴 [Rogue Security] not.
 set -u
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  [ -r "$f" ] && . "$f"
+  if [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f"; then . "$f"; break; fi
 done
 if [ -n "${ROGUE_API_KEY:-}" ]; then
   dot='🟢'

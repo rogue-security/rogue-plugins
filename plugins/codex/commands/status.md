@@ -5,9 +5,9 @@ description: Check Rogue Security AIDR connection status, active rulesets, and c
 # Rogue Security Status (Codex)
 
 Check the current status of the Rogue Security AIDR integration. The plugin hooks
-source credentials from three locations in order (later wins): the plugin's bundled
-`env` (managed installs), `/etc/rogue/env` (MDM-provisioned), and `~/.rogue-env`
-(per-user setup).
+read exactly one env file: the first of `/etc/rogue/env` (MDM-provisioned), the
+plugin's bundled `env` (managed installs), and `~/.rogue-env` (per-user setup) that
+holds `ROGUE_API_KEY`. This command applies the same rule.
 
 The commands below are bash (macOS/Linux). **On Windows**, run the PowerShell
 equivalents: read the key from `%USERPROFILE%\.rogue-env` (and
@@ -21,9 +21,11 @@ equivalents: read the key from `%USERPROFILE%\.rogue-env` (and
 ```bash
 cat > /tmp/rogue-source-env.sh <<'EOF'
 PLUGIN_ENV=$(find "$HOME/.codex/plugins" -name env -type f -path '*rogue*' 2>/dev/null | head -1)
-[ -n "$PLUGIN_ENV" ] && [ -r "$PLUGIN_ENV" ] && . "$PLUGIN_ENV"
-[ -r /etc/rogue/env ]              && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ]          && . "$HOME/.rogue-env"
+ROGUE_ENV_IN_USE=""
+# The first env file holding ROGUE_API_KEY is used alone.
+for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
+done
 EOF
 chmod +x /tmp/rogue-source-env.sh
 
@@ -34,6 +36,7 @@ PLUGIN_ENV=$(find "$HOME/.codex/plugins" -name env -type f -path '*rogue*' 2>/de
 [ -r /etc/rogue/env ]     && echo "  /etc/rogue/env  (MDM)"
 [ -r "$HOME/.rogue-env" ] && echo "  $HOME/.rogue-env  (per-user)"
 [ -z "$PLUGIN_ENV" ] && [ ! -r /etc/rogue/env ] && [ ! -r "$HOME/.rogue-env" ] && echo "  (none)"
+echo "In use: ${ROGUE_ENV_IN_USE:-(none holds ROGUE_API_KEY)}"
 [ -n "$ROGUE_API_KEY" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || echo "API key: not resolved"
 ```
 
@@ -79,16 +82,21 @@ Each Rogue plugin logs to its **own** file under `~/.rogue/logs/`, so this reads
 and so on. `<file>.1` is the previous rotation, if any.
 
 ```bash
-# Same precedence as the dispatcher: the env files first (system, then per-user),
-# with the process environment winning over both. Read with sed, never by
-# sourcing - a status command must not execute an env file. Reading only
-# $ROGUE_LOG_* would report "no activity" on exactly the machines that relocate
-# their logs by policy, which are the ones support is called about.
+PLUGIN_ENV=$(find "$HOME/.codex/plugins" -name env -type f -path '*rogue*' 2>/dev/null | head -1)
+# Same rule as the dispatcher: only the env file in use (the first holding
+# ROGUE_API_KEY) is read, with the process environment for anything it does not
+# set. Read with sed, never by sourcing - a status command must not execute an env
+# file. Reading only $ROGUE_LOG_* would report "no activity" on exactly the
+# machines that relocate their logs by policy, which are the ones support is
+# called about.
+ROGUE_ENV_IN_USE=""
+for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \
-        /etc/rogue/env "$HOME/.rogue-env" 2>/dev/null | tail -1 | sed "s/^['\"]//;s/['\"]$//")
-  eval "p=\${$1:-}"
-  [ -n "$p" ] && v=$p
+        "${ROGUE_ENV_IN_USE:-/dev/null}" 2>/dev/null | tail -1 | sed "s/^['\"]//;s/['\"]$//")
+  [ -n "$v" ] || eval "v=\${$1:-}"
   printf '%s' "$v"
 }
 log=$(rogue_log_var ROGUE_LOG_FILE)
@@ -105,22 +113,26 @@ On Windows, resolve the same precedence before reading:
 
 ```powershell
 $logCfg = @{}
-# Mirror the dispatcher's chain: C:\ProgramData\rogue\env (MDM) then
-# %USERPROFILE%\.rogue-env, with the process environment winning over both.
-# Parsed with a regex, never executed - a status command must not run an env
-# file. Reading only $env: would report "no activity" on exactly the machines
-# that relocate their logs by policy, which are the ones support is called about.
+# Mirror the dispatcher's rule: the first of C:\ProgramData\rogue\env (MDM) and
+# %USERPROFILE%\.rogue-env that holds ROGUE_API_KEY is read, with the process
+# environment for anything it does not set. Parsed with a regex, never executed -
+# a status command must not run an env file. Reading only $env: would report "no
+# activity" on exactly the machines that relocate their logs by policy, which are
+# the ones support is called about.
 foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
   if (-not (Test-Path -LiteralPath $f)) { continue }
+  $fileVals = @{}
   foreach ($line in (Get-Content -LiteralPath $f)) {
-    if ($line -match '^\s*(?:export\s+)?(ROGUE_LOG_FILE|ROGUE_LOG_DIR)=(.+)$') {
-      $logCfg[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
+    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+      $fileVals[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
     }
   }
+  if (-not $fileVals['ROGUE_API_KEY']) { continue }
+  $logCfg = $fileVals
+  break
 }
 foreach ($v in 'ROGUE_LOG_FILE','ROGUE_LOG_DIR') {
-  $pv = [Environment]::GetEnvironmentVariable($v)
-  if ($pv) { $logCfg[$v] = $pv }
+  if (-not $logCfg[$v]) { $pv = [Environment]::GetEnvironmentVariable($v); if ($pv) { $logCfg[$v] = $pv } }
 }
 $logPath = $logCfg['ROGUE_LOG_FILE']
 if (-not $logPath) {
@@ -181,7 +193,7 @@ else {
   $env:ROGUE_SHIP_MIN_INTERVAL = '0'; $env:ROGUE_DEBUG = '1'
   $env:ROGUE_SHIPPER_SCRIPT = $ship
   # PASS THE ROOT. On a no-argument run the shipper self-locates its plugin root to
-  # read <root>\env, the FIRST file in the credential chain - and $PSCommandPath is
+  # read <root>\env, a candidate in the credential chain - and $PSCommandPath is
   # EMPTY under [scriptblock]::Create, so it falls back to the current directory,
   # which is the operator's cwd and has no env file. The bundled ROGUE_BASE_URL is
   # then missed and identity can be absent entirely (outcome=skip reason=no-actor),
@@ -209,12 +221,10 @@ only if that finds nothing.
 
 **Which copy runs matters, so report the path it prints.** On a no-argument run
 the shipper self-locates its plugin root from its own script path and reads
-`<plugin-root>/env` as the *first* file in the credential chain. A leftover tree
-from a previous install therefore supplies credentials: a later `~/.rogue-env`
-overrides the API key, but `setup.sh` writes no `ROGUE_BASE_URL` of its own, so a
-stale base URL in that tree's bundled `env` would win and the upload would go to
-the wrong host. (One added to `~/.rogue-env` by hand does now survive: every
-writer merges rather than truncating, so setup and auto-update keep it.) Codex
+`<plugin-root>/env` as a credential candidate (after `/etc/rogue/env`). A leftover
+tree from a previous install whose bundled `env` holds a key therefore supplies the
+credentials alone — `~/.rogue-env` is not read at all then, and a stale base URL in
+that tree would send the upload to the wrong host. Codex
 has no equivalent of Claude Code's install registry to disambiguate with, so the
 command echoes the path it chose — check it names the plugin
 directory `/rogue:status` reported in Step 1, and if several copies exist, remove

@@ -6,19 +6,18 @@ if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { exit 0 }
 
 $pluginRoot = $env:PLUGIN_ROOT
 
-# Mirror the real resolution order (later file wins; process env wins over all),
-# and treat a blank final value as unconfigured — a non-empty earlier value must
-# not be masked by an empty later assignment, and vice versa.
+# Mirror the real resolution order: the first env file holding ROGUE_API_KEY is
+# used alone (machine, bundled, user), and it overrides the process env.
 $key = ''
-foreach ($f in @((Join-Path $pluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
+foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
     if ($f -and (Test-Path -LiteralPath $f)) {
         foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match '^\s*(?:export\s+)?ROGUE_API_KEY=(.*)$') { $key = $Matches[1].Trim().Trim("'").Trim('"') }
+            if ($line -match '^\s*(?:export\s+)?ROGUE_API_KEY=(.+)$') { $key = $Matches[1].Trim().Trim("'").Trim('"') }
         }
     }
+    if ($key) { break }
 }
-$procKey = [Environment]::GetEnvironmentVariable('ROGUE_API_KEY')
-if ($procKey) { $key = $procKey }
+if (-not $key) { $key = [Environment]::GetEnvironmentVariable('ROGUE_API_KEY') }
 
 if (-not $key) {
     [Console]::Out.Write('{"systemMessage": "[Rogue Security] Not configured. Run /rogue:setup to connect your API key."}')

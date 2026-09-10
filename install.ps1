@@ -69,7 +69,7 @@ $ROGUE_BASE_URL_DEFAULT = 'https://api.rogue.security'
 $MarketplaceName = 'rogue-marketplace'
 $CopilotMarketplaceName = 'rogue-copilot'
 $PluginName      = 'rogue'
-$EnvFile = if ($env:ROGUE_ENV_FILE) { $env:ROGUE_ENV_FILE } else { Join-Path $env:USERPROFILE '.rogue-env' }
+$EnvFile = Join-Path $env:USERPROFILE '.rogue-env'
 
 # Merge env vars -> params (explicit params win).
 if (-not $ApiKey)     { $ApiKey     = $env:ROGUE_API_KEY }
@@ -411,22 +411,23 @@ function ConvertFrom-ShellQuoted {
     return $sb.ToString()
 }
 
-# Load existing creds from disk (same priority as the dispatcher: later wins).
+# Load existing creds from disk: the first env file holding ROGUE_API_KEY, as the
+# dispatcher reads it.
 function Load-ExistingCreds {
     foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
         if (-not (Test-Path -LiteralPath $f)) { continue }
+        $vals = @{}
         foreach ($line in (Get-Content -LiteralPath $f -Encoding UTF8 -ErrorAction SilentlyContinue)) {
             if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $k = $Matches[1]
-                $v = ConvertFrom-ShellQuoted $Matches[2].Trim()
-                switch ($k) {
-                    'ROGUE_API_KEY'     { if (-not $script:ApiKey)  { $script:ApiKey  = $v } }
-                    'ROGUE_ACTOR_EMAIL' { if (-not $script:Email)   { $script:Email   = $v } }
-                    'ROGUE_ACTOR_NAME'  { if (-not $script:Name)    { $script:Name    = $v } }
-                    'ROGUE_BASE_URL'    { if (-not $script:BaseUrlExplicit) { $script:BaseUrl = $v } }
-                }
+                $vals[$Matches[1]] = ConvertFrom-ShellQuoted $Matches[2].Trim()
             }
         }
+        if (-not $vals['ROGUE_API_KEY']) { continue }
+        if (-not $script:ApiKey) { $script:ApiKey = $vals['ROGUE_API_KEY'] }
+        if (-not $script:Email -and $vals['ROGUE_ACTOR_EMAIL']) { $script:Email = $vals['ROGUE_ACTOR_EMAIL'] }
+        if (-not $script:Name -and $vals['ROGUE_ACTOR_NAME']) { $script:Name = $vals['ROGUE_ACTOR_NAME'] }
+        if (-not $script:BaseUrlExplicit -and $vals['ROGUE_BASE_URL']) { $script:BaseUrl = $vals['ROGUE_BASE_URL'] }
+        break
     }
 }
 Load-ExistingCreds

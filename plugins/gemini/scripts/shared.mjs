@@ -36,14 +36,17 @@ export function shellUnquote(raw) {
 }
 
 // ── Credential resolution ────────────────────────────────────────────────────
-// Same env-file precedence as the other monorepo plugins (later wins; process
-// env wins over all files):
-//   <ext>/env (bundled) → /etc/rogue/env (MDM) → ~/.rogue-env (per-user)
+// Same env-file rule as the other monorepo plugins: the first file holding
+// ROGUE_API_KEY is used alone, and its values override the process env:
+//   /etc/rogue/env (machine, MDM) → <ext>/env (bundled) → ~/.rogue-env (per-user)
 export function loadEnvFiles() {
   const merged = {};
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith("ROGUE_") && process.env[k]) merged[k] = process.env[k];
+  }
   const files = [
-    path.join(EXT_ROOT, "env"),
     IS_WIN ? "C:\\ProgramData\\rogue\\env" : "/etc/rogue/env",
+    path.join(EXT_ROOT, "env"),
     path.join(HOME, ".rogue-env"),
   ];
   for (const f of files) {
@@ -53,14 +56,14 @@ export function loadEnvFiles() {
     } catch {
       continue;
     }
+    const vals = {};
     for (const line of text.split(/\r?\n/)) {
       const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (m) merged[m[1]] = shellUnquote(m[2]);
+      if (m) vals[m[1]] = shellUnquote(m[2]);
     }
-  }
-  // Process env wins (explicitly-set ROGUE_* / config knobs).
-  for (const k of Object.keys(process.env)) {
-    if (k.startsWith("ROGUE_") && process.env[k]) merged[k] = process.env[k];
+    if (!vals.ROGUE_API_KEY) continue;
+    Object.assign(merged, vals);
+    break;
   }
   return merged;
 }

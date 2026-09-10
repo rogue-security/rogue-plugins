@@ -27,9 +27,10 @@
 # empty body). Never `set -e`; never let curl propagate a non-zero exit. A block
 # is carried in the relayed JSON body on stdout, never via the exit code.
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. ${PLUGIN_ROOT}/env        (baked into a compiled customer plugin)
-#   2. /etc/rogue/env            (MDM-provisioned)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. /etc/rogue/env            (machine, MDM-provisioned)
+#   2. ${PLUGIN_ROOT}/env        (bundled into a compiled customer plugin)
 #   3. $HOME/.rogue-env          (per-user / installer-written)
 
 EVENT="$1"
@@ -39,10 +40,12 @@ EVENT="$1"
 PLUGIN_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)"
 [ -n "$PLUGIN_ROOT" ] || PLUGIN_ROOT="${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}"
 
-# Env precedence (later wins): bundled → MDM → per-user.
-[ -r "${PLUGIN_ROOT}/env" ] && . "${PLUGIN_ROOT}/env"
-[ -r /etc/rogue/env ]       && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ]   && . "$HOME/.rogue-env"
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+  if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+    . "$_env_file"; break
+  fi
+done
 
 # Log destination — ONE FILE PER AGENT. Every Rogue plugin shares ~/.rogue, so a
 # machine running Copilot CLI + Claude Code + Cursor + … used to interleave all of

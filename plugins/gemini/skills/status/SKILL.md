@@ -6,9 +6,9 @@ description: Check Rogue Security AIDR connection status, active rulesets, ident
 # Rogue Security Status
 
 Check the current status of the Rogue Security AIDR integration for Gemini CLI.
-The hooks resolve credentials from three locations in order (later wins): the
-extension's bundled `env` (managed installs), `/etc/rogue/env` (MDM), and
-`~/.rogue-env` (per-user setup). This command checks all three.
+The hooks read exactly one env file: the first of `/etc/rogue/env` (MDM), the
+extension's bundled `env` (managed installs), and `~/.rogue-env` (per-user setup)
+that holds `ROGUE_API_KEY`. This command applies the same rule.
 
 **Pick the command variant for the user's OS.** Use the macOS / Linux (bash)
 commands by default; use the Windows (PowerShell) block at the end on native
@@ -19,12 +19,15 @@ Windows. There, the files are `C:\ProgramData\rogue\env` (MDM) and
 
 ```bash
 resolve() {
-  for f in "$HOME/.gemini/extensions/rogue/env" /etc/rogue/env "$HOME/.rogue-env"; do
-    [ -r "$f" ] && . "$f" && echo "  $f" >&2
+  # The first env file holding ROGUE_API_KEY is used alone.
+  for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do
+    [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; echo "  in use: $f" >&2; break; }
   done
 }
 resolve 2>/tmp/rogue-src
-echo "Credential sources detected:"; cat /tmp/rogue-src 2>/dev/null || echo "  (none)"
+echo "Credential sources detected:"
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && echo "  $f"; done
+cat /tmp/rogue-src 2>/dev/null || echo "  (none holds ROGUE_API_KEY)"
 [ -n "${ROGUE_API_KEY:-}" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || echo "API key: not resolved"
 ```
 
@@ -39,7 +42,7 @@ version exists. Read the extension version from the manifest without `python3`
 (absent on a fresh macOS):
 
 ```bash
-for f in "$HOME/.gemini/extensions/rogue/env" /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && . "$f"; done
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
 PJ="$HOME/.gemini/extensions/rogue/gemini-extension.json"
 VER=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9][^"]*"' "$PJ" 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 curl -s -w "\n%{http_code}" -X POST \
@@ -56,7 +59,7 @@ dashboard). No response → check network reachability to `api.rogue.security`.
 ## Step 3: Fetch configuration
 
 ```bash
-for f in "$HOME/.gemini/extensions/rogue/env" /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && . "$f"; done
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
 curl -s -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/config"
 ```
@@ -70,20 +73,24 @@ Display:
 ## Step 4: Show identity + recent hook activity
 
 ```bash
-for f in "$HOME/.gemini/extensions/rogue/env" /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && . "$f"; done
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
 echo "Actor email: ${ROGUE_ACTOR_EMAIL:-(unset)}"
 echo "Actor name:  ${ROGUE_ACTOR_NAME:-(unset)}"
 echo "--- recent hook activity ---"
-# Same precedence as the dispatcher: the env files first (system, then per-user),
-# with the process environment winning over both. Read with sed, never by
-# sourcing - a status command must not execute an env file. Reading only
-# $ROGUE_LOG_* would report "no activity" on exactly the machines that relocate
-# their logs by policy, which are the ones support is called about.
+# Same rule as the dispatcher: only the env file in use (the first holding
+# ROGUE_API_KEY) is read, with the process environment for anything it does not
+# set. Read with sed, never by sourcing - a status command must not execute an env
+# file. Reading only $ROGUE_LOG_* would report "no activity" on exactly the
+# machines that relocate their logs by policy, which are the ones support is
+# called about.
+ROGUE_ENV_IN_USE=""
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \
-        /etc/rogue/env "$HOME/.rogue-env" 2>/dev/null | tail -1 | sed "s/^['\"]//;s/['\"]$//")
-  eval "p=\${$1:-}"
-  [ -n "$p" ] && v=$p
+        "${ROGUE_ENV_IN_USE:-/dev/null}" 2>/dev/null | tail -1 | sed "s/^['\"]//;s/['\"]$//")
+  [ -n "$v" ] || eval "v=\${$1:-}"
   printf '%s' "$v"
 }
 log=$(rogue_log_var ROGUE_LOG_FILE)
@@ -180,14 +187,19 @@ user asks for an upload.
 
 ```powershell
 $creds = @{}
-foreach ($f in @("$env:USERPROFILE\.gemini\extensions\rogue\env", 'C:\ProgramData\rogue\env', "$env:USERPROFILE\.rogue-env")) {
-  if (-not (Test-Path -LiteralPath $f)) { continue }
-  Write-Host "  $f"
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+foreach ($f in @('C:\ProgramData\rogue\env', "$env:USERPROFILE\.gemini\extensions\rogue\env", "$env:USERPROFILE\.rogue-env")) {
+  if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+  $fileVals = @{}
   foreach ($line in (Get-Content -LiteralPath $f)) {
     if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-      $creds[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
+      $fileVals[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
     }
   }
+  if (-not $fileVals['ROGUE_API_KEY']) { continue }
+  Write-Host "  in use: $f"
+  $creds = $fileVals
+  break
 }
 $key = $creds['ROGUE_API_KEY']
 if (-not $key) { 'API key: not resolved — run /setup'; return }
@@ -202,12 +214,11 @@ try {
 } catch { "Status check failed: $($_.Exception.Message)" }
 "Actor email: $($creds['ROGUE_ACTOR_EMAIL'])"
 "Actor name:  $($creds['ROGUE_ACTOR_NAME'])"
-# The process environment wins over every file, exactly as it does in the
-# dispatcher - overlay it before deriving the path, or an operator who exported
-# ROGUE_LOG_DIR for this session is told there is no activity.
+# The process environment supplies only what the file in use does not set, exactly
+# as in the dispatcher - so an operator who exported ROGUE_LOG_DIR for this session
+# is still told where the log is.
 foreach ($v in 'ROGUE_LOG_FILE','ROGUE_LOG_DIR') {
-  $pv = [Environment]::GetEnvironmentVariable($v)
-  if ($pv) { $creds[$v] = $pv }
+  if (-not $creds[$v]) { $pv = [Environment]::GetEnvironmentVariable($v); if ($pv) { $creds[$v] = $pv } }
 }
 $logPath = $creds['ROGUE_LOG_FILE']
 if (-not $logPath) {

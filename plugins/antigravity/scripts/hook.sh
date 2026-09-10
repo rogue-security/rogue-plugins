@@ -25,9 +25,10 @@
 # decision when the PowerShell handler also runs on the same invocation.
 # ROGUE_FORCE_UNAME overrides uname (for tests).
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. ${PLUGIN_ROOT}/env        (baked into a compiled customer plugin)
-#   2. /etc/rogue/env            (MDM-provisioned)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. /etc/rogue/env            (machine, MDM-provisioned)
+#   2. ${PLUGIN_ROOT}/env        (bundled into a compiled customer plugin)
 #   3. $HOME/.rogue-env          (per-user / installer-written)
 
 # ── Shape of this file ─────────────────────────────────────────────────────
@@ -66,14 +67,16 @@ locate_plugin_root() {
   [ -n "$PLUGIN_ROOT" ] || PLUGIN_ROOT="."
 }
 
-# Env precedence (later wins): bundled → MDM → per-user. Every default derived
-# from the environment is computed HERE, after the sourcing, because a user's
-# `~/.rogue-env` must be able to set any of them — computing them at file scope
-# would freeze the built-in default before the file that overrides it is read.
+# Every default derived from the environment is computed HERE, after the
+# sourcing, because the env file must be able to set any of them — computing them
+# at file scope would freeze the built-in default before the file is read.
 load_env() {
-  [ -r "${PLUGIN_ROOT}/env" ] && . "${PLUGIN_ROOT}/env"
-  [ -r /etc/rogue/env ]       && . /etc/rogue/env
-  [ -r "$HOME/.rogue-env" ]   && . "$HOME/.rogue-env"
+  # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+  for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+    if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
 
   # Log destination — ONE FILE PER AGENT. Every Rogue plugin shares ~/.rogue, so
   # a machine running Antigravity + Claude Code + Cursor + … used to interleave

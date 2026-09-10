@@ -65,8 +65,8 @@ function emit(obj) {
 // is derived from them. `loadEnvFiles()` returns a MERGED OBJECT and deliberately
 // does not mutate `process.env`, so reading `process.env.ROGUE_LOG_DIR` directly
 // would silently ignore `~/.rogue-env` / `/etc/rogue/env` — the exact bug this
-// replaced. Precedence inside the merge: bundled env → MDM → per-user, then
-// process env wins (see shared.mjs).
+// replaced. The merge is the process env with the first env file holding
+// ROGUE_API_KEY laid over it (see shared.mjs).
 // Wrapped: a throw here would kill the hook before it could emit anything, and
 // Gemini must always get a body. An empty env degrades to "unconfigured".
 let ENV = {};

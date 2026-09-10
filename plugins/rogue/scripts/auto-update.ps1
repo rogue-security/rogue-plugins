@@ -79,24 +79,26 @@ try {
 # quoting, but the only flags we read here are simple tokens).
 function ReadEnvVar {
     param([string]$Key)
-    $v = [Environment]::GetEnvironmentVariable($Key)
-    if ($v) { return $v }
-    # Same precedence as the dispatcher (later wins): bundled plugin env -> MDM ->
-    # per-user. The bundled ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed
-    # plugins pin flags like ROGUE_AUTO_UPDATE=0 / ROGUE_PLUGIN_VERSION.
-    $files = @()
+    # Same rule as the dispatcher: the first env file holding ROGUE_API_KEY is used
+    # alone (machine, bundled, user) and overrides the process env. The bundled
+    # ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed plugins pin flags like
+    # ROGUE_AUTO_UPDATE=0 / ROGUE_PLUGIN_VERSION.
+    $files = @('C:\ProgramData\rogue\env')
     if ($env:CLAUDE_PLUGIN_ROOT) { $files += (Join-Path $env:CLAUDE_PLUGIN_ROOT 'env') }
-    $files += 'C:\ProgramData\rogue\env'
     $files += (Join-Path $env:USERPROFILE '.rogue-env')
     foreach ($f in $files) {
         if (-not (Test-Path -LiteralPath $f)) { continue }
+        $vals = @{}
         foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match ('^\s*(?:export\s+)?' + [regex]::Escape($Key) + '=(.+)$')) {
-                $v = $Matches[1].Trim().Trim("'").Trim('"')
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+                $vals[$Matches[1]] = $Matches[2].Trim().Trim("'").Trim('"')
             }
         }
+        if (-not $vals['ROGUE_API_KEY']) { continue }
+        if ($vals.ContainsKey($Key)) { return $vals[$Key] }
+        break
     }
-    return $v
+    return [Environment]::GetEnvironmentVariable($Key)
 }
 
 if ((ReadEnvVar 'ROGUE_AUTO_UPDATE') -eq '0') { LogLine 'ROGUE_AUTO_UPDATE=0, skipping'; exit 0 }

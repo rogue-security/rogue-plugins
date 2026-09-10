@@ -27,13 +27,14 @@ mkdir -p "$(dirname "$LOG")" 2>/dev/null || exit 0
 exec >>"$LOG" 2>&1
 date "+%F %T --- auto-update tick ---"
 
-# Pull creds + flags from the same files the hooks read, in the same precedence
-# order (later wins): bundled plugin env → MDM → per-user. The bundled
-# ${CLAUDE_PLUGIN_ROOT}/env is where compiled/managed plugins pin flags like
-# ROGUE_AUTO_UPDATE=0 or ROGUE_PLUGIN_VERSION, so it must be sourced here too.
-[ -r "${CLAUDE_PLUGIN_ROOT:-}/env" ] && . "${CLAUDE_PLUGIN_ROOT}/env"
-[ -r /etc/rogue/env ] && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ] && . "$HOME/.rogue-env"
+# Same env file rule as the hooks. The bundled ${CLAUDE_PLUGIN_ROOT}/env is where
+# compiled/managed plugins pin flags like ROGUE_AUTO_UPDATE=0 or ROGUE_PLUGIN_VERSION.
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
+  if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+    . "$_env_file"; break
+  fi
+done
 
 if [ "${ROGUE_AUTO_UPDATE:-1}" = "0" ]; then
   echo "ROGUE_AUTO_UPDATE=0, skipping"

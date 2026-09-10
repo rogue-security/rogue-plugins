@@ -112,20 +112,22 @@ function Get-BeaconLibrary {
 # ── credential resolution ──────────────────────────────────────────────────
 function Import-Credentials {
     $script:creds = @{}
-    foreach ($f in @((Join-Path $pluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-        foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $script:creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            }
-        }
-    }
-    # ROGUE_HEARTBEAT_MIN_INTERVAL rides this list so a process-env value still beats
-    # the files, which is what makes the resolved precedence identical to
-    # heartbeat.sh's.
     foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                    'ROGUE_HEARTBEAT_MIN_INTERVAL') {
         $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $script:creds[$k] = $val }
+    }
+    # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+    foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+        $fileVals = @{}
+        foreach ($line in (Get-Content -LiteralPath $f)) {
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+                $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+            }
+        }
+        if (-not $fileVals['ROGUE_API_KEY']) { continue }
+        foreach ($k in $fileVals.Keys) { $script:creds[$k] = $fileVals[$k] }
+        break
     }
     $script:apiKey = $script:creds['ROGUE_API_KEY']
 }

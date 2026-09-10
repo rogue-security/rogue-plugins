@@ -50,15 +50,19 @@ const HTTP_TIMEOUT_MS = 15000;
 const HOME = os.homedir() || process.env.HOME || process.env.USERPROFILE || ".";
 
 // ── env files ──────────────────────────────────────────────────────────────
-// Same platform-aware chain as every dispatcher (later file wins; process env wins
-// over all files). Takes the root as an argument rather than using shared.mjs's
-// EXT_ROOT-bound loadEnvFiles(), so the documented four-argument contract is real on
-// this implementation too and a support run can point at any install.
+// Same platform-aware rule as every dispatcher: the first env file holding
+// ROGUE_API_KEY is used alone, and its values override the process env. Takes the
+// root as an argument rather than using shared.mjs's EXT_ROOT-bound loadEnvFiles(),
+// so the documented four-argument contract is real on this implementation too and a
+// support run can point at any install.
 function loadEnv(pluginRoot) {
   const merged = {};
+  for (const varName of Object.keys(process.env)) {
+    if (varName.startsWith("ROGUE_") && process.env[varName]) merged[varName] = process.env[varName];
+  }
   const envFiles = [
-    pluginRoot ? path.join(pluginRoot, "env") : null,
     IS_WIN ? "C:\\ProgramData\\rogue\\env" : "/etc/rogue/env",
+    pluginRoot ? path.join(pluginRoot, "env") : null,
     path.join(HOME, ".rogue-env"),
   ];
   for (const envFile of envFiles) {
@@ -69,13 +73,14 @@ function loadEnv(pluginRoot) {
     } catch {
       continue;
     }
+    const vals = {};
     for (const line of text.split(/\r?\n/)) {
       const assignment = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (assignment) merged[assignment[1]] = shellUnquote(assignment[2]);
+      if (assignment) vals[assignment[1]] = shellUnquote(assignment[2]);
     }
-  }
-  for (const varName of Object.keys(process.env)) {
-    if (varName.startsWith("ROGUE_") && process.env[varName]) merged[varName] = process.env[varName];
+    if (!vals.ROGUE_API_KEY) continue;
+    Object.assign(merged, vals);
+    break;
   }
   return merged;
 }

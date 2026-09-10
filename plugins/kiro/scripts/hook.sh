@@ -34,12 +34,10 @@
 # decision blocks on the IDE only (model-mediated); timeout and exit 1 are both
 # fail-open. Hence the two transports.
 #
-# Credential resolution (later file wins, INCLUDING over the process env — the
-# files are sourced, and env-file.sh writes `export X=…`, so a value in a later
-# file overwrites whatever the hook inherited; hook.ps1 differs and lets the
-# process env beat every file):
-#   1. ${PLUGIN_ROOT}/env        (baked into a compiled customer plugin)
-#   2. /etc/rogue/env            (MDM-provisioned)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. /etc/rogue/env            (machine, MDM-provisioned)
+#   2. ${PLUGIN_ROOT}/env        (bundled into a compiled customer plugin)
 #   3. $HOME/.rogue-env          (per-user / installer-written)
 
 locate_plugin_root() {
@@ -50,9 +48,12 @@ locate_plugin_root() {
 load_env() {
   [ -r "${PLUGIN_ROOT}/scripts/env-file.sh" ] || return 0
   . "${PLUGIN_ROOT}/scripts/env-file.sh"
-  rogue_source_env "${PLUGIN_ROOT}/env"
-  rogue_source_env /etc/rogue/env
-  rogue_source_env "$HOME/.rogue-env"
+  # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+  for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_env_file" && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
 }
 
 canonical_event() {

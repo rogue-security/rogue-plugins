@@ -39,11 +39,13 @@ locate_plugin_root() {
   [ -n "$PLUGIN_ROOT" ] || PLUGIN_ROOT="."
 }
 
-# Same env precedence as hook.sh (later wins): bundled → MDM → per-user.
 load_env() {
-  [ -r "${PLUGIN_ROOT}/env" ] && . "${PLUGIN_ROOT}/env"
-  [ -r /etc/rogue/env ]       && . /etc/rogue/env
-  [ -r "$HOME/.rogue-env" ]   && . "$HOME/.rogue-env"
+  # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+  for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+    if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
   # Trim a trailing slash so a user-set ROGUE_BASE_URL with one doesn't yield
   # "//" in the composed URL (mirrors hook.ps1's .TrimEnd('/')). Guarded for
   # unset since this script runs under `set -u`.
