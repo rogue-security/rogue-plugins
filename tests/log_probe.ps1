@@ -8,8 +8,8 @@
 # functions ($logFile, Log, Rotate-Log) can never collide in one session.
 #
 # -Creds takes JSON rather than a hashtable because it crosses a process boundary.
-# It stands in for the merged map each dispatcher builds from
-# <root>/env → /etc/rogue|ProgramData → ~/.rogue-env → process env: the point of
+# It stands in for the map each dispatcher builds from the process env plus the
+# first env file holding ROGUE_API_KEY: the point of
 # the test is that Initialize-Logging reads THAT map, not $env: directly, which is
 # what lets an env file relocate the log on Windows.
 param(

@@ -116,6 +116,8 @@ jobs:
           TEST_SH=bash bash tests/test_setup_env.sh
           SH=bash bash tests/test_hook_sh_cursor.sh
           TEST_SH=dash bash tests/test_hook_sh_cursor.sh
+          TEST_SH=dash bash tests/test_env_first_found.sh
+          TEST_SH=bash bash tests/test_env_first_found.sh
       - name: Kiro installer (temp HOME, fake kiro-cli)
         # install.sh --kiro is the only installer that WRITES the vendor's hook
         # wiring itself (a hook file, Crew wrappers, a merge into every agent
@@ -228,7 +230,9 @@ jobs:
         # and nothing invoked it. It carries the subagent-attribution rules, whose
         # failure mode is a WRONG x-rogue-agent-id on a main-agent tool row: a
         # false attribution in an audit trail, which no other gate can see.
-        run: node --test tests/test_hook_mjs.mjs
+        run: |
+          node --test tests/test_hook_mjs.mjs
+          node --test tests/test_env_first_found.mjs
 
       - name: Log-shipper contract (sh)
         # The shipper is a byte-offset state machine over a file another process is
@@ -355,6 +359,7 @@ jobs:
           pwsh -NoProfile -File tests/test_auto_update_ps1.ps1
           pwsh -NoProfile -File tests/test_setup_env.ps1
           pwsh -NoProfile -File tests/test_env_file_trust.ps1
+          pwsh -NoProfile -File tests/test_env_first_found.ps1
           pwsh -NoProfile -File tests/test_install_kiro_ps1.ps1
           pwsh -NoProfile -File tests/test_status_kiro_ps1.ps1
 
@@ -414,6 +419,8 @@ jobs:
           powershell -NoProfile -File tests/test_setup_env.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_env_file_trust.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_env_first_found.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_install_kiro_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
