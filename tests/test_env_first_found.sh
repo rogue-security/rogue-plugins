@@ -122,6 +122,16 @@ for reader in $READERS; do
   check "$reader: keyless machine file is skipped"           "bundled-key" "$(key_sent)"
   check "$reader: ...and contributes nothing"                "http://bundled.invalid" "$(host_sent)"
 
+  # An empty ROGUE_API_KEY, quoted or bare, does not select the file (the ps1 and
+  # mjs readers parse the value; the sh gate must agree with them).
+  home="$(new_home "$reader-e")"
+  envf "$MACHINE" "export ROGUE_API_KEY=''" 'export ROGUE_BASE_URL=http://machine.invalid'
+  envf "$bundled" 'ROGUE_API_KEY=' 'export ROGUE_BASE_URL=http://bundled.invalid'
+  envf "$home/.rogue-env" 'export ROGUE_API_KEY=user-key' 'export ROGUE_BASE_URL=http://user.invalid'
+  run "$reader" "$home"
+  check "$reader: an empty key line does not select the file"  "user-key" "$(key_sent)"
+  check "$reader: ...and contributes nothing either"          "http://user.invalid" "$(host_sent)"
+
   # The chosen file overrides the process env; keys it does not set are kept.
   home="$(new_home "$reader-c")"
   rm -f "$MACHINE" "$bundled"
@@ -144,6 +154,10 @@ envf "$home/.rogue-env" 'export ROGUE_API_KEY=user-key'
 out="$(HOME="$home" ROGUE_API_KEY='' "$SH" "$T/plugins/rogue/scripts/statusline.sh")"
 case "$out" in *🟢*) got=green ;; *) got=other ;; esac
 check "statusline: keyless machine file falls through to the user key" green "$got"
+envf "$MACHINE" 'export ROGUE_API_KEY=""'
+out="$(HOME="$home" ROGUE_API_KEY='' "$SH" "$T/plugins/rogue/scripts/statusline.sh")"
+case "$out" in *🟢*) got=green ;; *) got=other ;; esac
+check "statusline: an empty machine key falls through to the user key" green "$got"
 rm -f "$home/.rogue-env"
 out="$(HOME="$home" ROGUE_API_KEY='' "$SH" "$T/plugins/rogue/scripts/statusline.sh")"
 case "$out" in *🔴*) got=red ;; *) got=other ;; esac

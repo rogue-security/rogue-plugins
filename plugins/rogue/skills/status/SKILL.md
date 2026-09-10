@@ -23,7 +23,7 @@ PLUGIN_ENV=$(find "$HOME/.claude/plugins" -name env -type f -path '*rogue*' 2>/d
 ROGUE_ENV_IN_USE=""
 # The first env file holding ROGUE_API_KEY is used alone.
 for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
 done
 EOF
 chmod +x /tmp/rogue-source-env.sh
@@ -36,6 +36,9 @@ PLUGIN_ENV=$(find "$HOME/.claude/plugins" -name env -type f -path '*rogue*' 2>/d
 [ -r /etc/rogue/env ]     && echo "  /etc/rogue/env  (MDM)"
 [ -r "$HOME/.rogue-env" ] && echo "  $HOME/.rogue-env  (per-user)"
 [ -z "$PLUGIN_ENV" ] && [ ! -r /etc/rogue/env ] && [ ! -r "$HOME/.rogue-env" ] && echo "  (none)"
+for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && echo "  $f  (no ROGUE_API_KEY, not read)"
+done
 echo "In use: ${ROGUE_ENV_IN_USE:-(none holds ROGUE_API_KEY)}"
 
 # Sanity check the resolved key
@@ -174,7 +177,7 @@ echo "--- recent hook activity ---"
 # called about.
 ROGUE_ENV_IN_USE=""
 for f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
 done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \

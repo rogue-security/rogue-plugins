@@ -86,7 +86,7 @@ fi
 # sourcing them is correct. The first file holding ROGUE_API_KEY is used alone:
 # machine, bundled, user.
 for _f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
-  if [ -r "$_f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_f"; then
+  if [ -r "$_f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_f"; then
     dbg "cred file in use: $_f"; . "$_f" 2>/dev/null; break
   else dbg "cred file skipped: $_f"; fi
 done

@@ -22,12 +22,15 @@ equivalents: read the key from `%USERPROFILE%\.rogue-env` (and
 ROGUE_ENV_IN_USE=""
 # The first env file holding ROGUE_API_KEY is used alone.
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
 done
 echo "Credential sources detected:"
 [ -r /etc/rogue/env ]     && echo "  /etc/rogue/env  (MDM)"
 [ -r "$HOME/.rogue-env" ] && echo "  $HOME/.rogue-env  (per-user)"
 [ ! -r /etc/rogue/env ] && [ ! -r "$HOME/.rogue-env" ] && echo "  (none)"
+for f in /etc/rogue/env "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && echo "  $f  (no ROGUE_API_KEY, not read)"
+done
 echo "In use: ${ROGUE_ENV_IN_USE:-(none holds ROGUE_API_KEY)}"
 [ -n "$ROGUE_API_KEY" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || echo "API key: not resolved"
 [ "${ROGUE_IDE_ALERT:-1}" = "0" ] && echo "ROGUE_IDE_ALERT=0  (JetBrains blocked-prompt alert disabled)"
@@ -43,7 +46,7 @@ Remove the line from `~/.rogue-env` to get the reason back.
 ## Step 2: Test connection + register heartbeat
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 PJ="$HOME/.copilot/installed-plugins/rogue-copilot/rogue/plugin.json"
 VER=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9][^"]*"' "$PJ" 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
@@ -68,7 +71,7 @@ is invalid; no response → check network reachability to `api.rogue.security`.
 ## Step 3: Fetch configuration
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 curl -s -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/config"
 ```
@@ -92,7 +95,7 @@ Each Rogue plugin logs to its **own** file under `~/.rogue/logs/`, so this reads
 # called about.
 ROGUE_ENV_IN_USE=""
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
 done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \

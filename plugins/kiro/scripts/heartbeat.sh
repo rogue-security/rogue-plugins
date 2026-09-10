@@ -42,7 +42,7 @@ load_env() {
   . "${PLUGIN_ROOT}/scripts/env-file.sh"
   # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
   for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
-    if rogue_env_is_trusted "$_env_file" && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
       . "$_env_file"; break
     fi
   done

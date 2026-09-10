@@ -17,12 +17,15 @@ PLUGIN_ENV=$(find "$HOME/.gemini" -maxdepth 5 -type f -name env -path '*rogue*' 
 ROGUE_ENV_IN_USE=""
 # The first env file holding ROGUE_API_KEY is used alone.
 for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
 done
 echo "Credential sources detected:"
 [ -n "$PLUGIN_ENV" ] && [ -r "$PLUGIN_ENV" ] && echo "  $PLUGIN_ENV  (plugin bundle)"
 [ -r /etc/rogue/env ]     && echo "  /etc/rogue/env  (MDM)"
 [ -r "$HOME/.rogue-env" ] && echo "  $HOME/.rogue-env  (per-user)"
+for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && echo "  $f  (no ROGUE_API_KEY, not read)"
+done
 echo "In use: ${ROGUE_ENV_IN_USE:-(none holds ROGUE_API_KEY)}"
 [ -n "$ROGUE_API_KEY" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || echo "API key: not resolved"
 ```
@@ -60,7 +63,7 @@ Hit the status endpoint with the resolved key. This validates the key, registers
 PLUGIN_ENV=$(find "$HOME/.gemini" -maxdepth 5 -type f -name env -path '*rogue*' 2>/dev/null | head -1)
 # The first env file holding ROGUE_API_KEY is used alone.
 for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }
 done
 VF=$(find "$HOME/.gemini" -maxdepth 5 -type f -name VERSION -path '*rogue*' 2>/dev/null | head -1)
 VER=$(head -n1 "$VF" 2>/dev/null | tr -d ' \r\n')
@@ -101,7 +104,7 @@ Report from the JSON response (HTTP 200 = connected): organization name, running
 PLUGIN_ENV=$(find "$HOME/.gemini" -maxdepth 5 -type f -name env -path '*rogue*' 2>/dev/null | head -1)
 # The first env file holding ROGUE_API_KEY is used alone.
 for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }
 done
 curl -s -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/config"
@@ -130,7 +133,7 @@ PLUGIN_ENV=$(find "$HOME/.gemini" -maxdepth 5 -type f -name env -path '*rogue*' 
 # called about.
 ROGUE_ENV_IN_USE=""
 for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
 done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \

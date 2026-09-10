@@ -297,8 +297,8 @@ load_env() {
   [ -r "$(dirname "$0")/env-file.sh" ] || return 0
   . "$(dirname "$0")/env-file.sh"
   for _env_file in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
-    if rogue_env_is_trusted "$_env_file" && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file" 2>/dev/null; then
-      . "$_env_file"; break
+    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file" 2>/dev/null; then
+      . "$_env_file" 2>/dev/null; break
     fi
   done
   return 0

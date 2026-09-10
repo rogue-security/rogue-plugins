@@ -31,7 +31,7 @@ date "+%F %T --- auto-update tick ---"
 # compiled/managed plugins pin flags like ROGUE_AUTO_UPDATE=0 or ROGUE_PLUGIN_VERSION.
 # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
 for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
-  if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+  if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
     . "$_env_file"; break
   fi
 done

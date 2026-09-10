@@ -18,16 +18,17 @@ Windows. There, the files are `C:\ProgramData\rogue\env` (MDM) and
 ## Step 1: Resolve credentials and report sources
 
 ```bash
-resolve() {
-  # The first env file holding ROGUE_API_KEY is used alone.
-  for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do
-    [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; echo "  in use: $f" >&2; break; }
-  done
-}
-resolve 2>/tmp/rogue-src
+ROGUE_ENV_IN_USE=""
+# The first env file holding ROGUE_API_KEY is used alone.
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do
+  [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
+done
 echo "Credential sources detected:"
-for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && echo "  $f"; done
-cat /tmp/rogue-src 2>/dev/null || echo "  (none holds ROGUE_API_KEY)"
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do
+  [ -r "$f" ] || continue
+  if grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f"; then echo "  $f"; else echo "  $f  (no ROGUE_API_KEY, not read)"; fi
+done
+echo "In use: ${ROGUE_ENV_IN_USE:-(none holds ROGUE_API_KEY)}"
 [ -n "${ROGUE_API_KEY:-}" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || echo "API key: not resolved"
 ```
 
@@ -42,7 +43,7 @@ version exists. Read the extension version from the manifest without `python3`
 (absent on a fresh macOS):
 
 ```bash
-for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 PJ="$HOME/.gemini/extensions/rogue/gemini-extension.json"
 VER=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9][^"]*"' "$PJ" 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 curl -s -w "\n%{http_code}" -X POST \
@@ -59,7 +60,7 @@ dashboard). No response → check network reachability to `api.rogue.security`.
 ## Step 3: Fetch configuration
 
 ```bash
-for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 curl -s -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/config"
 ```
@@ -73,7 +74,7 @@ Display:
 ## Step 4: Show identity + recent hook activity
 
 ```bash
-for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 echo "Actor email: ${ROGUE_ACTOR_EMAIL:-(unset)}"
 echo "Actor name:  ${ROGUE_ACTOR_NAME:-(unset)}"
 echo "--- recent hook activity ---"
@@ -85,7 +86,7 @@ echo "--- recent hook activity ---"
 # called about.
 ROGUE_ENV_IN_USE=""
 for f in /etc/rogue/env "$HOME/.gemini/extensions/rogue/env" "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
 done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \

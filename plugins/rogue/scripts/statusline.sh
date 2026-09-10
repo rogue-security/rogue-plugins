@@ -10,7 +10,7 @@
 set -u
 
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  if [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f"; then . "$f"; break; fi
+  if [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f"; then . "$f"; break; fi
 done
 
 if [ -n "${ROGUE_API_KEY:-}" ]; then

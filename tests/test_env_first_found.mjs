@@ -104,6 +104,20 @@ test("loadEnvFiles: a machine file without ROGUE_API_KEY is skipped whole", asyn
   }
 });
 
+test("loadEnvFiles: an empty ROGUE_API_KEY, quoted or bare, does not select the file", async () => {
+  const sb = sandbox();
+  try {
+    write(sb.machine, ["export ROGUE_API_KEY=''", "export ROGUE_BASE_URL=http://machine.invalid"]);
+    write(sb.bundled, ["ROGUE_API_KEY=", "export ROGUE_BASE_URL=http://bundled.invalid"]);
+    write(sb.user, ["export ROGUE_API_KEY=user-key", "export ROGUE_BASE_URL=http://user.invalid"]);
+    const env = await resolve(sb, {});
+    assert.equal(env.ROGUE_API_KEY, "user-key");
+    assert.equal(env.ROGUE_BASE_URL, "http://user.invalid");
+  } finally {
+    sb.cleanup();
+  }
+});
+
 test("loadEnvFiles: the chosen file overrides the process env; unset keys are kept", async () => {
   const sb = sandbox();
   try {

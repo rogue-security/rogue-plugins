@@ -688,7 +688,7 @@ configure_credentials() {
   # Pull anything already on disk into scope: the first env file holding
   # ROGUE_API_KEY, as the hooks read it.
   for _env_file in /etc/rogue/env "$ENV_FILE"; do
-    if [ -r "$_env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$_env_file"; then
+    if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
       . "$_env_file"; break
     fi
   done
@@ -830,7 +830,7 @@ write_statusline_script() {
 # teal bracketed label: 🟢 [Rogue Security] configured, 🔴 [Rogue Security] not.
 set -u
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  if [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f"; then . "$f"; break; fi
+  if [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f"; then . "$f"; break; fi
 done
 if [ -n "${ROGUE_API_KEY:-}" ]; then
   dot='🟢'

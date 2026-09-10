@@ -12,7 +12,8 @@ Verify the current Rogue Security integration. Reads one env file: the first of 
 ```bash
 # The first env file holding ROGUE_API_KEY is used alone.
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; echo "  in use: $f"; break; }
+  [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; echo "  in use: $f"; break; }
+  [ -r "$f" ] && echo "  $f  (no ROGUE_API_KEY, not read)"
 done
 [ -n "$ROGUE_API_KEY" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || { echo "API key: not resolved"; }
 ```
@@ -22,7 +23,7 @@ If `ROGUE_API_KEY` is empty, stop and tell the user to run `/rogue:setup`.
 ## Step 2: Ping the API
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 curl -s -w "\n%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
 ```
@@ -30,7 +31,7 @@ curl -s -w "\n%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" \
 ## Step 3: Fetch active config
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 curl -s -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/config"
 ```
@@ -40,7 +41,7 @@ Parse the JSON and show: mode (enforce/monitor), fail-open setting, active rules
 ## Step 4: Show identity + recent hook activity
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { . "$f"; break; }; done
+for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 echo "Actor email: ${ROGUE_ACTOR_EMAIL:-(unset)}"
 echo "Actor name:  ${ROGUE_ACTOR_NAME:-(unset)}"
 echo "--- recent hook activity ---"
@@ -52,7 +53,7 @@ echo "--- recent hook activity ---"
 # called about.
 ROGUE_ENV_IN_USE=""
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  [ -n "$f" ] && [ -r "$f" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=' "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
 done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \
