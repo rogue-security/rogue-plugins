@@ -216,6 +216,29 @@ ROOT_DIR="$FAKE_HOME"
 GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
 assert_actor "jane@devbox|jane" "missing git-identity.sh degrades to login@hostname"
 
+# ── Case 20: a CRLF ~/.gitconfig yields no trailing \r ─────────────────────
+# curl would put a bare CR in the actor header and a strict server rejects the
+# request; git-identity.ps1 and shared.mjs already drop it, so the shells must too.
+scenario
+write_gitconfig
+printf '[user]\r\n\temail = jane@corp.com\r\n\tname = Jane Dev\r\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "jane@corp.com|Jane Dev" ] || { echo "FAIL [crlf]: got <$(printf '%s' "$actual" | od -c | head -2)>" >&2; exit 1; }
+echo "  ok: CRLF line endings in the git config do not leak a \\r into the actor"
+
+# ── Case 21: `[include] path = /dev/stdin` must not drain the hook payload ─────
+# Every sh bridge resolves the actor BEFORE it reads the payload, so a parser
+# that inherits stdin would leave the server an empty body and the hook fails open.
+scenario
+write_gitconfig
+printf '[include]\n\tpath = /dev/stdin\n' > "$FAKE_HOME/.gitconfig"
+actual="$(printf '{"tool":"Bash"}' | HOME="$FAKE_HOME" XDG_CONFIG_HOME= PATH="$STUB:$PATH" USER= USERNAME= \
+  CLAUDE_PLUGIN_ROOT="$REPO/plugins/rogue" PLUGIN_ROOT="$REPO/plugins/codex" \
+  ROGUE_ACTOR_EMAIL= ROGUE_ACTOR_NAME= CLAUDE_CODE_USER_EMAIL= STUB_HOSTNAME=devbox STUB_WHOAMI=jane \
+  "$SH" -c '. "$1"; printf "%s|%s|%s" "$ROGUE_ACTOR_EMAIL" "$ROGUE_ACTOR_NAME" "$(cat)"' _ "$ACTOR")"
+[ "$actual" = 'jane@devbox|jane|{"tool":"Bash"}' ] || { echo "FAIL [stdin include]: got <$actual>" >&2; exit 1; }
+echo "  ok: an include of /dev/stdin reads nothing; the payload survives for the bridge"
+
 echo "── scripts/shared/actor.sh (codex copy) ──"
 ACTOR="$SHARED_ACTOR"
 
@@ -239,6 +262,17 @@ assert_actor "jane@devbox|jane" "login@hostname and login when no git identity e
 scenario
 HOST_NAME=""
 assert_actor "jane|jane" "login alone when the hostname is unavailable"
+
+scenario
+HOST_NAME=""; WHO=""
+assert_actor "unknown|unknown" "the unknown marker when login and hostname are both unavailable, never blank"
+
+scenario
+write_gitconfig
+printf '[user]\r\n\temail = jane@corp.com\r\n\tname = Jane Dev\r\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "jane@corp.com|Jane Dev" ] || { echo "FAIL [shared crlf]: got <$actual>" >&2; exit 1; }
+echo "  ok: CRLF git config read cleanly by the shared cascade"
 
 # ── The git binary was never run, in any case above ──────────────────────────
 if [ -s "$TRIPWIRE" ]; then

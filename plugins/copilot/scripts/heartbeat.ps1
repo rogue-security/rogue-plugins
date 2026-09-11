@@ -125,26 +125,19 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# ── actor resolution (mirrors actor.sh): creds → git config files → USERNAME/COMPUTERNAME
-$actorName  = $creds['ROGUE_ACTOR_NAME']
-$actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorName -or -not $actorEmail) {
-    # Git identity from the config files (scripts/git-identity.ps1), never git.exe.
-    $gitId = $null
-    try {
-        $gitLib = Join-Path $pluginRoot 'scripts\git-identity.ps1'
-        if (Test-Path -LiteralPath $gitLib) { $gitId = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $gitLib))) }
-    } catch {}
-    if ($gitId) {
-        if (-not $actorName)  { $actorName  = [string]$gitId.Name }
-        if (-not $actorEmail) { $actorEmail = [string]$gitId.Email }
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values.
+$actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+try {
+    $actorLib = Join-Path $pluginRoot 'scripts\actor.ps1'
+    if (Test-Path -LiteralPath $actorLib) {
+        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+        $actor = Resolve-RogueSharedActor $creds $pluginRoot
     }
-}
-if (-not $actorName) { $actorName = $env:USERNAME }
-if (-not $actorEmail) {
-    if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-    elseif ($env:USERNAME) { $actorEmail = $env:USERNAME } else { $actorEmail = $env:COMPUTERNAME }
-}
+} catch {}
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
 
 # ── plugin version (regex from manifest, no python) ────────────────────────
 $ver = 'unknown'

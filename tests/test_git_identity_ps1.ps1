@@ -5,6 +5,8 @@
 #      FILES (XDG then ~/.gitconfig, later wins, one level of [include] path).
 #   2. plugins/rogue/scripts/hook.ps1 Resolve-RogueActor: env file → git config
 #      files → <login>@<host>, loaded through the ROGUE_PS_LIB_ONLY seam.
+#   2b. scripts/shared/actor.ps1 Resolve-RogueSharedActor, the same three levels
+#      for codex/cursor/copilot/antigravity/kiro.
 #   3. No dispatcher or heartbeat shells out to git: a stub git ahead of PATH is a
 #      tripwire, and the sources are grepped for the old `& git config` call.
 #
@@ -15,6 +17,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($here, '..'))
 $lib  = [System.IO.Path]::Combine($repo, 'scripts', 'shared', 'git-identity.ps1')
 $hook = [System.IO.Path]::Combine($repo, 'plugins', 'rogue', 'scripts', 'hook.ps1')
+$sharedActor = [System.IO.Path]::Combine($repo, 'scripts', 'shared', 'actor.ps1')
 
 $fails = 0
 $count = 0
@@ -93,6 +96,12 @@ try {
     Assert-Eq $id.Name  'Xdg Me'        'a field only XDG carries survives'
 
     $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`r`n`temail = jane@corp.com`r`n`tname = Jane Dev`r`n"
+    $id = Read-GitId
+    Assert-Eq $id.Email 'jane@corp.com' 'CRLF file: no trailing CR on the email (same bytes as git-identity.sh)'
+    Assert-Eq $id.Name  'Jane Dev'      'CRLF file: no trailing CR on the name'
+
+    $h = New-TestHome
     $id = Read-GitId
     Assert-Eq $id.Email '' 'no config file: empty email, no error'
     Assert-Eq $id.Name  '' 'no config file: empty name, no error'
@@ -147,6 +156,47 @@ try {
 
     $a = Resolve-RogueActor @{} ([System.IO.Path]::Combine($h, 'no-such-plugin'))
     Assert-Eq $a.Email $loginAtHost 'a damaged install (no git-identity.ps1) degrades to login@host'
+
+    Write-Host '-- scripts/shared/actor.ps1 Resolve-RogueSharedActor: the three fallback levels --'
+    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $sharedActor)))
+    $codexRoot = [System.IO.Path]::Combine($repo, 'plugins', 'codex')
+    $sharedLogin = $env:USERNAME
+    if (-not $sharedLogin) { $sharedLogin = [Environment]::UserName }
+    $sharedHost = $env:COMPUTERNAME
+    if (-not $sharedHost) { $sharedHost = $dns }
+    $sharedLoginAtHost = if ($sharedHost) { "$sharedLogin@$sharedHost" } else { $sharedLogin }
+
+    $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`n`temail = jane@corp.com`n`tname = Jane Dev`n"
+    $a = Resolve-RogueSharedActor @{ ROGUE_ACTOR_EMAIL = 'mdm@corp.com'; ROGUE_ACTOR_NAME = 'MDM Provisioned' } $codexRoot
+    Assert-Eq $a.Email 'mdm@corp.com'    'shared level 1: env file email wins over the git identity'
+    Assert-Eq $a.Name  'MDM Provisioned' 'shared level 1: env file name wins over the git identity'
+
+    $a = Resolve-RogueSharedActor @{} $codexRoot
+    Assert-Eq $a.Email 'jane@corp.com' 'shared level 2: git config file email'
+    Assert-Eq $a.Name  'Jane Dev'      'shared level 2: git config file name'
+
+    $a = Resolve-RogueSharedActor @{ ROGUE_ACTOR_EMAIL = 'mdm@corp.com' } $codexRoot
+    Assert-Eq $a.Email 'mdm@corp.com' 'shared: fields resolve independently (email from env)'
+    Assert-Eq $a.Name  'Jane Dev'     'shared: fields resolve independently (name from git)'
+
+    $h = New-TestHome
+    $a = Resolve-RogueSharedActor @{} $codexRoot
+    Assert-Eq $a.Email $sharedLoginAtHost 'shared level 3: <login>@<host> when there is no git identity'
+    Assert-Eq $a.Name  $sharedLogin       'shared level 3: login as the name'
+    Assert-Eq ([bool]$a.Email) $true 'shared level 3: the email is never blank'
+
+    $a = Resolve-RogueSharedActor @{} ([System.IO.Path]::Combine($h, 'no-such-plugin'))
+    Assert-Eq $a.Email $sharedLoginAtHost 'shared: a damaged install (no git-identity.ps1) degrades to login@host'
+
+    Write-Host '-- every non-Claude bridge loads the shared cascade --'
+    foreach ($p in 'codex','copilot','antigravity','kiro','cursor') {
+        foreach ($f in 'hook.ps1','heartbeat.ps1') {
+            $src = [System.IO.Path]::Combine($repo, 'plugins', $p, 'scripts', $f)
+            if (-not (Test-Path -LiteralPath $src)) { continue }
+            Assert-Eq ((Get-Content -Raw -LiteralPath $src) -match 'Resolve-RogueSharedActor') $true "$p/$f resolves the actor through actor.ps1"
+        }
+    }
 
     Write-Host '-- no bridge shells out to git --'
     Assert-Eq (Test-Path -LiteralPath $tripMarker) $false 'git binary never invoked'

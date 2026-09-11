@@ -330,26 +330,19 @@ if (-not $url) {
     $url = "$($baseUrl.TrimEnd('/'))/api/v1/hooks/copilot"
 }
 
-# ── actor resolution (mirrors actor.sh): creds → git config files → USERNAME/COMPUTERNAME
-$actorName  = $creds['ROGUE_ACTOR_NAME']
-$actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorName -or -not $actorEmail) {
-    # Git identity from the config files (scripts/git-identity.ps1), never git.exe.
-    $gitId = $null
-    try {
-        $gitLib = Join-Path $PluginRoot 'scripts\git-identity.ps1'
-        if (Test-Path -LiteralPath $gitLib) { $gitId = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $gitLib))) }
-    } catch {}
-    if ($gitId) {
-        if (-not $actorName)  { $actorName  = [string]$gitId.Name }
-        if (-not $actorEmail) { $actorEmail = [string]$gitId.Email }
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values.
+$actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+try {
+    $actorLib = Join-Path $PluginRoot 'scripts\actor.ps1'
+    if (Test-Path -LiteralPath $actorLib) {
+        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+        $actor = Resolve-RogueSharedActor $creds $PluginRoot
     }
-}
-if (-not $actorName) { $actorName = $env:USERNAME }
-if (-not $actorEmail) {
-    if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-    elseif ($env:USERNAME) { $actorEmail = $env:USERNAME } else { $actorEmail = $env:COMPUTERNAME }
-}
+} catch {}
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
 
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────
 $payload = [Console]::In.ReadToEnd()

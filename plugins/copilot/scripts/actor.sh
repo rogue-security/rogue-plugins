@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Sourceable. Resolves ROGUE_ACTOR_{EMAIL,NAME} from a cascade.
-# Cascade: env → git config files (scripts/git-identity.sh) → login@hostname / login.
+# Cascade: env → git config files (scripts/git-identity.sh) → login@hostname / login
+# → marker "unknown", never blank.
 # Sourced by hook.sh and heartbeat.sh after PLUGIN_ROOT is set.
 
 if [ -z "${ROGUE_ACTOR_EMAIL:-}" ] || [ -z "${ROGUE_ACTOR_NAME:-}" ]; then
@@ -21,5 +22,7 @@ if [ -z "${ROGUE_ACTOR_EMAIL:-}" ] || [ -z "${ROGUE_ACTOR_NAME:-}" ]; then
   [ -n "${ROGUE_ACTOR_NAME:-}" ] || ROGUE_ACTOR_NAME="$_rogue_login"
   unset _rogue_login _rogue_host
 fi
+: "${ROGUE_ACTOR_EMAIL:=unknown}"
+: "${ROGUE_ACTOR_NAME:=unknown}"
 
 export ROGUE_ACTOR_EMAIL ROGUE_ACTOR_NAME

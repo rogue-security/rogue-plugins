@@ -183,27 +183,11 @@ BASE_URL="${ROGUE_BASE_URL:-https://api.rogue.security}"
 BASE_URL="${BASE_URL%/}"
 dbg "apiKey present (tail $(printf '%s' "$API_KEY" | tail -c 4 2>/dev/null)) baseUrl=$BASE_URL"
 
-# ── actor resolution: explicit creds → git config files → whoami/hostname ──
-# The git identity is read from the config files (scripts/git-identity.sh), never
-# by running git: on a Mac without the Command Line Tools `git` opens the installer.
-ROGUE_GIT_EMAIL=""; ROGUE_GIT_NAME=""
-if { [ -z "${ROGUE_ACTOR_NAME:-}" ] || [ -z "${ROGUE_ACTOR_EMAIL:-}" ]; } && [ -r "$PLUGIN_ROOT/scripts/git-identity.sh" ]; then
-  . "$PLUGIN_ROOT/scripts/git-identity.sh"
-  rogue_git_identity
-fi
-
-actor_name="${ROGUE_ACTOR_NAME:-}"
-[ -n "$actor_name" ] || actor_name="$ROGUE_GIT_NAME"
-[ -n "$actor_name" ] || actor_name="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
-
-actor_email="${ROGUE_ACTOR_EMAIL:-}"
-[ -n "$actor_email" ] || actor_email="$ROGUE_GIT_EMAIL"
-if [ -z "$actor_email" ]; then
-  _u="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
-  _h="$(hostname 2>/dev/null)"
-  if [ -n "$_u" ] && [ -n "$_h" ]; then actor_email="$_u@$_h"
-  else actor_email="${_u:-$_h}"; fi
-fi
+# ── actor resolution: env file → git config files → login@hostname → unknown ─
+# scripts/actor.sh is the shared cascade (synced from scripts/shared/actor.sh).
+[ -r "$PLUGIN_ROOT/scripts/actor.sh" ] && . "$PLUGIN_ROOT/scripts/actor.sh"
+actor_name="${ROGUE_ACTOR_NAME:-unknown}"
+actor_email="${ROGUE_ACTOR_EMAIL:-unknown}"
 
 # ── install identity: host + plugin version ────────────────────────────────
 # The fleet roster keys an install on host + actor + family + agent, and until

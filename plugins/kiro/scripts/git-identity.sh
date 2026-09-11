@@ -8,10 +8,12 @@
 # followed by its [include] path entries (one level; includeIf is not evaluated).
 
 # Print the last value of [$2] $3 in git config file $1 and its includes.
+# awk reads stdin from /dev/null: an `[include] path = /dev/stdin` would otherwise
+# drain the hook payload the bridge has not read yet.
 _rogue_gitcfg_value() {
   [ -r "$1" ] || return 0
   awk -v main="$1" -v dir="${1%/*}" -v home="$HOME" -v section="$2" -v key="$3" '
-    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function value(s) {
       s = trim(s)
       if (substr(s, 1, 1) == "\"") { s = substr(s, 2); sub(/".*$/, "", s); return s }
@@ -39,7 +41,7 @@ _rogue_gitcfg_value() {
       close(file)
     }
     BEGIN { scan(main, 0); if (found != "") print found }
-  ' 2>/dev/null
+  ' </dev/null 2>/dev/null
 }
 
 rogue_git_identity() {

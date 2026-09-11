@@ -250,7 +250,7 @@ function Select-ActorValue {
     return ''
 }
 
-function Get-RogueGitIdentity {
+function Read-RogueGitIdentity {
     # user.email / user.name from the git config FILES through scripts/git-identity.ps1,
     # never git.exe (one rule with actor.sh). Empty fields when the library or the
     # files are missing.
@@ -282,7 +282,7 @@ function Resolve-RogueActor {
     $name  = Select-ActorValue @($Creds['ROGUE_ACTOR_NAME'], (($hostMail -split '@')[0]))
     $email = Select-ActorValue @($Creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
     if (-not $name -or -not $email) {
-        $git = Get-RogueGitIdentity $PluginRoot
+        $git = Read-RogueGitIdentity $PluginRoot
         $name  = Select-ActorValue @($name, [string]$git.Name)
         $email = Select-ActorValue @($email, [string]$git.Email)
     }
