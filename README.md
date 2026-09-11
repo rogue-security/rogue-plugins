@@ -125,6 +125,10 @@ System-wide MDM deployment can drop the same exports into `/etc/rogue/env` —
 hooks check that path first, and when it holds `ROGUE_API_KEY` they read no other
 file. Values in the file in use override the process environment.
 
+When the file in use carries no `ROGUE_ACTOR_*`, every hook resolves the actor
+at fire time: `user.email` / `user.name` from `~/.gitconfig` (read as a file;
+`git` itself is never run), then `<login>@<hostname>`.
+
 To revoke: `rm ~/.rogue-env` (per-user) or `sudo rm /etc/rogue/env` (MDM).
 
 ## False positive escape hatch

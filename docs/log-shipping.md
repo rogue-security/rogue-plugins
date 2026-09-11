@@ -50,9 +50,9 @@ and `agent_family`. A shipped log chunk carrying those same fields is attributab
 with no `machine_id` at all — provided the shipper uses the *same* values, which is a
 contract and not a coincidence: it **inherits** them from the caller rather than
 running its own cascade. Cursor and Gemini keep their actor resolution inline
-(shell locals / module locals) and their fallbacks differ from `actor.sh`'s, so an
-independently-resolving shipper would produce a second identity for the same machine
-and orphan the logs. See **The actor is passed IN** in
+(shell locals / module locals) and the Claude bridge's `actor.sh` screens sandbox
+identities the others do not, so an independently-resolving shipper could produce a
+second identity for the same machine and orphan the logs. See **The actor is passed IN** in
 [plugin-log-shipper.md](plugin-log-shipper.md).
 
 **Correction to an earlier version of this section**, which claimed the roster
