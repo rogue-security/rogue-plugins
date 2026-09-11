@@ -330,13 +330,22 @@ if (-not $url) {
     $url = "$($baseUrl.TrimEnd('/'))/api/v1/hooks/copilot"
 }
 
-# ── actor resolution (mirrors actor.sh) ────────────────────────────────────
-$actorName = $creds['ROGUE_ACTOR_NAME']
-if (-not $actorName) { try { $actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorName) { $actorName = $env:USERNAME }
-
+# ── actor resolution (mirrors actor.sh): creds → git config files → USERNAME/COMPUTERNAME
+$actorName  = $creds['ROGUE_ACTOR_NAME']
 $actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorEmail) { try { $actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
+if (-not $actorName -or -not $actorEmail) {
+    # Git identity from the config files (scripts/git-identity.ps1), never git.exe.
+    $gitId = $null
+    try {
+        $gitLib = Join-Path $PluginRoot 'scripts\git-identity.ps1'
+        if (Test-Path -LiteralPath $gitLib) { $gitId = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $gitLib))) }
+    } catch {}
+    if ($gitId) {
+        if (-not $actorName)  { $actorName  = [string]$gitId.Name }
+        if (-not $actorEmail) { $actorEmail = [string]$gitId.Email }
+    }
+}
+if (-not $actorName) { $actorName = $env:USERNAME }
 if (-not $actorEmail) {
     if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
     elseif ($env:USERNAME) { $actorEmail = $env:USERNAME } else { $actorEmail = $env:COMPUTERNAME }

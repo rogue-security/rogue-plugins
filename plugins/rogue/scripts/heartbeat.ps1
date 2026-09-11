@@ -167,40 +167,42 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# -- actor resolution (mirrors actor.sh / hook.ps1: first non-synthetic wins) -
+# -- actor resolution (mirrors actor.sh / hook.ps1 Resolve-RogueActor) --------
 # Screen the WHOLE address before splitting it. Taking the local-part first
 # smuggles the sandbox identity past the screen: noreply@anthropic.com is
 # rejected as an email, but its local-part "noreply" is not on the list.
 $hostMail = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
-$actorName = Select-ActorValue @(
-    $creds['ROGUE_ACTOR_NAME'],
-    (($hostMail -split '@')[0])
-)
-if (-not $actorName) {
-    $gitName = ''
-    try { $gitName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {}
-    # POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
-    # to whoami.exe: its output is DOMAIN\user, a different identity string that
-    # would re-fingerprint every existing roster row, and it costs a process per
-    # hook. [Environment]::UserName is the true twin — it reads the process token,
-    # so it still answers in the service contexts where USERNAME is unset.
-    $actorName = Select-ActorValue @($gitName, $env:USERNAME, [Environment]::UserName)
-}
-if (-not $actorName) { $actorName = 'unknown' }
-
+$actorName  = Select-ActorValue @($creds['ROGUE_ACTOR_NAME'], (($hostMail -split '@')[0]))
 $actorEmail = Select-ActorValue @($creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
-if (-not $actorEmail) {
-    $gitEmail = ''
-    try { $gitEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {}
-    $actorEmail = Select-ActorValue @($gitEmail)
+if (-not $actorName -or -not $actorEmail) {
+    # Git identity from the config files (scripts/git-identity.ps1), never git.exe.
+    $gitId = $null
+    try {
+        $gitLib = Join-Path $pluginRoot 'scripts\git-identity.ps1'
+        if (Test-Path -LiteralPath $gitLib) { $gitId = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $gitLib))) }
+    } catch {}
+    if ($gitId) {
+        $actorName  = Select-ActorValue @($actorName, [string]$gitId.Name)
+        $actorEmail = Select-ActorValue @($actorEmail, [string]$gitId.Email)
+    }
 }
+# POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
+# to whoami.exe: its output is DOMAIN\user, a different identity string that
+# would re-fingerprint every existing roster row, and it costs a process per
+# hook. [Environment]::UserName is the true twin - it reads the process token,
+# so it still answers in the service contexts where USERNAME is unset.
+$login = Select-ActorValue @($env:USERNAME, [Environment]::UserName)
+if (-not $actorName) { $actorName = $login }
+if (-not $actorName) { $actorName = 'unknown' }
 if (-not $actorEmail) {
     # Same fallback the roster host below already uses: COMPUTERNAME can be unset
     # in service contexts, where the sh twin's `hostname` still answers.
     $dnsHost = ''
     try { $dnsHost = [System.Net.Dns]::GetHostName() } catch {}
     $hostForActor = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
-    if ($hostForActor) { $actorEmail = "unknown@$hostForActor" } else { $actorEmail = 'unknown' }
+    $who = $login
+    if (-not $who) { $who = 'unknown' }
+    if ($hostForActor) { $actorEmail = "$who@$hostForActor" } else { $actorEmail = $who }
 }
 
 # -- plugin version (regex from manifest, no python) ------------------------

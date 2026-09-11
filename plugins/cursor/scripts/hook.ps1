@@ -817,13 +817,22 @@ $baseUrl = $creds['ROGUE_BASE_URL']
 if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# ── actor resolution: explicit creds → git config → username/hostname ──────
-$actorName = $creds['ROGUE_ACTOR_NAME']
-if (-not $actorName) { try { $actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorName) { $actorName = $env:USERNAME }
-
+# ── actor resolution: explicit creds → git config files → username/hostname ─
+$actorName  = $creds['ROGUE_ACTOR_NAME']
 $actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorEmail) { try { $actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
+if (-not $actorName -or -not $actorEmail) {
+    # Git identity from the config files (scripts/git-identity.ps1), never git.exe.
+    $gitId = $null
+    try {
+        $gitLib = Join-Path $pluginRoot 'scripts\git-identity.ps1'
+        if (Test-Path -LiteralPath $gitLib) { $gitId = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $gitLib))) }
+    } catch {}
+    if ($gitId) {
+        if (-not $actorName)  { $actorName  = [string]$gitId.Name }
+        if (-not $actorEmail) { $actorEmail = [string]$gitId.Email }
+    }
+}
+if (-not $actorName) { $actorName = $env:USERNAME }
 if (-not $actorEmail) {
     if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
     elseif ($env:USERNAME) { $actorEmail = $env:USERNAME }
@@ -1092,10 +1101,9 @@ if ($null -ne $hbUnthrottled) {
     # alone, a long session's log never left the disk.
     #
     # Every value travels as an environment variable, so the command is a constant
-    # with nothing to escape. The actor is passed in, never re-resolved: Cursor's
-    # cascade ends at "$env:USERNAME@$env:COMPUTERNAME" where actor.sh ends at the
-    # hostname, so a second cascade would key the log's source row differently
-    # from the roster row just posted.
+    # with nothing to escape. The actor is passed in, never re-resolved: a second
+    # cascade could key the log's source row differently from the roster row just
+    # posted.
     $shipScript = Join-Path $pluginRoot 'scripts\ship-logs.ps1'
     if (Test-Path -LiteralPath $shipScript) {
         try {

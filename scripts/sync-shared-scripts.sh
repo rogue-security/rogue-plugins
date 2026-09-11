@@ -42,6 +42,8 @@ ROWS=(
   "beacon.ps1|rogue codex cursor copilot antigravity kiro"
   "env-file.sh|rogue codex cursor copilot antigravity kiro"
   "env-file.ps1|rogue codex cursor copilot antigravity kiro"
+  "git-identity.sh|rogue codex cursor copilot antigravity kiro"
+  "git-identity.ps1|rogue codex cursor copilot antigravity kiro"
   "actor.sh|codex copilot antigravity kiro"
 )
 

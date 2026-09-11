@@ -621,7 +621,7 @@ require_api_key() {
 }
 
 # ROGUE_ACTOR_EMAIL / ROGUE_ACTOR_NAME, resolved by the shared cascade
-# (env → git config --global → hostname/whoami).
+# (env → git config files → login@hostname / login).
 load_actor() {
   [ -r "${PLUGIN_ROOT}/scripts/actor.sh" ] && . "${PLUGIN_ROOT}/scripts/actor.sh"
   return 0

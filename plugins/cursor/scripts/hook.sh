@@ -183,15 +183,21 @@ BASE_URL="${ROGUE_BASE_URL:-https://api.rogue.security}"
 BASE_URL="${BASE_URL%/}"
 dbg "apiKey present (tail $(printf '%s' "$API_KEY" | tail -c 4 2>/dev/null)) baseUrl=$BASE_URL"
 
-# ── actor resolution: explicit creds → git config → whoami/hostname ────────
-_git_cfg() { git config --global "$1" 2>/dev/null; }
+# ── actor resolution: explicit creds → git config files → whoami/hostname ──
+# The git identity is read from the config files (scripts/git-identity.sh), never
+# by running git: on a Mac without the Command Line Tools `git` opens the installer.
+ROGUE_GIT_EMAIL=""; ROGUE_GIT_NAME=""
+if { [ -z "${ROGUE_ACTOR_NAME:-}" ] || [ -z "${ROGUE_ACTOR_EMAIL:-}" ]; } && [ -r "$PLUGIN_ROOT/scripts/git-identity.sh" ]; then
+  . "$PLUGIN_ROOT/scripts/git-identity.sh"
+  rogue_git_identity
+fi
 
 actor_name="${ROGUE_ACTOR_NAME:-}"
-[ -n "$actor_name" ] || actor_name="$(_git_cfg user.name)"
+[ -n "$actor_name" ] || actor_name="$ROGUE_GIT_NAME"
 [ -n "$actor_name" ] || actor_name="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
 
 actor_email="${ROGUE_ACTOR_EMAIL:-}"
-[ -n "$actor_email" ] || actor_email="$(_git_cfg user.email)"
+[ -n "$actor_email" ] || actor_email="$ROGUE_GIT_EMAIL"
 if [ -z "$actor_email" ]; then
   _u="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
   _h="$(hostname 2>/dev/null)"
@@ -782,9 +788,9 @@ if [ -n "$hb_unthrottled" ]; then
   # The actor MUST be passed explicitly. Unlike the other plugins, which get it
   # from actor.sh (which exports), this dispatcher resolves the actor into plain
   # shell LOCALS - so without this prefix the child would inherit nothing, find no
-  # identity, and skip. It also must not re-resolve: Cursor's own cascade ends at
-  # "$USER@$(hostname)" where actor.sh ends at `hostname`, so a re-resolve here
-  # would key the log's source row differently from the roster row just posted.
+  # identity, and skip. It also must not re-resolve: a second cascade (rogue's
+  # actor.sh screens sandbox identities, for one) could key the log's source row
+  # differently from the roster row just posted.
   if [ -r "$PLUGIN_ROOT/scripts/ship-logs.sh" ]; then
     ( ROGUE_ACTOR_EMAIL="$actor_email" ROGUE_ACTOR_NAME="$actor_name" \
         sh "$PLUGIN_ROOT/scripts/ship-logs.sh" \

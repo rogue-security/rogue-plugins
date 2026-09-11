@@ -290,14 +290,23 @@ function Resolve-Url {
     }
 }
 
-# ── actor resolution (mirrors actor.sh) ────────────────────────────────────
+# ── actor resolution (mirrors actor.sh): creds → git config files → USERNAME/COMPUTERNAME
 function Resolve-Actor {
-    $script:actorName = $creds['ROGUE_ACTOR_NAME']
-    if (-not $script:actorName) { try { $script:actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-    if (-not $script:actorName) { $script:actorName = $env:USERNAME }
-
+    $script:actorName  = $creds['ROGUE_ACTOR_NAME']
     $script:actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-    if (-not $script:actorEmail) { try { $script:actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
+    if (-not $script:actorName -or -not $script:actorEmail) {
+        # Git identity from the config files (scripts/git-identity.ps1), never git.exe.
+        $gitId = $null
+        try {
+            $gitLib = Join-Path $script:pluginRoot 'scripts\git-identity.ps1'
+            if (Test-Path -LiteralPath $gitLib) { $gitId = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $gitLib))) }
+        } catch {}
+        if ($gitId) {
+            if (-not $script:actorName)  { $script:actorName  = [string]$gitId.Name }
+            if (-not $script:actorEmail) { $script:actorEmail = [string]$gitId.Email }
+        }
+    }
+    if (-not $script:actorName) { $script:actorName = $env:USERNAME }
     if (-not $script:actorEmail) {
         if ($env:USERNAME -and $env:COMPUTERNAME) { $script:actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
         elseif ($env:USERNAME) { $script:actorEmail = $env:USERNAME } else { $script:actorEmail = $env:COMPUTERNAME }

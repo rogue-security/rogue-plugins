@@ -15,7 +15,7 @@
 // One cross-platform script replaces the sh + PowerShell dual-dispatcher used by
 // the Claude/Codex/Cursor plugins: Gemini CLI guarantees Node 20+ on PATH (every
 // install method requires it; Homebrew declares `node` as a dependency), so we
-// use Node built-ins only (global fetch, node:fs/os/path/child_process) — no
+// use Node built-ins only (global fetch, node:fs/path/child_process) — no
 // curl, no jq, no dependencies, no build step.
 //
 // Fail-open by design: any missing key / network error / bad response prints
@@ -23,7 +23,6 @@
 // hook contract; everything else goes to the log file.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
@@ -31,7 +30,7 @@ import {
   SCRIPT_DIR,
   SURFACE,
   loadEnvFiles,
-  gitConfig,
+  resolveActor,
   installId,
 } from "./shared.mjs";
 
@@ -141,24 +140,6 @@ function log(msg) {
   } catch {
     /* logging is best-effort */
   }
-}
-
-// Actor cascade (mirrors scripts/actor.sh): env → git --global → host/user.
-function resolveActor(env) {
-  const email =
-    env.ROGUE_ACTOR_EMAIL ||
-    gitConfig("user.email") ||
-    os.hostname() ||
-    "unknown";
-  let name = env.ROGUE_ACTOR_NAME || gitConfig("user.name");
-  if (!name) {
-    try {
-      name = os.userInfo().username;
-    } catch {
-      name = "unknown";
-    }
-  }
-  return { email, name: name || "unknown" };
 }
 
 // ── Detached heartbeat (SessionStart + AfterAgent) ──────────────────────────

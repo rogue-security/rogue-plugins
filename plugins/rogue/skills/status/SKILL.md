@@ -203,12 +203,13 @@ missing file with a healthy connection just means no events have fired yet.
 If either is unset:
 
 - **A real address and name** — nothing to do.
-- **`unknown@<host>` / `unknown`** — no usable identity was found anywhere: the
-  cascade tried `ROGUE_ACTOR_*`, `CLAUDE_CODE_USER_EMAIL`, `git config --global`
-  and `whoami`, and either found them empty or rejected them as the sandbox's
-  synthetic `Claude <noreply@anthropic.com>`. Events still POST and are still
-  enforced; they are just attributed to a marker instead of a person. Fix by
-  setting a real git identity, or by provisioning `ROGUE_ACTOR_*` explicitly:
+- **`<login>@<host>` / `<login>`** — no identity was found in the env file,
+  `CLAUDE_CODE_USER_EMAIL` or the git config files (`~/.gitconfig`, read as a
+  file), so the login name stands in. **`unknown@<host>` / `unknown`** means even
+  the login was rejected as the sandbox's synthetic `Claude <noreply@anthropic.com>`.
+  Events still POST and are still enforced; they are just attributed to a marker
+  instead of a person. Fix by setting a real git identity, or by provisioning
+  `ROGUE_ACTOR_*` explicitly:
   - **Managed deployment**: the MDM script (`mdm-provision-actor.sh`) hasn't run
     yet or ran with empty placeholders. Force an enforcement run on your MDM
     (Kandji "Run library item now", `sudo jamf policy`).
@@ -443,23 +444,10 @@ $hookPs1 = Get-ChildItem "$env:USERPROFILE\.claude\plugins" -Recurse -Filter hoo
 $actorEmail = [string]$creds['ROGUE_ACTOR_EMAIL']; $actorName = [string]$creds['ROGUE_ACTOR_NAME']
 if ($hookPs1) {
   $env:ROGUE_PS_LIB_ONLY = '1'; . $hookPs1.FullName; $env:ROGUE_PS_LIB_ONLY = $null
-  # Mirrors the cascade in hook.ps1 / heartbeat.ps1 — keep all three in step.
-  $hostMail  = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
-  $actorName = Select-ActorValue @($creds['ROGUE_ACTOR_NAME'], (($hostMail -split '@')[0]))
-  if (-not $actorName) {
-    $gn = ''; try { $gn = (& git config --global user.name 2>$null | Out-String).Trim() } catch {}
-    $actorName = Select-ActorValue @($gn, $env:USERNAME, [Environment]::UserName)
-  }
-  if (-not $actorName) { $actorName = 'unknown' }
-  $actorEmail = Select-ActorValue @($creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
-  if (-not $actorEmail) {
-    $ge = ''; try { $ge = (& git config --global user.email 2>$null | Out-String).Trim() } catch {}
-    $actorEmail = Select-ActorValue @($ge)
-  }
-  if (-not $actorEmail) {
-    $h = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
-    if ($h) { $actorEmail = "unknown@$h" } else { $actorEmail = 'unknown' }
-  }
+  # The very cascade hook.ps1 runs (env file -> CLAUDE_CODE_USER_EMAIL -> git config
+  # files -> login@host), so this can never report a different actor than the hooks.
+  $a = Resolve-RogueActor $creds (Split-Path (Split-Path $hookPs1.FullName -Parent) -Parent)
+  $actorEmail = [string]$a.Email; $actorName = [string]$a.Name
 } else {
   'WARNING: hook.ps1 not found - reporting raw env values, which may be a sandbox identity'
 }
