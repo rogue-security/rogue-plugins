@@ -173,11 +173,12 @@ BLOCK_BODY='{"decision":"block","reason":"PII detected"}'
 # else — critically, no osascript. Cases put their own stub ahead of it, so the
 # capability probe sees exactly what the case intends. Listing the tools
 # explicitly (rather than filtering /usr/bin) also documents the dispatcher's
-# real dependency surface: hook.sh + actor.sh + install-id.sh + security-alert.sh.
+# real dependency surface: hook.sh + actor.sh + git-identity.sh + install-id.sh +
+# security-alert.sh. No git: the identity comes from the config files.
 SANDBOX_BIN="$(mktemp -d)"
 # "$SH" is in the list because TEST_SH=dash names an interpreter that is not
 # called `sh` — without it the sandboxed PATH cannot find the shell under test.
-for tool in "$SH" sh bash env curl date mkdir dirname tr grep sed head cat hostname whoami git uname sleep; do
+for tool in "$SH" sh bash env curl date mkdir dirname tr grep sed head cat hostname whoami awk uname sleep; do
   src="$(command -v "$tool" 2>/dev/null)" || continue
   [ -n "$src" ] && ln -sf "$src" "$SANDBOX_BIN/$tool"
 done

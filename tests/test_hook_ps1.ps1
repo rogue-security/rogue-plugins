@@ -135,7 +135,7 @@ Assert-Selected @('mdm@corp.com', 'real.user@corp.com')          'mdm@corp.com' 
 Assert-Selected @('Claude', 'claude code', '  ')                 ''                   'all-synthetic yields empty (caller emits the unknown marker)'
 
 # ── last-resort fallbacks: parity with the POSIX cascade ───────────────────
-# actor.sh ends at `whoami` / `hostname`; the PowerShell twin must still resolve
+# actor.sh ends at `<login>@<hostname>`; the PowerShell twin must still resolve
 # a real identity when USERNAME or COMPUTERNAME is unset (service contexts),
 # rather than skipping straight to the unknown marker. It does NOT shell out to
 # whoami.exe: that prints DOMAIN\user, which is a different identity string and
@@ -152,16 +152,24 @@ Assert-Selected @('', (($labMail -split '@')[0])) ''          'synthetic host em
 $labMail = Select-ActorValue @('jane.doe@corp.com')
 Assert-Selected @('', (($labMail -split '@')[0])) 'jane.doe'  'real host email still yields its local-part'
 
-# The cascade itself lives below the ROGUE_PS_LIB_ONLY seam (its dispatcher body
-# only runs on Windows), so its wiring is asserted structurally here: a silent
-# drop of either fallback is exactly the regression this covers.
+# hook.ps1's cascade (Resolve-RogueActor) is driven end to end in
+# tests/test_git_identity_ps1.ps1; heartbeat.ps1 carries an inline copy whose
+# dispatcher body only runs on Windows, so both are pinned structurally here: a
+# silent drop of either fallback is exactly the regression this covers.
 foreach ($f in @('hook.ps1', 'heartbeat.ps1')) {
     $src = Get-Content -Raw -LiteralPath ([System.IO.Path]::Combine($here, '..', 'plugins', 'rogue', 'scripts', $f))
     $script:count++
-    if ($src -match [regex]::Escape('Select-ActorValue @($gitName, $env:USERNAME, [Environment]::UserName)')) {
-        Write-Host "  ok: $f name cascade falls back to the process token user"
+    if ($src -match [regex]::Escape('Select-ActorValue @($env:USERNAME, [Environment]::UserName)')) {
+        Write-Host "  ok: $f login falls back to the process token user"
     } else {
-        Write-Host "FAIL [$f]: name cascade does not fall back to [Environment]::UserName"
+        Write-Host "FAIL [$f]: login does not fall back to [Environment]::UserName"
+        $script:fails++
+    }
+    $script:count++
+    if ($src -match [regex]::Escape("scripts\git-identity.ps1") -and $src -notmatch '&\s*git\s') {
+        Write-Host "  ok: $f reads the git identity from the config files, never git.exe"
+    } else {
+        Write-Host "FAIL [$f]: git identity is not read through git-identity.ps1"
         $script:fails++
     }
     $script:count++
@@ -187,7 +195,7 @@ foreach ($f in @('hook.ps1', 'heartbeat.ps1')) {
 # It cannot run here (it reads $env:USERPROFILE and posts), so assert its shape.
 $skill = Get-Content -Raw -LiteralPath ([System.IO.Path]::Combine($here, '..', 'plugins', 'rogue', 'skills', 'status', 'SKILL.md'))
 $script:count++
-if ($skill -match [regex]::Escape('$env:ROGUE_PS_LIB_ONLY') -and $skill -match 'Select-ActorValue') {
+if ($skill -match [regex]::Escape('$env:ROGUE_PS_LIB_ONLY') -and $skill -match 'Resolve-RogueActor' -and $skill -notmatch '&\s*git\s') {
     Write-Host "  ok: status skill resolves the actor through hook.ps1's screen"
 } else {
     Write-Host "FAIL: status skill does not load hook.ps1's actor screen"

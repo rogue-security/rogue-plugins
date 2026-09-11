@@ -349,6 +349,7 @@ jobs:
         run: |
           set -euo pipefail
           pwsh -NoProfile -File tests/test_hook_ps1.ps1
+          pwsh -NoProfile -File tests/test_git_identity_ps1.ps1
           pwsh -NoProfile -File tests/test_hook_ps1_copilot.ps1
           pwsh -NoProfile -File tests/test_hook_ps1_cursor.ps1
           pwsh -NoProfile -File tests/test_hook_ps1_antigravity.ps1
@@ -399,6 +400,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           powershell -NoProfile -File tests/test_hook_ps1.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_git_identity_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_hook_ps1_copilot.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
