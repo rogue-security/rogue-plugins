@@ -59,6 +59,7 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 STATUSLINE_PATH="$CONFIG_DIR/hooks/rogue-statusline.sh"
 SETTINGS_PATH="$CONFIG_DIR/settings.json"
 ENV_FILE="$HOME/.rogue-env"
+MACHINE_ENV_FILE="/etc/rogue/env"
 
 NON_INTERACTIVE="${ROGUE_NON_INTERACTIVE:-0}"
 # Explicit agent selection via --claude/--codex/--cursor. Empty = auto-detect all.
@@ -676,22 +677,27 @@ key_hint() { # key_hint <key>
   if [ "${#k}" -le 8 ]; then printf '%s' "$k"; else printf '%s…' "${k:0:8}"; fi
 }
 
+env_file_has_key() { # env_file_has_key <file>
+  [ -r "$1" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$1"
+}
+
 configure_credentials() {
+  # The hooks read a keyed machine env file alone, so a user env file written
+  # here would never be consulted.
+  if env_file_has_key "$MACHINE_ENV_FILE"; then
+    ok "Credentials come from the machine env file ${C_DIM}$MACHINE_ENV_FILE${C_RESET} — no API key prompt, $ENV_FILE not written"
+    return
+  fi
+
   # Capture explicit input (CLI flags / env vars) BEFORE sourcing the on-disk
-  # files — otherwise a stored key would clobber a key the caller passed to
+  # file — otherwise a stored key would clobber a key the caller passed to
   # rotate it. Explicit user intent wins; on-disk is the fallback.
   local flag_key="${ROGUE_API_KEY:-}"
   local flag_email="${ROGUE_ACTOR_EMAIL:-}"
   local flag_name="${ROGUE_ACTOR_NAME:-}"
   local flag_base_url="$ROGUE_BASE_URL"
 
-  # Pull anything already on disk into scope: the first env file holding
-  # ROGUE_API_KEY, as the hooks read it.
-  for _env_file in /etc/rogue/env "$ENV_FILE"; do
-    if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
-      . "$_env_file"; break
-    fi
-  done
+  ! env_file_has_key "$ENV_FILE" || . "$ENV_FILE"
 
   [ "$BASE_URL_EXPLICIT" = "1" ] && ROGUE_BASE_URL="$flag_base_url"
 
@@ -1053,7 +1059,7 @@ main() {
     [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
   fi
 
-  # Credentials once — every plugin reads the shared ~/.rogue-env.
+  # Credentials once — every plugin reads the machine env file, else the shared ~/.rogue-env.
   configure_credentials
 
   for a in $agents; do
