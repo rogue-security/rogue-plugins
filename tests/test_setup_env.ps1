@@ -189,8 +189,10 @@ $installer = Get-Content -Raw -LiteralPath (Join-Path $repo 'install.ps1')
 Check 'install.ps1: merges existing lines' $true ($installer -match 'foreach \(\$line in \(Get-Content -LiteralPath \$EnvFile')
 Check 'install.ps1: reads the merge source as UTF-8' $true `
     ($installer -match 'Get-Content -LiteralPath \$EnvFile -Encoding UTF8')
+$readValuesFn = [regex]::Match($installer, '(?ms)^function Read-EnvFileValues \{.*?^\}').Value
+Check 'install.ps1: Read-EnvFileValues located' $true ($readValuesFn.Length -gt 0)
 Check 'install.ps1: reads existing creds as UTF-8' $true `
-    ($installer -match 'Get-Content -LiteralPath \$script:EnvFile -Encoding UTF8')
+    ($readValuesFn -match 'Get-Content -LiteralPath \$Path -Encoding UTF8')
 
 $dispatcher = Get-Content -Raw -LiteralPath (Join-Path $repo 'plugins/rogue/scripts/hook.ps1')
 function Get-NormalizedFunction {
@@ -216,6 +218,7 @@ $hasKeyFn = [regex]::Match($installer, '(?ms)^function Test-EnvFileHasKey \{.*?^
 Check 'install.ps1: Test-EnvFileHasKey located' $true ($hasKeyFn.Length -gt 0)
 . ([scriptblock]::Create($unquoteFn))
 . ([scriptblock]::Create($hasKeyFn))
+. ([scriptblock]::Create($readValuesFn))
 . ([scriptblock]::Create($loadFn))
 
 $ROGUE_BASE_URL_DEFAULT = 'https://api.rogue.security'

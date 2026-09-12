@@ -33,7 +33,10 @@ Rogue plugin into each — **Claude Code**, **OpenAI Codex**, **Cursor**,
 writing the shared `~/.rogue-env` (`%USERPROFILE%\.rogue-env` on
 Windows) once. On a machine whose `/etc/rogue/env` (`C:\ProgramData\rogue\env`)
 already holds `ROGUE_API_KEY` it prompts for nothing and writes no user file:
-that machine file is the one the hooks read. Claude and Codex install through
+that machine file is the one the hooks read, and its key is validated in place.
+A machine file that is not root-owned (SYSTEM/Administrators on Windows) or is
+writable by others is skipped by Kiro and the log shipper, so the installer
+warns and falls back to the user file. Claude and Codex install through
 their native plugin CLIs (`claude plugin install` / `codex plugin add`);
 **Cursor has no plugin CLI**, so
 its plugin is copied into `~/.cursor/plugins/local/rogue` from the release tarball;
