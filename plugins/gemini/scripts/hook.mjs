@@ -31,6 +31,7 @@ import {
   SURFACE,
   loadEnvFiles,
   resolveActor,
+  headerBytes,
   installId,
 } from "./shared.mjs";
 
@@ -495,8 +496,8 @@ async function main() {
         "Content-Type": "application/json",
         "x-rogue-api-key": apiKey,
         "x-rogue-event": EVENT,
-        "x-rogue-actor-email": actor.email,
-        "x-rogue-actor-name": actor.name,
+        "x-rogue-actor-email": headerBytes(actor.email),
+        "x-rogue-actor-name": headerBytes(actor.name),
         "x-rogue-host": install.host,
         "x-rogue-version": install.version,
         "x-rogue-agent": install.agent,

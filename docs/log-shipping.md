@@ -52,7 +52,10 @@ contract and not a coincidence: it **inherits** them from the caller rather than
 running its own cascade. Gemini keeps its actor resolution inline (module locals)
 and the Claude bridge's `actor.sh` screens sandbox identities the others do not, so
 an independently-resolving shipper could produce a second identity for the same
-machine and orphan the logs. See **The actor is passed IN** in
+machine and orphan the logs. Every level of the cascade is set by the local user (env
+file, `~/.gitconfig`, login), so `actor_email` is a self-reported label and never an
+authenticated principal; the API key and the enrolled endpoint are what attribute a
+row to an organization. See **The actor is passed IN** in
 [plugin-log-shipper.md](plugin-log-shipper.md).
 
 **Correction to an earlier version of this section**, which claimed the roster

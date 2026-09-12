@@ -819,7 +819,7 @@ $baseUrl = $baseUrl.TrimEnd('/')
 
 # ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
 # env file → git config files → <login>@<host> → unknown. A damaged install with
-# no library still reports the env file values.
+# no library still reports the env file values, or the marker, never a blank.
 $actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
 try {
     $actorLib = Join-Path $pluginRoot 'scripts\actor.ps1'
@@ -830,6 +830,8 @@ try {
 } catch {}
 $actorName  = [string]$actor.Name
 $actorEmail = [string]$actor.Email
+if (-not $actorName)  { $actorName  = 'unknown' }
+if (-not $actorEmail) { $actorEmail = 'unknown' }
 
 # ── install identity: host + plugin version ────────────────────────────────
 # The fleet roster keys an install on host + actor + family + agent, and until

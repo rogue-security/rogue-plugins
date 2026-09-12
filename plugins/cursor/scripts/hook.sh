@@ -769,12 +769,11 @@ if [ -n "$hb_unthrottled" ]; then
   # either way. This is the whole point of the `stop` trigger - on `sessionStart`
   # alone, a long session's log never left the disk.
   #
-  # The actor MUST be passed explicitly. Unlike the other plugins, which get it
-  # from actor.sh (which exports), this dispatcher resolves the actor into plain
-  # shell LOCALS - so without this prefix the child would inherit nothing, find no
-  # identity, and skip. It also must not re-resolve: a second cascade (rogue's
-  # actor.sh screens sandbox identities, for one) could key the log's source row
-  # differently from the roster row just posted.
+  # actor.sh exports both vars, so the child would inherit them anyway - the
+  # explicit prefix states the contract at the call site and covers an install
+  # whose actor.sh predates that export. The shipper must not re-resolve: a second
+  # cascade (rogue's actor.sh screens sandbox identities, for one) could key the
+  # log's source row differently from the roster row just posted.
   if [ -r "$PLUGIN_ROOT/scripts/ship-logs.sh" ]; then
     ( ROGUE_ACTOR_EMAIL="$actor_email" ROGUE_ACTOR_NAME="$actor_name" \
         sh "$PLUGIN_ROOT/scripts/ship-logs.sh" \

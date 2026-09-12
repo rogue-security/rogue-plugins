@@ -317,7 +317,7 @@ function Initialize-KiroContext {
 
 # ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
 # env file → git config files → <login>@<host> → unknown. A damaged install with
-# no library still reports the env file values.
+# no library still reports the env file values, or the marker, never a blank.
 function Resolve-KiroActor {
     $actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
     try {
@@ -329,6 +329,8 @@ function Resolve-KiroActor {
     } catch {}
     $script:actorName  = [string]$actor.Name
     $script:actorEmail = [string]$actor.Email
+    if (-not $script:actorName)  { $script:actorName  = 'unknown' }
+    if (-not $script:actorEmail) { $script:actorEmail = 'unknown' }
 }
 
 function Read-KiroPayload {

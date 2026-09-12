@@ -257,6 +257,41 @@ test("no actor in the env file → git identity from the config files, git never
   }
 });
 
+test("BOM-prefixed config and git's escaped quotes read as git does (one rule with sh/ps1)", async () => {
+  const { server, seen, port } = await startServer(200, "{}");
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", {}, (home) =>
+      seedHome(home, {
+        gitconfig: '\uFEFF[user]\n\temail = jane@corp.com # work\n\tname = "Jane \\"JJ\\" Dev" ; nick\n',
+      }),
+    );
+    assert.equal(seen.headers["x-rogue-actor-email"], "jane@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], 'Jane "JJ" Dev');
+  } finally {
+    server.close();
+  }
+});
+
+test("a non-Latin-1 git user.name still reaches the server, as the UTF-8 bytes curl would send", async () => {
+  // fetch() throws on any header code unit above 0xFF; before headerBytes that
+  // TypeError landed in the fail-open catch and every hook of such a user emitted {}.
+  const denyBody = JSON.stringify({ decision: "deny", reason: "blocked by test" });
+  const { server, seen, port } = await startServer(200, denyBody);
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    const out = await runHook("BeforeTool", "{}", {}, (home) =>
+      seedHome(home, { gitconfig: "[user]\n\temail = yuval@corp.com\n\tname = יובל\n" }),
+    );
+    assert.equal(out, denyBody, "the decision must reach Gemini, not a fail-open {}");
+    // Node's server decodes header bytes as Latin-1; the bytes are the UTF-8 encoding.
+    assert.equal(Buffer.from(seen.headers["x-rogue-actor-name"], "latin1").toString("utf8"), "יובל");
+    assert.equal(seen.headers["x-rogue-actor-email"], "yuval@corp.com");
+  } finally {
+    server.close();
+  }
+});
+
 test("no git identity → login@hostname, never a blank actor", async () => {
   const { server, seen, port } = await startServer(200, "{}");
   const git = gitTripwire();

@@ -16,6 +16,21 @@ function Resolve-RogueGitInclude {
     return (Join-Path (Split-Path -Parent $From) $Inc)
 }
 
+function ConvertFrom-RogueGitValue {
+    # git syntax: a backslash escapes the next character, quotes toggle a region in
+    # which # and ; are literal, and a comment ends the value outside one.
+    param([string]$Raw)
+    $s = $Raw.Trim(); $sb = [System.Text.StringBuilder]::new(); $quoted = $false
+    for ($i = 0; $i -lt $s.Length; $i++) {
+        $c = $s[$i]
+        if ($c -eq '\' -and ($i + 1) -lt $s.Length) { $i++; [void]$sb.Append($s[$i]) }
+        elseif ($c -eq '"') { $quoted = -not $quoted }
+        elseif (-not $quoted -and ($c -eq '#' -or $c -eq ';')) { break }
+        else { [void]$sb.Append($c) }
+    }
+    return $sb.ToString().Trim()
+}
+
 function Read-RogueGitConfig {
     param([string]$Path, [string]$UserHome, [hashtable]$Id, [int]$Depth)
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
@@ -30,9 +45,7 @@ function Read-RogueGitConfig {
         $eq = $line.IndexOf('=')
         if ($eq -lt 1) { continue }
         $key = $line.Substring(0, $eq).Trim().ToLowerInvariant()
-        $val = $line.Substring($eq + 1).Trim()
-        if ($val.StartsWith('"')) { $val = $val.Substring(1) -replace '".*$', '' }
-        else { $val = ($val -replace '\s*[#;].*$', '').Trim() }
+        $val = ConvertFrom-RogueGitValue ($line.Substring($eq + 1))
         if ($section -eq 'include' -and $key -eq 'path' -and $Depth -eq 0) {
             Read-RogueGitConfig (Resolve-RogueGitInclude $val $Path $UserHome) $UserHome $Id 1
         } elseif ($section -eq 'user' -and $val) {

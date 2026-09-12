@@ -239,6 +239,24 @@ actual="$(printf '{"tool":"Bash"}' | HOME="$FAKE_HOME" XDG_CONFIG_HOME= PATH="$S
 [ "$actual" = 'jane@devbox|jane|{"tool":"Bash"}' ] || { echo "FAIL [stdin include]: got <$actual>" >&2; exit 1; }
 echo "  ok: an include of /dev/stdin reads nothing; the payload survives for the bridge"
 
+# ── Case 22: a BOM-prefixed ~/.gitconfig (Windows editors write one) is read ───
+# git accepts the BOM; git-identity.ps1 and shared.mjs strip it, so the awk reader
+# must too, or the same user is two roster rows: sh reports login@host, ps1 the git identity.
+scenario
+write_gitconfig
+printf '\357\273\277[user]\n\temail = bom@corp.com\n\tname = Bom Me\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "bom@corp.com|Bom Me" ] || { echo "FAIL [bom]: got <$actual>" >&2; exit 1; }
+echo "  ok: a UTF-8 BOM before [user] does not hide the section"
+
+# ── Case 23: git's value syntax — escaped quotes, quoted comment characters ────
+scenario
+write_gitconfig
+printf '[user]\n\temail = jane@corp.com # work\n\tname = "Jane \\"JJ\\" Dev" ; nick\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'jane@corp.com|Jane "JJ" Dev' ] || { echo "FAIL [escapes]: got <$actual>" >&2; exit 1; }
+echo "  ok: backslash-escaped quotes survive and a trailing comment is dropped, as git reads them"
+
 echo "── scripts/shared/actor.sh (codex copy) ──"
 ACTOR="$SHARED_ACTOR"
 
@@ -273,6 +291,13 @@ printf '[user]\r\n\temail = jane@corp.com\r\n\tname = Jane Dev\r\n' > "$FAKE_HOM
 actual="$(resolve)"
 [ "$actual" = "jane@corp.com|Jane Dev" ] || { echo "FAIL [shared crlf]: got <$actual>" >&2; exit 1; }
 echo "  ok: CRLF git config read cleanly by the shared cascade"
+
+scenario
+write_gitconfig
+printf '\357\273\277[user]\n\temail = bom@corp.com\n\tname = "Bom \\"B\\" Me"\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'bom@corp.com|Bom "B" Me' ] || { echo "FAIL [shared bom]: got <$actual>" >&2; exit 1; }
+echo "  ok: BOM and escaped quotes read by the shared cascade"
 
 # ── The git binary was never run, in any case above ──────────────────────────
 if [ -s "$TRIPWIRE" ]; then

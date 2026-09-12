@@ -102,6 +102,18 @@ try {
     Assert-Eq $id.Name  'Jane Dev'      'CRLF file: no trailing CR on the name'
 
     $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) ([string][char]0xFEFF + "[user]`n`temail = bom@corp.com`n`tname = Bom Me`n")
+    $id = Read-GitId
+    Assert-Eq $id.Email 'bom@corp.com' 'a UTF-8 BOM before [user] does not hide the section (same as git-identity.sh)'
+    Assert-Eq $id.Name  'Bom Me'       'BOM file: name read'
+
+    $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`n`temail = jane@corp.com # work`n`tname = `"Jane \`"JJ\`" Dev`" ; nick`n"
+    $id = Read-GitId
+    Assert-Eq $id.Email 'jane@corp.com'  'an unquoted trailing comment is dropped'
+    Assert-Eq $id.Name  'Jane "JJ" Dev'  'backslash-escaped quotes survive, as git reads them'
+
+    $h = New-TestHome
     $id = Read-GitId
     Assert-Eq $id.Email '' 'no config file: empty email, no error'
     Assert-Eq $id.Name  '' 'no config file: empty name, no error'
@@ -156,6 +168,27 @@ try {
 
     $a = Resolve-RogueActor @{} ([System.IO.Path]::Combine($h, 'no-such-plugin'))
     Assert-Eq $a.Email $loginAtHost 'a damaged install (no git-identity.ps1) degrades to login@host'
+
+    # heartbeat.ps1 takes the same cascade through this seam inside a child scope:
+    # the actor comes out, none of hook.ps1's helpers land in the caller.
+    $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`n`temail = hb@corp.com`n`tname = HB Dev`n"
+    $creds = @{}
+    $viaSeam = & {
+        $env:ROGUE_PS_LIB_ONLY = '1'
+        try {
+            & {
+                . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $hook)))
+                Resolve-RogueActor $creds $pluginRoot
+            }
+        } finally { $env:ROGUE_PS_LIB_ONLY = $null }
+    }
+    Assert-Eq $viaSeam.Email 'hb@corp.com' 'heartbeat.ps1 construct: the seam-loaded cascade answers the git identity'
+    Assert-Eq $viaSeam.Name  'HB Dev'      'heartbeat.ps1 construct: name too'
+    Assert-Eq ([bool][string]$env:ROGUE_PS_LIB_ONLY) $false 'heartbeat.ps1 construct: the seam variable is cleared for the shipper it spawns'
+    $hbSrc = Get-Content -Raw -LiteralPath ([System.IO.Path]::Combine($repo, 'plugins', 'rogue', 'scripts', 'heartbeat.ps1'))
+    Assert-Eq ($hbSrc -match 'Resolve-RogueActor \$creds \$pluginRoot') $true 'heartbeat.ps1 calls hook.ps1 Resolve-RogueActor'
+    Assert-Eq ($hbSrc -match 'function (Select-ActorValue|Test-SyntheticActor)') $false 'heartbeat.ps1 carries no copy of the cascade'
 
     Write-Host '-- scripts/shared/actor.ps1 Resolve-RogueSharedActor: the three fallback levels --'
     . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $sharedActor)))

@@ -147,10 +147,20 @@ export function installId() {
 // and .ps1: $XDG_CONFIG_HOME/git/config, then ~/.gitconfig, a later value
 // overriding an earlier one as git does, each file followed by its [include] path
 // entries (one level; includeIf is not evaluated).
+// git syntax: a backslash escapes the next character, quotes toggle a region in
+// which # and ; are literal, and a comment ends the value outside one.
 function gitConfigValue(raw) {
-  const v = raw.trim();
-  if (v.startsWith('"')) return v.slice(1).replace(/".*$/, "");
-  return v.replace(/\s*[#;].*$/, "").trim();
+  const s = raw.trim();
+  let out = "";
+  let quoted = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\" && i + 1 < s.length) out += s[++i];
+    else if (c === '"') quoted = !quoted;
+    else if (!quoted && (c === "#" || c === ";")) break;
+    else out += c;
+  }
+  return out.trim();
 }
 
 function readGitConfig(file, id, depth) {
@@ -213,4 +223,11 @@ export function resolveActor(env) {
   const host = os.hostname() || "";
   if (!email) email = login && host ? `${login}@${host}` : login || host;
   return { email: email || "unknown", name: name || login || "unknown" };
+}
+
+// The actor as a request-header value. fetch() rejects any code unit above 0xFF
+// (a Hebrew or CJK git user.name failed the hook open), so the UTF-8 bytes are
+// spelled as one char each: the same bytes curl puts on the wire for the sh bridges.
+export function headerBytes(value) {
+  return Buffer.from(String(value), "utf8").toString("latin1");
 }

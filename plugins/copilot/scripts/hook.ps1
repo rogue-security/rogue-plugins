@@ -332,7 +332,7 @@ if (-not $url) {
 
 # ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
 # env file → git config files → <login>@<host> → unknown. A damaged install with
-# no library still reports the env file values.
+# no library still reports the env file values, or the marker, never a blank.
 $actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
 try {
     $actorLib = Join-Path $PluginRoot 'scripts\actor.ps1'
@@ -343,6 +343,8 @@ try {
 } catch {}
 $actorName  = [string]$actor.Name
 $actorEmail = [string]$actor.Email
+if (-not $actorName)  { $actorName  = 'unknown' }
+if (-not $actorEmail) { $actorEmail = 'unknown' }
 
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────
 $payload = [Console]::In.ReadToEnd()

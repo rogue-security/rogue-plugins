@@ -7,20 +7,32 @@
 # then ~/.gitconfig, a later value overriding an earlier one as git does, each file
 # followed by its [include] path entries (one level; includeIf is not evaluated).
 
-# Print the last value of [$2] $3 in git config file $1 and its includes.
-# awk reads stdin from /dev/null: an `[include] path = /dev/stdin` would otherwise
-# drain the hook payload the bridge has not read yet.
-_rogue_gitcfg_value() {
-  [ -r "$1" ] || return 0
-  awk -v main="$1" -v dir="${1%/*}" -v home="$HOME" -v section="$2" -v key="$3" '
+# Print "E<email>" and "N<name>" (one line each) for the config files given as
+# arguments, scanned in order. One awk process for both files and both keys: this
+# runs on every hook event. awk reads stdin from /dev/null: an
+# `[include] path = /dev/stdin` would otherwise drain the hook payload the bridge
+# has not read yet. `bom` is passed in from the shell so its length is counted in
+# whatever locale awk runs under.
+_rogue_gitcfg_scan() {
+  awk -v home="$HOME" -v bom="$(printf '\357\273\277')" '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
-    function value(s) {
-      s = trim(s)
-      if (substr(s, 1, 1) == "\"") { s = substr(s, 2); sub(/".*$/, "", s); return s }
-      sub(/[ \t]*[#;].*$/, "", s); return trim(s)
+    # git syntax: a backslash escapes the next character, quotes toggle a region in
+    # which # and ; are literal, and a comment ends the value outside one.
+    function value(s,   out, i, c, q, n) {
+      s = trim(s); out = ""; q = 0; n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\\" && i < n) { i++; out = out substr(s, i, 1) }
+        else if (c == "\"") q = !q
+        else if (!q && (c == "#" || c == ";")) break
+        else out = out c
+      }
+      return trim(out)
     }
-    function scan(file, depth,   line, sect, l, eq, k, v, inc) {
+    function scan(file, depth,   line, dir, sect, l, eq, k, v, inc) {
+      dir = (index(file, "/") ? file : "./" file); sub(/\/[^\/]*$/, "", dir)
       while ((getline line < file) > 0) {
+        if (index(line, bom) == 1) line = substr(line, length(bom) + 1)
         l = trim(line)
         if (l == "" || l ~ /^[#;]/) continue
         if (substr(l, 1, 1) == "[") {
@@ -36,23 +48,24 @@ _rogue_gitcfg_value() {
           if (inc ~ /^~\//) inc = home substr(inc, 2)
           else if (inc !~ /^\//) inc = dir "/" inc
           scan(inc, 1)
-        } else if (sect == section && k == key && v != "") found = v
+        } else if (sect == "user" && v != "") {
+          if (k == "email") email = v
+          else if (k == "name") name = v
+        }
       }
       close(file)
     }
-    BEGIN { scan(main, 0); if (found != "") print found }
-  ' </dev/null 2>/dev/null
+    BEGIN { for (i = 1; i < ARGC; i++) scan(ARGV[i], 0); print "E" email; print "N" name }
+  ' "$@" </dev/null 2>/dev/null
 }
 
 rogue_git_identity() {
   ROGUE_GIT_EMAIL=""
   ROGUE_GIT_NAME=""
-  for _rogue_gc in "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" "$HOME/.gitconfig"; do
-    _rogue_gv=$(_rogue_gitcfg_value "$_rogue_gc" user email)
-    [ -n "$_rogue_gv" ] && ROGUE_GIT_EMAIL="$_rogue_gv"
-    _rogue_gv=$(_rogue_gitcfg_value "$_rogue_gc" user name)
-    [ -n "$_rogue_gv" ] && ROGUE_GIT_NAME="$_rogue_gv"
-  done
-  unset _rogue_gc _rogue_gv
+  { IFS= read -r ROGUE_GIT_EMAIL; IFS= read -r ROGUE_GIT_NAME; } <<EOF || :
+$(_rogue_gitcfg_scan "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" "$HOME/.gitconfig")
+EOF
+  ROGUE_GIT_EMAIL="${ROGUE_GIT_EMAIL#E}"
+  ROGUE_GIT_NAME="${ROGUE_GIT_NAME#N}"
   return 0
 }

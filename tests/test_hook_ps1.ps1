@@ -153,10 +153,10 @@ $labMail = Select-ActorValue @('jane.doe@corp.com')
 Assert-Selected @('', (($labMail -split '@')[0])) 'jane.doe'  'real host email still yields its local-part'
 
 # hook.ps1's cascade (Resolve-RogueActor) is driven end to end in
-# tests/test_git_identity_ps1.ps1; heartbeat.ps1 carries an inline copy whose
-# dispatcher body only runs on Windows, so both are pinned structurally here: a
-# silent drop of either fallback is exactly the regression this covers.
-foreach ($f in @('hook.ps1', 'heartbeat.ps1')) {
+# tests/test_git_identity_ps1.ps1, which also drives the seam construct heartbeat.ps1
+# reaches it through. The fallbacks are pinned structurally here too: a silent drop
+# of either is exactly the regression this covers.
+foreach ($f in @('hook.ps1')) {
     $src = Get-Content -Raw -LiteralPath ([System.IO.Path]::Combine($here, '..', 'plugins', 'rogue', 'scripts', $f))
     $script:count++
     if ($src -match [regex]::Escape('Select-ActorValue @($env:USERNAME, [Environment]::UserName)')) {
