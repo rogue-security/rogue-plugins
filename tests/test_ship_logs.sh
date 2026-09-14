@@ -113,6 +113,10 @@ ship_as() { # <plugin> <slug|-> <version> <family> [VAR=val …]
     export ROGUE_SHIP_MAX_BYTES='' ROGUE_SHIP_MAX_RUN_BYTES='' ROGUE_SHIP_MAX_LINE_BYTES=''
     for kv in "$@"; do export "${kv?}"; done
     _root="${SHIP_ROOT:-$REPO/plugins/$_p}"
+    if [ -n "${SHIP_ROOT:-}" ]; then
+      mkdir -p "$_root/scripts"
+      cp "$REPO/scripts/shared/protection.sh" "$_root/scripts/protection.sh"
+    fi
     if [ "$_s" = "-" ]; then "$SH" "$REPO/plugins/$_p/scripts/ship-logs.sh"
     else "$SH" "$REPO/plugins/$_p/scripts/ship-logs.sh" "$_root" "$_s" "$_v" "$_fam"; fi )
 }

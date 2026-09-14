@@ -217,6 +217,7 @@ function Rotate-Log {
 
 function Log {
     param([string]$Msg)
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return }
     try {
         if (-not $logFile) { return }
         $dir = Split-Path $logFile
@@ -861,7 +862,12 @@ if (Test-Path -LiteralPath $pluginJson) {
 }
 
 # ── payload from stdin ─────────────────────────────────────────────────────
-$payload = [Console]::In.ReadToEnd()
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'cursor' -Family 'cursor'
+if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{}'); exit 0 }
+
+$payload = Read-RogueProtectionInput
+if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
 if (-not $payload) { $payload = '{}' }
 # Cursor sends a UTF-8 payload, but the console often reads stdin under a legacy
 # OEM codepage (observed in the field: IBM437), which mojibakes it — e.g. the
@@ -932,6 +938,8 @@ $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 $resp = ''
 $postError = ''
 try {
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and $null -ne $script:RPRevision) { $headers['x-rogue-activity-revision']=[string]$script:RPRevision }
     $r = Invoke-WebRequest -Uri $url -Method Post `
         -Headers $headers -ContentType 'application/json' -Body $bodyBytes `
         -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
@@ -971,6 +979,7 @@ try {
 # (mirrors hook.sh's `log "rc=… raw=…"`). An empty `raw=` means fail-open: either
 # the request threw (then `error=` says why) or the server answered non-200.
 $respHead = if ($resp.Length -gt 400) { $resp.Substring(0, 400) } else { $resp }
+if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
 if ($postError) { Log "raw=$(Sanitize $respHead) error=`"$(Sanitize $postError)`"" }
 else            { Log "raw=$(Sanitize $respHead)" }
 

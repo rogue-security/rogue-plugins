@@ -167,6 +167,8 @@ main() {
   locate_plugin_root
   load_env          # sources the env files, then normalises the base URL
   require_api_key   # exits 0 when this install is not configured
+  . "${PLUGIN_ROOT}/scripts/protection.sh"
+  rogue_protection_init antigravity antigravity "${PLUGIN_ROOT}/scripts"
   load_actor
   resolve_version
   resolve_surface "${1:-}"

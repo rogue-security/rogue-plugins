@@ -159,6 +159,8 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'claude' -Family 'claude'
 
 # -- actor resolution (mirrors actor.sh / hook.ps1: first non-synthetic wins) -
 # Screen the WHOLE address before splitting it. Taking the local-part first

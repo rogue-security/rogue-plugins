@@ -16,6 +16,7 @@ const cap = process.env.CAP || ".";
 const code = Number(process.env.FAKE_CODE || 200);
 
 globalThis.fetch = async (_url, opts) => {
+  if (String(_url).includes('/hooks/protection/')) return {status:404, ok:false};
   let n = 0;
   while (fs.existsSync(path.join(cap, `body.${n}`))) n++;
   try {

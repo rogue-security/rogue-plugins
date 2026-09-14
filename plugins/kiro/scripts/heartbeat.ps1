@@ -335,6 +335,8 @@ function Invoke-Main {
     Initialize-Beacon  # after the env files are parsed so they can set the interval
     Assert-ApiKey      # exits 0 when this install is not configured
     Resolve-BaseUrl
+    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+    $script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'kiro' -Family 'kiro'
     Resolve-Actor
     Resolve-Version
     Resolve-Surface
