@@ -22,6 +22,8 @@ try {
     if (Test-RogueEnvFile $file) { throw 'world-writable env was trusted' }
     if (@(Read-RogueEnvFile $file).Count -ne 0) { throw 'unsafe env was read' }
     # A write grant to the current user is fine for the user file and disqualifies the machine file.
+    # Recreate the file: the Everyone rule above is explicit, so protection alone would keep it.
+    Remove-Item -LiteralPath $file -Force
     [System.IO.File]::WriteAllText($file, 'ROGUE_TEST_VALUE=trusted')
     if ($unix) { & chmod 600 $file }
     else {
