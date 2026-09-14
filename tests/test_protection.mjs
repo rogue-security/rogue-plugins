@@ -201,6 +201,89 @@ try {
     }
     available=true;
   });
+  await test('every shell bridge cancels open stdin when its persisted decision changes', async () => {
+    available=true; paused=false; revision=30;
+    for (const plugin of ['rogue','codex','cursor','copilot','antigravity','kiro']) {
+      const slug=plugin==='rogue'?'claude':plugin;
+      const root=path.join(fixturePlugins,plugin);
+      const directory=path.join(temp,`${slug}-default-${createHash('sha256').update(`${base}\nprovision_${slug}`).digest('hex')}`);
+      fs.mkdirSync(directory,{recursive:true});
+      fs.writeFileSync(path.join(directory,'decision'),`1 30 0 0 0 0 ${Math.floor(Date.now()/1000)} 30 0 ${Math.floor(Date.now()/1000)}\n`);
+      fs.writeFileSync(path.join(directory,'attempt'),String(Math.floor(Date.now()/1000)));
+      const env={...process.env,ROGUE_API_KEY:`provision_${slug}`,ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:temp,PLUGIN_ROOT:root,CLAUDE_PLUGIN_ROOT:root,CODEX_PLUGIN_ROOT:root,CURSOR_PLUGIN_ROOT:root,ROGUE_ACTOR_EMAIL:'qa@example.test'};
+      const event=({cursor:'beforeShellExecution',copilot:'preToolUse',antigravity:'PreInvocation'})[plugin] || 'PreToolUse';
+      const child=spawn('sh',[path.join(root,'scripts/hook.sh'),event,'kiro_cli'],{env,stdio:['pipe','pipe','pipe']});
+      let output=''; child.stdout.on('data',b=>output+=b); child.stderr.resume();
+      child.stdin.write('{"private":"must-not-upload"');
+      const start=requests.length;
+      const change=setTimeout(()=>fs.writeFileSync(path.join(directory,'decision'),`1 31 1 0 0 0 ${Math.floor(Date.now()/1000)} 31 0 ${Math.floor(Date.now()/1000)}\n`),400);
+      const timeout=setTimeout(()=>child.kill(),3000);
+      const code=await new Promise(resolve=>child.once('exit',resolve));
+      clearTimeout(change);clearTimeout(timeout);
+      assert.equal(code,0,plugin);
+      assert.deepEqual(JSON.parse(output || '{}'),plugin==='antigravity'?{decision:'allow'}:{},plugin);
+      assert(!requests.slice(start).some(call=>!call.path.includes('/hooks/protection/') && call.body.includes('must-not-upload')),plugin);
+      assert(!fs.readdirSync(directory).some(name=>name.startsWith('input.')),plugin);
+    }
+    paused=true; revision=31;
+  });
+  await test('shell lease persistence failure rejects entry and reports failed', async () => {
+    const directory=path.join(temp,'lease-failure'); fs.mkdirSync(directory);
+    const now=Math.floor(Date.now()/1000);
+    fs.writeFileSync(path.join(directory,'decision'),`1 31 0 0 0 0 ${now} 31 0 ${now}\n`);
+    const start=requests.length;
+    const script=`. '${path.join(repo,'scripts/shared/protection.sh')}'; mkdir "$ROGUE_PROTECTION_STATE/active.$$"; if rogue_protection_enter; then exit 9; fi`;
+    const result=await run('sh',['-c',script],{ROGUE_PROTECTION_STATE:directory,ROGUE_PROTECTION_BASE:base,ROGUE_API_KEY:'installation_test_key'},'');
+    assert.equal(result.code,0,result.err);
+    assert(requests.slice(start).some(call=>call.path.endsWith('/ack') && JSON.parse(call.body).status==='failed'),JSON.stringify({result,calls:requests.slice(start)}));
+  });
+  await test('PowerShell rejects malformed decisions and lease write failures', {skip:!process.env.ROGUE_TEST_PWSH}, async () => {
+    const directory=path.join(temp,'ps-lease-failure'); fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory,'state.json'),JSON.stringify({decision:{protocolVersion:1,revision:31,serverTime:new Date().toISOString()},receivedAt:new Date().toISOString()}));
+    const script=`. '${path.join(repo,'scripts/shared/protection.ps1')}'; $script:RPDirectory='${directory}'; $script:RPBase='${base}'; $script:RPKey='installation_test_key'; if (Test-RogueProtectionCurrent) {exit 8}; $decision=@{protocolVersion=1;revision=31;serverTime=[DateTimeOffset]::UtcNow.ToString('o');aidr=@{paused=$false;revision=31};aispm=@{paused=$false;revision=0}}; Write-RogueProtectionFile "$script:RPDirectory/state.json" (@{decision=$decision;receivedAt=[DateTimeOffset]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 8); if (-not (Test-RogueProtectionCurrent)) { throw "valid active decision rejected: $(Get-Content -Raw \"$script:RPDirectory/state.json\")" }; $null=New-Item -ItemType Directory "$script:RPDirectory/active.$PID"; if (Enter-RogueProtection) {exit 9}`;
+    const start=requests.length;
+    const result=await run(process.env.ROGUE_TEST_PWSH,['-NoProfile','-Command',script],{},'');
+    assert.equal(result.code,0,result.err);
+    assert(requests.slice(start).some(call=>call.path.endsWith('/ack') && JSON.parse(call.body).status==='failed'),JSON.stringify({result,calls:requests.slice(start)}));
+  });
+  await test('failed discard offset writes cannot certify a new shipping revision', async () => {
+    available=true; paused=false; revision=40;
+    for (const slug of ['codex','gemini']) {
+      const root=path.join(fixturePlugins,slug);
+      const directory=path.join(temp,`${slug}-default-${createHash('sha256').update(`${base}\nprovision_${slug}`).digest('hex')}`);
+      const ship=path.join(directory,'ship');fs.mkdirSync(ship,{recursive:true});
+      const state=path.join(ship,`${slug}.state`);
+      fs.rmSync(state,{recursive:true,force:true});fs.mkdirSync(state);
+      fs.writeFileSync(path.join(directory,`${slug}.log`),'paused-canary\n');
+      fs.writeFileSync(path.join(directory,'attempt'),'0');
+      const env={ROGUE_API_KEY:`provision_${slug}`,ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:temp,ROGUE_ACTOR_EMAIL:'qa@example.test',ROGUE_ACTOR_NAME:'QA',ROGUE_SHIP_MIN_INTERVAL:'0'};
+      const args=[path.join(root,`scripts/ship-logs.${slug==='gemini'?'mjs':'sh'}`),root,slug,'1.0.0',slug==='codex'?'openai':'gemini'];
+      const start=requests.length;
+      await run(slug==='gemini'?process.execPath:'sh',args,env,'');
+      fs.rmSync(state,{recursive:true});
+      await run(slug==='gemini'?process.execPath:'sh',args,env,'');
+      assert(!requests.slice(start).some(call=>call.path.endsWith('/logs')),slug);
+      assert(fs.readFileSync(state,'utf8').includes('revision=40'),slug);
+    }
+    paused=true;revision=41;
+    const directory=path.join(temp,`codex-default-${createHash('sha256').update(`${base}\nprovision_codex`).digest('hex')}`);
+    fs.writeFileSync(path.join(directory,'attempt'),'0');
+    const root=path.join(fixturePlugins,'codex');
+    await run('sh',[path.join(root,'scripts/hook.sh'),'PreToolUse'],{ROGUE_API_KEY:'provision_codex',ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:temp,PLUGIN_ROOT:root});
+  });
+  await test('an unavailable enrollment never enables unscoped activity on retry', async () => {
+    available=false;
+    for (const slug of ['codex','gemini']) {
+      const root=path.join(fixturePlugins,slug);
+      const env={ROGUE_API_KEY:`unavailable_${slug}`,ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:temp,PLUGIN_ROOT:root,CODEX_PLUGIN_ROOT:root};
+      const start=requests.length;
+      for (let attempt=0;attempt<2;attempt++) {
+        const result=await run(slug==='gemini'?process.execPath:'sh',[path.join(root,`scripts/hook.${slug==='gemini'?'mjs':'sh'}`),slug==='gemini'?'BeforeTool':'PreToolUse'],env);
+        assert.equal(result.code,0,result.err);assert.deepEqual(JSON.parse(result.out || '{}'),{});
+      }
+      assert(requests.slice(start).every(call=>call.path.includes('/hooks/protection/')));
+    }
+  });
   await test('a new shell invocation honors persisted pause while offline',async()=>{
     available=false;
     const root=path.join(fixturePlugins,'codex');

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -108,15 +108,18 @@ export class Protection {
         }
       }
       if (!key) {
-        if (Date.now()-Number(read(client.file('enroll-attempt'))) < 60000) return undefined;
+        if (Date.now()-Number(read(client.file('enroll-attempt'))) < 60000) return read(client.file('legacy-server')) ? undefined : client;
         const lock=client.file('enroll.lock');
         try { fs.writeFileSync(lock, String(process.pid), {flag:'wx', mode:0o600}); }
         catch { if (!alive(read(lock))) fs.rmSync(lock, {force:true}); return client; }
         try {
           write(client.file('enroll-attempt'), String(Date.now()));
-          const enrolled=await client.request('enroll', {type:'coding_agent', name:slug, family, host:os.hostname(), version:env.ROGUE_INSTALL_VERSION || 'unknown'});
+          let enrollmentNonce=read(client.file('enrollment-nonce'));
+          if (!enrollmentNonce) { enrollmentNonce=randomUUID(); write(client.file('enrollment-nonce'),enrollmentNonce); }
+          fs.rmSync(client.file('legacy-server'),{force:true});
+          const enrolled=await client.request('enroll', {enrollmentNonce,type:'coding_agent', name:slug, family, host:os.hostname(), version:env.ROGUE_INSTALL_VERSION || 'unknown'});
           key=enrolled.alreadyEnrolled ? env.ROGUE_API_KEY : enrolled.apiKey;
-          if (typeof key !== 'string' || !key) return undefined;
+          if (typeof key !== 'string' || !key) return client;
           write(client.file('credential'), key);
         } finally { fs.rmSync(lock, {force:true}); }
       }
@@ -133,9 +136,12 @@ export class Protection {
         child.unref();
       } } finally { if (ownsPollLock) fs.rmSync(pollLock,{force:true}); }
       return client;
-    } catch {
+    } catch (error) {
       const key=read(client.file('credential'));
-      if (!key) return undefined;
+      if (!key) {
+        if (error.status === 404) { try { write(client.file('legacy-server'),'1'); } catch {} return undefined; }
+        return client;
+      }
       client.key=key; client.revision=client.state()?.aidr.revision; return client;
     }
   }

@@ -93,7 +93,6 @@ initialize_context() {
 
 rotate_log() {
   if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
-  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   [ "$ROGUE_LOG_MAX_BYTES" -gt 0 ] || return 0
   # `wc -c` not `stat`: BSD and GNU stat take different flags for file size.
@@ -210,6 +209,7 @@ maybe_heartbeat() {
 }
 
 post_request() {
+rogue_protection_current || { exit 0; }
   RAW=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
     -H "x-rogue-api-key: $ROGUE_API_KEY" \
   -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
@@ -249,7 +249,7 @@ block_reason() {
 }
 
 relay_decision() {
-  rogue_protection_current || { printf '%s' '{}'; exit 0; }
+  rogue_protection_current || { exit 0; }
   if [ "$RC" -ne 0 ] || [ "$CODE" != "200" ] || [ -z "$RESP" ]; then
     finish allow
     exit 0
@@ -283,15 +283,17 @@ main() {
   locate_plugin_root
   load_env
   initialize_context
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { exit 0; }
 . "${PLUGIN_ROOT}/scripts/protection.sh"
 rogue_protection_init kiro kiro "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
-rogue_protection_enter || { printf '%s' '{}'; exit 0; }
+rogue_protection_enter || { exit 0; }
 trap 'rogue_protection_leave' EXIT
 
   require_api_key
   load_identity
   resolve_request
-  BODY="$(inject_session_id "$(cat)")"
+  BODY="$(inject_session_id "$(rogue_protection_read_input)")"
+rogue_protection_current || { exit 0; }
   skip_duplicate
   maybe_heartbeat
   post_request

@@ -336,9 +336,11 @@ if (-not $actorEmail) {
 }
 
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { [Console]::Out.Write('{}'); exit 0 }
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
 $apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'copilot' -Family 'copilot'
 if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{}'); exit 0 }
+try {
 
 $payload = Read-RogueProtectionInput
 if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
@@ -656,3 +658,4 @@ if ($EventName -eq 'userPromptSubmitted' -and
 
 Write-Raw $resp
 exit 0
+} finally { Leave-RogueProtection }

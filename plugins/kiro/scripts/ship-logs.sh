@@ -99,7 +99,7 @@ MAX_RUN_BYTES=10485760
 MAX_LINE_BYTES=4194304
 # per-target working state
 TARGET_BASENAME=""; TARGET_FAMILY=""; STATE_KEY=""
-OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""
+OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""; STATE_REVISION=""
 ADVANCE_BYTES=0; RUN_BYTES_SENT=0
 LINE_LENGTH=0; LINE_SEARCH_HIT_EOF=0
 
@@ -546,7 +546,7 @@ cleanup() {
 
 # ── stage 7: state ─────────────────────────────────────────────────────────
 read_state() { # <key> <abs-path>
-  OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""
+  OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""; STATE_REVISION=""
   _state_file="$STATE_DIR/${1:-}.state"
   [ -r "$_state_file" ] || return 0
   while IFS= read -r _state_line; do
@@ -560,6 +560,7 @@ read_state() { # <key> <abs-path>
         _state_value="${_state_line#size=}"
         case "$_state_value" in ''|*[!0-9]*) _state_value=0 ;; esac
         STATE_SIZE="$_state_value" ;;
+      revision=*) STATE_REVISION="${_state_line#revision=}" ;;
       path=*) STATE_PATH="${_state_line#path=}" ;;
     esac
   done < "$_state_file"
@@ -570,7 +571,7 @@ read_state() { # <key> <abs-path>
   # directly is cheaper and clearer.
   if [ -n "$STATE_PATH" ] && [ "$STATE_PATH" != "${2:-}" ]; then
     debug "state path mismatch ($STATE_PATH != ${2:-}) -> treating state as absent"
-    OFFSET=0; STATE_HEAD=""; STATE_SIZE=0
+    OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_REVISION=""
   fi
   return 0
 }
@@ -579,10 +580,10 @@ read_state() { # <key> <abs-path>
 # The temp lives in the SAME directory as the destination, or the mv is not atomic.
 write_state() { # <key> <offset> <head> <size> <path>
   _state_tmp_file="$STATE_DIR/.state-tmp-$$"
-  printf 'offset=%s\nhead=%s\nsize=%s\npath=%s\n' \
-    "${2:-0}" "${3:-}" "${4:-0}" "${5:-}" > "$_state_tmp_file" 2>/dev/null || return 0
+  printf 'offset=%s\nhead=%s\nsize=%s\npath=%s\nrevision=%s\n' \
+    "${2:-0}" "${3:-}" "${4:-0}" "${5:-}" "${ROGUE_PROTECTION_REVISION:-}" > "$_state_tmp_file" 2>/dev/null || return 1
+  [ ! -d "$STATE_DIR/${1:-}.state" ] || return 1
   mv -f "$_state_tmp_file" "$STATE_DIR/${1:-}.state" 2>/dev/null
-  return 0
 }
 
 # ── stage 8: chunks ────────────────────────────────────────────────────────
@@ -794,6 +795,7 @@ post_chunk() { # <chunk-file> <offset> <bytes> <rotated:0|1>
     printf '"}'
   } > "$_post_body_file" 2>/dev/null
   debug "POST $SHIP_URL file=$TARGET_BASENAME offset=$_post_offset bytes=$_post_bytes rotated=$_post_rotated_json"
+  rogue_protection_current || return 1
   _post_http_code=$(curl -sS --max-time "$HTTP_TIMEOUT" -X POST "$SHIP_URL" \
     -H "x-rogue-api-key: $API_KEY" \
   -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
@@ -830,7 +832,7 @@ drain_file() { # <file> <size> <rotated:0|1> <expected-head> <persist-head> <per
     [ "$ADVANCE_BYTES" -gt 0 ] || return 1
     OFFSET=$((OFFSET + ADVANCE_BYTES))
     RUN_BYTES_SENT=$((RUN_BYTES_SENT + ADVANCE_BYTES))
-    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path"
+    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path" || return 1
   done
   return 0
 }
@@ -852,9 +854,8 @@ ship_log_file() { # <path>
   read_state "$STATE_KEY" "$_target_abs_path"
   _target_file_bytes=$(file_size "$_target_file")
   _target_head=$(first_line_fingerprint "$_target_file")
-  if [ -n "${ROGUE_PROTECTION_STATE:-}" ] && [ "${ROGUE_PROTECTION_REVISION:-0}" -gt 0 ] && [ "$(cat "$ROGUE_PROTECTION_STATE/ship-revision" 2>/dev/null)" != "$ROGUE_PROTECTION_REVISION" ]; then
+  if [ -n "${ROGUE_PROTECTION_STATE:-}" ] && [ "${ROGUE_PROTECTION_REVISION:-0}" -gt 0 ] && [ "$STATE_REVISION" != "$ROGUE_PROTECTION_REVISION" ]; then
     write_state "$STATE_KEY" "$_target_file_bytes" "$_target_head" "$_target_file_bytes" "$_target_abs_path"
-    printf '%s' "$ROGUE_PROTECTION_REVISION" > "$ROGUE_PROTECTION_STATE/ship-revision"
     release_lock
     return 0
   fi
@@ -909,9 +910,11 @@ main() {
   stand_down_on_git_bash
   parse_args "$@"
   load_env
+  [ -r "$PLUGIN_ROOT/scripts/protection.sh" ] || exit 0
   . "$PLUGIN_ROOT/scripts/protection.sh"
   rogue_protection_init "$SHIPPER_SLUG" "$AGENT_FAMILY" "$PLUGIN_ROOT/scripts"
   rogue_protection_enter || exit 0
+  trap 'rogue_protection_leave' EXIT
   resolve_knobs
   [ -n "$API_KEY" ] || { debug 'not configured -> no-op'; exit 0; }
   command -v curl >/dev/null 2>&1 || { log 'outcome=fail reason=no-curl'; exit 0; }

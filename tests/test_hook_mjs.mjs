@@ -53,6 +53,7 @@ function startServer(status, body) {
   return new Promise((resolve) => {
     const seen = {};
     const server = http.createServer((req, res) => {
+      if (req.url.includes("/hooks/protection/")) { req.resume(); res.writeHead(404); res.end("{}"); return; }
       // SessionStart and AfterAgent also spawn the DETACHED heartbeat (hook.mjs
       // fireHeartbeat), which POSTs to /api/v1/hooks/status and, riding along
       // inside it, the log shipper, which POSTs to /api/v1/hooks/logs. Both race
@@ -246,6 +247,7 @@ function startCollectingServer(status, body) {
   return new Promise((resolve) => {
     const requests = [];
     const server = http.createServer((req, res) => {
+      if (req.url.includes("/hooks/protection/")) { req.resume(); res.writeHead(404); res.end("{}"); return; }
       let b = "";
       req.on("data", (c) => (b += c));
       req.on("end", () => {
