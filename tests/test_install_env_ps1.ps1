@@ -111,7 +111,7 @@ function Run-Configure {
     $script:CredentialSource = $null
     $script:prompts = 0
     Remove-Item -LiteralPath $EnvFile -Force -ErrorAction SilentlyContinue
-    return (Configure-Credentials 6>&1 | Out-String)
+    return (Configure-Credentials 6>&1 | Out-String -Width 4096)
 }
 function Get-WrittenKey {
     if (-not (Test-Path -LiteralPath $EnvFile)) { return '<no file>' }
@@ -157,7 +157,7 @@ Copy-Item -Recurse ([System.IO.Path]::Combine($repo, 'plugins', 'cursor')) ([Sys
 $env:ROGUE_TEST_TARBALL = Join-Path $work 'rogue-plugin-cursor.tar.gz'
 & tar -czf $env:ROGUE_TEST_TARBALL -C (Join-Path $work 'stage') rogue-plugin-cursor
 if ($LASTEXITCODE -ne 0) { Write-Host 'could not build the Cursor tarball'; exit 1 }
-$out = & $installer -Cursor -NonInteractive 6>&1 | Out-String
+$out = & $installer -Cursor -NonInteractive 6>&1 | Out-String -Width 4096
 Assert-Eq (Count-Matches $out "machine env file $MachineEnvFile") 1 'end to end: output names the machine file once'
 Assert-Eq (Count-Matches $out 'Key validated') 1 'end to end: the machine key is validated'
 Assert-Eq (Test-Path -LiteralPath $EnvFile) $false 'end to end: no user env file'
