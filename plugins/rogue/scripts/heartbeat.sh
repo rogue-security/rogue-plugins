@@ -129,12 +129,13 @@ fi
 # means the common case is that it makes no request at all.
 #
 # The actor is PASSED IN, never re-resolved. The shipper deliberately carries no
-# cascade of its own: the plugins' cascades differ (actor.sh ends at `hostname`,
-# Cursor's at "$USER@$(hostname)"), so a re-resolve would key the log's source
-# row differently from the roster row this script just posted, and the logs would
-# attach to nothing. actor.sh exports both vars, so the child would inherit them
-# anyway - the explicit prefix states the contract at the call site and also
-# covers an install whose actor.sh predates that export.
+# cascade of its own: the plugins' cascades differ (this actor.sh screens sandbox
+# identities and reads CLAUDE_CODE_USER_EMAIL, Cursor's does neither), so a
+# re-resolve would key the log's source row differently from the roster row this
+# script just posted, and the logs would attach to nothing. actor.sh exports both
+# vars, so the child would inherit them anyway - the explicit prefix states the
+# contract at the call site and also covers an install whose actor.sh predates
+# that export.
 #
 # `-r` guarded so a partial or older install is a no-op rather than an error, and
 # `|| true` because this script runs under `set -u` and must exit 0 regardless.

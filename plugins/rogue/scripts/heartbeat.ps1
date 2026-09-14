@@ -101,24 +101,6 @@ function ConvertFrom-ShellQuoted {
     return $sb.ToString()
 }
 
-function Test-SyntheticActor {
-    # Duplicated from hook.ps1 (heartbeat.ps1 is standalone, like its copy of
-    # ConvertFrom-ShellQuoted). Keep in lockstep with actor.sh's
-    # _rogue_is_synthetic: empty/whitespace, "claude", "claude code" and
-    # "noreply@anthropic.com" are the sandbox identity, never a human.
-    param([string]$Value)
-    if ($null -eq $Value) { return $true }
-    $v = ($Value -replace '\s+', ' ').Trim().ToLowerInvariant()
-    return ($v -eq '' -or $v -eq 'claude' -or $v -eq 'claude code' -or $v -eq 'noreply@anthropic.com')
-}
-
-function Select-ActorValue {
-    param([string[]]$Candidates)
-    if ($null -eq $Candidates) { return '' }
-    foreach ($c in $Candidates) { if (-not (Test-SyntheticActor $c)) { return $c } }
-    return ''
-}
-
 try {
     [Net.ServicePointManager]::SecurityProtocol = `
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -167,41 +149,30 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# -- actor resolution (mirrors actor.sh / hook.ps1: first non-synthetic wins) -
-# Screen the WHOLE address before splitting it. Taking the local-part first
-# smuggles the sandbox identity past the screen: noreply@anthropic.com is
-# rejected as an email, but its local-part "noreply" is not on the list.
-$hostMail = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
-$actorName = Select-ActorValue @(
-    $creds['ROGUE_ACTOR_NAME'],
-    (($hostMail -split '@')[0])
-)
-if (-not $actorName) {
-    $gitName = ''
-    try { $gitName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {}
-    # POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
-    # to whoami.exe: its output is DOMAIN\user, a different identity string that
-    # would re-fingerprint every existing roster row, and it costs a process per
-    # hook. [Environment]::UserName is the true twin — it reads the process token,
-    # so it still answers in the service contexts where USERNAME is unset.
-    $actorName = Select-ActorValue @($gitName, $env:USERNAME, [Environment]::UserName)
+# -- actor resolution: hook.ps1's Resolve-RogueActor -------------------------
+# The ONE Claude cascade (env file -> CLAUDE_CODE_USER_EMAIL -> git config files ->
+# login@host, every candidate screened for the Cowork sandbox identity), loaded
+# through hook.ps1's ROGUE_PS_LIB_ONLY seam inside a child scope so none of its
+# helpers land in this one. The roster row and the event rows are keyed on the
+# actor, so a second copy of the cascade here was a drift waiting to happen.
+$actor = $null
+$hookLib = Join-Path $pluginRoot 'scripts\hook.ps1'
+if (Test-Path -LiteralPath $hookLib) {
+    try {
+        $env:ROGUE_PS_LIB_ONLY = '1'
+        $actor = & {
+            . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $hookLib)))
+            Resolve-RogueActor $creds $pluginRoot
+        }
+    } catch {}
+    # ship-logs.ps1, spawned below, honours the same seam and would load as a library.
+    finally { $env:ROGUE_PS_LIB_ONLY = $null }
 }
-if (-not $actorName) { $actorName = 'unknown' }
-
-$actorEmail = Select-ActorValue @($creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
-if (-not $actorEmail) {
-    $gitEmail = ''
-    try { $gitEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {}
-    $actorEmail = Select-ActorValue @($gitEmail)
-}
-if (-not $actorEmail) {
-    # Same fallback the roster host below already uses: COMPUTERNAME can be unset
-    # in service contexts, where the sh twin's `hostname` still answers.
-    $dnsHost = ''
-    try { $dnsHost = [System.Net.Dns]::GetHostName() } catch {}
-    $hostForActor = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
-    if ($hostForActor) { $actorEmail = "unknown@$hostForActor" } else { $actorEmail = 'unknown' }
-}
+$actorEmail = [string]$creds['ROGUE_ACTOR_EMAIL']
+$actorName  = [string]$creds['ROGUE_ACTOR_NAME']
+if ($actor) { $actorEmail = [string]$actor.Email; $actorName = [string]$actor.Name }
+if (-not $actorEmail) { $actorEmail = 'unknown' }
+if (-not $actorName)  { $actorName  = 'unknown' }
 
 # -- plugin version (regex from manifest, no python) ------------------------
 $ver = 'unknown'
@@ -283,8 +254,7 @@ if ($env:CLAUDE_CODE_ENTRYPOINT -and
 # same reason - Start-Process's -ArgumentList quoting is unreliable on Windows
 # PowerShell 5.1 for anything containing spaces.
 #
-# The actor is PASSED IN, never re-resolved: this script resolved it into ordinary
-# locals through a cascade of its own, and a second cascade inside the shipper
+# The actor is PASSED IN, never re-resolved: a second cascade inside the shipper
 # would key the log's source row differently from the roster row just posted, so
 # the logs would attach to nothing. Writing $env: here is safe - this process
 # exits immediately below.

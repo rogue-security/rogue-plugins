@@ -242,12 +242,69 @@ function Test-SyntheticActor {
 
 function Select-ActorValue {
     # First non-synthetic candidate, or '' when every one is rejected. Callers
-    # invoke it in stages so an expensive candidate (git config) is only computed
-    # when the cheap ones have already been rejected.
+    # invoke it in stages so the git config files are only read when the cheap
+    # candidates have already been rejected.
     param([string[]]$Candidates)
     if ($null -eq $Candidates) { return '' }
     foreach ($c in $Candidates) { if (-not (Test-SyntheticActor $c)) { return $c } }
     return ''
+}
+
+function Read-RogueGitIdentity {
+    # user.email / user.name from the git config FILES through scripts/git-identity.ps1,
+    # never git.exe (one rule with actor.sh). Empty fields when the library or the
+    # files are missing.
+    param([string]$PluginRoot)
+    $id = $null
+    try {
+        $lib = Join-Path $PluginRoot 'scripts\git-identity.ps1'
+        if (Test-Path -LiteralPath $lib) { $id = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $lib))) }
+    } catch {}
+    if (-not $id) { $id = @{ Email = ''; Name = '' } }
+    return $id
+}
+
+function Resolve-RogueActor {
+    # Mirrors actor.sh: first NON-SYNTHETIC candidate wins.
+    #   EMAIL: ROGUE_ACTOR_EMAIL -> CLAUDE_CODE_USER_EMAIL -> git config file user.email
+    #          -> <login>@<COMPUTERNAME> (marker "unknown" for a missing part)
+    #   NAME:  ROGUE_ACTOR_NAME -> local-part of CLAUDE_CODE_USER_EMAIL
+    #          -> git config file user.name -> USERNAME / [Environment]::UserName
+    #          -> marker unknown
+    # The explicit ROGUE_ACTOR_* values are screened too - compiled bundles already
+    # in the field bake a git-config pre-seed into ${CLAUDE_PLUGIN_ROOT}\env, so a
+    # plugin update can only fix them if we distrust a poisoned value. See actor.sh.
+    param([hashtable]$Creds, [string]$PluginRoot)
+    # Screen the WHOLE address before splitting it. Taking the local-part first
+    # smuggles the sandbox identity past the screen: noreply@anthropic.com is
+    # rejected as an email, but its local-part "noreply" is not on the list.
+    $hostMail = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
+    $name  = Select-ActorValue @($Creds['ROGUE_ACTOR_NAME'], (($hostMail -split '@')[0]))
+    $email = Select-ActorValue @($Creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
+    if (-not $name -or -not $email) {
+        $git = Read-RogueGitIdentity $PluginRoot
+        $name  = Select-ActorValue @($name, [string]$git.Name)
+        $email = Select-ActorValue @($email, [string]$git.Email)
+    }
+    # POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
+    # to whoami.exe: its output is DOMAIN\user, a different identity string that
+    # would re-fingerprint every existing roster row, and it costs a process per
+    # hook. [Environment]::UserName is the true twin - it reads the process token,
+    # so it still answers in the service contexts where USERNAME is unset.
+    $login = Select-ActorValue @($env:USERNAME, [Environment]::UserName)
+    if (-not $name) { $name = $login }
+    if (-not $name) { $name = 'unknown' }
+    if (-not $email) {
+        # Same fallback the roster host uses: COMPUTERNAME can be unset in service
+        # contexts, where the sh twin's `hostname` still answers.
+        $dnsHost = ''
+        try { $dnsHost = [System.Net.Dns]::GetHostName() } catch {}
+        $hostForActor = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
+        $who = $login
+        if (-not $who) { $who = 'unknown' }
+        if ($hostForActor) { $email = "$who@$hostForActor" } else { $email = $who }
+    }
+    return @{ Email = $email; Name = $name }
 }
 
 function Test-WantAlert {
@@ -388,49 +445,10 @@ $baseUrl = $creds['ROGUE_BASE_URL']
 if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# -- actor resolution (mirrors actor.sh, first NON-SYNTHETIC candidate wins) --
-#   EMAIL: ROGUE_ACTOR_EMAIL -> CLAUDE_CODE_USER_EMAIL -> git config user.email
-#          -> marker unknown@<COMPUTERNAME>
-#   NAME:  ROGUE_ACTOR_NAME -> local-part of CLAUDE_CODE_USER_EMAIL
-#          -> git config user.name -> USERNAME / [Environment]::UserName
-#          -> marker unknown
-# The explicit ROGUE_ACTOR_* values are screened too - compiled bundles already
-# in the field bake a git-config pre-seed into ${CLAUDE_PLUGIN_ROOT}\env, so a
-# plugin update can only fix them if we distrust a poisoned value. See actor.sh.
-# Screen the WHOLE address before splitting it. Taking the local-part first
-# smuggles the sandbox identity past the screen: noreply@anthropic.com is
-# rejected as an email, but its local-part "noreply" is not on the list.
-$hostMail = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
-$actorName = Select-ActorValue @(
-    $creds['ROGUE_ACTOR_NAME'],
-    (($hostMail -split '@')[0])
-)
-if (-not $actorName) {
-    $gitName = ''
-    try { $gitName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {}
-    # POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
-    # to whoami.exe: its output is DOMAIN\user, a different identity string that
-    # would re-fingerprint every existing roster row, and it costs a process per
-    # hook. [Environment]::UserName is the true twin — it reads the process token,
-    # so it still answers in the service contexts where USERNAME is unset.
-    $actorName = Select-ActorValue @($gitName, $env:USERNAME, [Environment]::UserName)
-}
-if (-not $actorName) { $actorName = 'unknown' }
-
-$actorEmail = Select-ActorValue @($creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
-if (-not $actorEmail) {
-    $gitEmail = ''
-    try { $gitEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {}
-    $actorEmail = Select-ActorValue @($gitEmail)
-}
-if (-not $actorEmail) {
-    # Same fallback the roster host below already uses: COMPUTERNAME can be unset
-    # in service contexts, where the sh twin's `hostname` still answers.
-    $dnsHost = ''
-    try { $dnsHost = [System.Net.Dns]::GetHostName() } catch {}
-    $hostForActor = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
-    if ($hostForActor) { $actorEmail = "unknown@$hostForActor" } else { $actorEmail = 'unknown' }
-}
+# -- actor resolution (Resolve-RogueActor, above the seam so tests can drive it) --
+$actor = Resolve-RogueActor $creds $pluginRoot
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
 
 # -- install identity: host + version + surface label ------------------------
 # The fleet roster keys an install on host + actor + family + agent, and until

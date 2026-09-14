@@ -315,18 +315,22 @@ function Initialize-KiroContext {
     if ($t -match '^[0-9]{1,9}$' -and [int]$t -gt 0) { $script:timeoutSec = [int]$t }
 }
 
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values, or the marker, never a blank.
 function Resolve-KiroActor {
-    # -- actor resolution (mirrors actor.sh) -------------------------------------
-    $script:actorName = $creds['ROGUE_ACTOR_NAME']
-    if (-not $actorName) { try { $script:actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-    if (-not $actorName) { $script:actorName = $env:USERNAME }
-
-    $script:actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-    if (-not $actorEmail) { try { $script:actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-    if (-not $actorEmail) {
-        if ($env:USERNAME -and $env:COMPUTERNAME) { $script:actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-        elseif ($env:USERNAME) { $script:actorEmail = $env:USERNAME } else { $script:actorEmail = $env:COMPUTERNAME }
-    }
+    $actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+    try {
+        $actorLib = Join-Path $script:pluginRoot 'scripts\actor.ps1'
+        if (Test-Path -LiteralPath $actorLib) {
+            . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+            $actor = Resolve-RogueSharedActor $creds $script:pluginRoot
+        }
+    } catch {}
+    $script:actorName  = [string]$actor.Name
+    $script:actorEmail = [string]$actor.Email
+    if (-not $script:actorName)  { $script:actorName  = 'unknown' }
+    if (-not $script:actorEmail) { $script:actorEmail = 'unknown' }
 }
 
 function Read-KiroPayload {

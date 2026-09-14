@@ -86,7 +86,7 @@ run_bridge() {
 make_nojq_path() {
   local d b src
   d="$(mktemp -d)"
-  for b in "$SH" sh dirname basename date mkdir cat sed grep tr tail head awk wc hostname whoami git curl printf stat id; do
+  for b in "$SH" sh dirname basename date mkdir cat sed grep tr tail head awk wc hostname whoami curl printf stat id; do
     src="$(command -v "$b" 2>/dev/null || true)"
     [ -n "$src" ] || continue
     ln -s "$src" "$d/$(basename "$src")" 2>/dev/null || true

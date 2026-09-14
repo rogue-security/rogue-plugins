@@ -1,37 +1,31 @@
 #!/usr/bin/env bash
-# tests/test_actor_sh.sh — the actor identity cascade (plugins/rogue/scripts/actor.sh).
+# tests/test_actor_sh.sh — the actor identity cascade: plugins/rogue/scripts/actor.sh
+# (Claude: screens the Cowork sandbox identity, ranks CLAUDE_CODE_USER_EMAIL above
+# git) and scripts/shared/actor.sh (codex/copilot/antigravity/kiro, tested through
+# the synced codex copy). Both read the git identity from the config FILES via
+# scripts/git-identity.sh, so a stub `git` ahead of PATH is a tripwire: on a Mac
+# without the Command Line Tools `git` is a stub that opens the installer dialog,
+# and a hook must never trigger it.
 #
-# Why this file exists: in Claude Cowork the hook runs in a sandbox as unix user
-# `claude`, with git configured as Anthropic's synthetic
-# "Claude <noreply@anthropic.com>", so a git-config-first cascade reported EVERY
-# Cowork user as "Claude". actor.sh now ranks CLAUDE_CODE_USER_EMAIL (the real
-# authenticated user, set by the Claude host) above git config and rejects
-# synthetic identities from ANY source — including ROGUE_ACTOR_*, which compiled
-# bundles already in the field pre-seed from git config.
+# Three fallback levels per bridge: env file → git config files → login@hostname.
 #
 # actor.sh is sourced by hook.sh, which hooks.json invokes via `sh`; override with
 # TEST_SH=dash to exercise strict POSIX (Debian/Ubuntu /bin/sh) and catch bashisms.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-ACTOR="$REPO/plugins/rogue/scripts/actor.sh"
+ROGUE_ACTOR="$REPO/plugins/rogue/scripts/actor.sh"
+SHARED_ACTOR="$REPO/plugins/codex/scripts/actor.sh"
 SH="${TEST_SH:-sh}"
 
-# Stub git / hostname / whoami so the cascade's environment-dependent candidates
-# are deterministic (the machine running the tests has its own git identity).
 STUB="$(mktemp -d)"
-cleanup() { rm -rf "$STUB"; }
+FAKE_HOME="$(mktemp -d)"
+TRIPWIRE="$STUB/git-invoked"
+cleanup() { rm -rf "$STUB" "$FAKE_HOME"; }
 trap cleanup EXIT
 
-cat > "$STUB/git" <<'EOF'
-#!/bin/sh
-# Only `git config --global user.{email,name}` is used by actor.sh.
-case "$*" in
-  *user.email*) [ -n "${STUB_GIT_EMAIL:-}" ] || exit 1; printf '%s\n' "$STUB_GIT_EMAIL" ;;
-  *user.name*)  [ -n "${STUB_GIT_NAME:-}" ]  || exit 1; printf '%s\n' "$STUB_GIT_NAME" ;;
-  *) exit 1 ;;
-esac
-EOF
+# hostname / whoami stubs make the login@host level deterministic; `git` records
+# every invocation and fails, so a cascade that still shells out is caught twice.
 cat > "$STUB/hostname" <<'EOF'
 #!/bin/sh
 [ -n "${STUB_HOSTNAME:-}" ] || exit 1
@@ -42,21 +36,41 @@ cat > "$STUB/whoami" <<'EOF'
 [ -n "${STUB_WHOAMI:-}" ] || exit 1
 printf '%s\n' "$STUB_WHOAMI"
 EOF
-chmod +x "$STUB/git" "$STUB/hostname" "$STUB/whoami"
+cat > "$STUB/git" <<EOF
+#!/bin/sh
+echo "git \$*" >> "$TRIPWIRE"
+exit 1
+EOF
+chmod +x "$STUB/hostname" "$STUB/whoami" "$STUB/git"
 
-# Source actor.sh in a fresh shell and print what it resolved. Empty is passed
-# instead of unset on purpose: actor.sh must treat both the same way.
+# Writes the [user] section GIT_EMAIL / GIT_NAME describe into ~/.gitconfig (no
+# file at all when both are empty), after clearing every git config file.
+write_gitconfig() {
+  rm -rf "$FAKE_HOME/.gitconfig" "$FAKE_HOME/.gitconfig-work" "$FAKE_HOME/.config"
+  if [ -n "$GIT_EMAIL" ] || [ -n "$GIT_NAME" ]; then
+    {
+      echo "[user]"
+      if [ -n "$GIT_EMAIL" ]; then printf '\temail = %s\n' "$GIT_EMAIL"; fi
+      if [ -n "$GIT_NAME" ];  then printf '\tname = %s\n'  "$GIT_NAME";  fi
+    } > "$FAKE_HOME/.gitconfig"
+  fi
+}
+
+# Source the actor script under test in a fresh shell and print what it resolved.
+# Empty is passed instead of unset on purpose: the cascade must treat both alike.
+# USER/USERNAME are cleared so the login level goes through the whoami stub.
 resolve() {
-  PATH="$STUB:$PATH" \
+  HOME="$FAKE_HOME" XDG_CONFIG_HOME= PATH="$STUB:$PATH" USER="${LOGIN_ENV:-}" USERNAME= \
+  CLAUDE_PLUGIN_ROOT="${ROOT_DIR:-$REPO/plugins/rogue}" PLUGIN_ROOT="${ROOT_DIR:-$REPO/plugins/codex}" \
   ROGUE_ACTOR_EMAIL="${SEED_EMAIL:-}" ROGUE_ACTOR_NAME="${SEED_NAME:-}" \
   CLAUDE_CODE_USER_EMAIL="${HOST_EMAIL:-}" \
-  STUB_GIT_EMAIL="${GIT_EMAIL:-}" STUB_GIT_NAME="${GIT_NAME:-}" \
   STUB_HOSTNAME="${HOST_NAME:-}" STUB_WHOAMI="${WHO:-}" \
     "$SH" -c '. "$1"; printf "%s|%s" "$ROGUE_ACTOR_EMAIL" "$ROGUE_ACTOR_NAME"' _ "$ACTOR"
 }
 
 assert_actor() {
   local expected="$1" label="$2" actual
+  write_gitconfig
   actual="$(resolve)"
   if [ "$actual" != "$expected" ]; then
     echo "FAIL [$label]: expected <$expected> but got <$actual>" >&2; exit 1
@@ -66,14 +80,17 @@ assert_actor() {
 
 # Every case sets the whole environment explicitly, so no state leaks between them.
 scenario() {
-  SEED_EMAIL=""; SEED_NAME=""; HOST_EMAIL=""
+  SEED_EMAIL=""; SEED_NAME=""; HOST_EMAIL=""; LOGIN_ENV=""; ROOT_DIR=""
   GIT_EMAIL=""; GIT_NAME=""; HOST_NAME="devbox"; WHO="jane"
 }
+
+echo "── plugins/rogue/scripts/actor.sh ──"
+ACTOR="$ROGUE_ACTOR"
 
 # ── Case 1: normal dev machine — real git identity, no host email (no regression)
 scenario
 GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
-assert_actor "jane@corp.com|Jane Dev" "git identity still wins when CLAUDE_CODE_USER_EMAIL is absent"
+assert_actor "jane@corp.com|Jane Dev" "git identity from ~/.gitconfig wins when CLAUDE_CODE_USER_EMAIL is absent"
 
 # ── Case 2: CLAUDE_CODE_USER_EMAIL outranks a real git identity ───────────────
 scenario
@@ -135,12 +152,12 @@ assert_actor "claude.dubois@corp.com|Claudia Claude-Smith" "names merely contain
 # ── Case 11: fields resolve independently (synthetic email, real git name) ────
 scenario
 GIT_EMAIL="noreply@anthropic.com"; GIT_NAME="Jane Dev"; HOST_NAME="devbox"
-assert_actor "unknown@devbox|Jane Dev" "email and name cascades are independent"
+assert_actor "jane@devbox|Jane Dev" "email and name cascades are independent"
 
-# ── Case 12: whoami is the last human candidate for the name ─────────────────
+# ── Case 12: no git identity → login@hostname / login, never blank ────────────
 scenario
 GIT_EMAIL=""; GIT_NAME=""; WHO="jane"; HOST_NAME="devbox"
-assert_actor "unknown@devbox|jane" "whoami used for name when git config is absent"
+assert_actor "jane@devbox|jane" "login@hostname and login when no git identity exists"
 
 # ── Case 13: the synthetic host email must not leak in through its local-part ─
 # Screening the full address but splitting it first would report the actor as
@@ -157,5 +174,170 @@ HOST_EMAIL="claude@corp.com"
 GIT_EMAIL=""; GIT_NAME=""; WHO="jane"; HOST_NAME="devbox"
 assert_actor "claude@corp.com|jane" "real address kept as email, unusable local-part falls through"
 
+# ── Case 15: $USER outranks whoami for the login level ───────────────────────
+scenario
+LOGIN_ENV="envuser"; WHO="jane"
+assert_actor "envuser@devbox|envuser" "USER from the environment is the login when set"
+
+# ── Case 16: [include] path is followed, one level ────────────────────────────
+scenario
+write_gitconfig
+printf '[include]\n\tpath = ~/.gitconfig-work\n' > "$FAKE_HOME/.gitconfig"
+printf '[user]\n\temail = work@corp.com\n\tname = "Work Me"\n' > "$FAKE_HOME/.gitconfig-work"
+actual="$(resolve)"
+[ "$actual" = "work@corp.com|Work Me" ] || { echo "FAIL [include]: got <$actual>" >&2; exit 1; }
+echo "  ok: identity inside an [include] path file is used (quoted value unwrapped)"
+
+# ── Case 17: [includeIf] is not evaluated ─────────────────────────────────────
+scenario
+write_gitconfig
+printf '[includeIf "gitdir:~/work/"]\n\tpath = ~/.gitconfig-work\n' > "$FAKE_HOME/.gitconfig"
+printf '[user]\n\temail = never@corp.com\n' > "$FAKE_HOME/.gitconfig-work"
+actual="$(resolve)"
+[ "$actual" = "jane@devbox|jane" ] || { echo "FAIL [includeIf]: got <$actual>" >&2; exit 1; }
+echo "  ok: a conditional include is skipped"
+
+# ── Case 18: $XDG_CONFIG_HOME/git/config is read; ~/.gitconfig overrides it ──
+scenario
+write_gitconfig
+mkdir -p "$FAKE_HOME/.config/git"
+printf '[user]\n\temail = xdg@corp.com\n\tname = Xdg Me\n' > "$FAKE_HOME/.config/git/config"
+actual="$(resolve)"
+[ "$actual" = "xdg@corp.com|Xdg Me" ] || { echo "FAIL [xdg]: got <$actual>" >&2; exit 1; }
+echo "  ok: XDG config is used when ~/.gitconfig is absent"
+printf '[user]\n\temail = home@corp.com\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "home@corp.com|Xdg Me" ] || { echo "FAIL [xdg override]: got <$actual>" >&2; exit 1; }
+echo "  ok: ~/.gitconfig overrides the XDG value, field by field"
+
+# ── Case 19: a damaged install (no git-identity.sh) still resolves an actor ──
+scenario
+ROOT_DIR="$FAKE_HOME"
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "jane@devbox|jane" "missing git-identity.sh degrades to login@hostname"
+
+# ── Case 20: a CRLF ~/.gitconfig yields no trailing \r ─────────────────────
+# curl would put a bare CR in the actor header and a strict server rejects the
+# request; git-identity.ps1 and shared.mjs already drop it, so the shells must too.
+scenario
+write_gitconfig
+printf '[user]\r\n\temail = jane@corp.com\r\n\tname = Jane Dev\r\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "jane@corp.com|Jane Dev" ] || { echo "FAIL [crlf]: got <$(printf '%s' "$actual" | od -c | head -2)>" >&2; exit 1; }
+echo "  ok: CRLF line endings in the git config do not leak a \\r into the actor"
+
+# ── Case 21: `[include] path = /dev/stdin` must not drain the hook payload ─────
+# Every sh bridge resolves the actor BEFORE it reads the payload, so a parser
+# that inherits stdin would leave the server an empty body and the hook fails open.
+scenario
+write_gitconfig
+printf '[include]\n\tpath = /dev/stdin\n' > "$FAKE_HOME/.gitconfig"
+actual="$(printf '{"tool":"Bash"}' | HOME="$FAKE_HOME" XDG_CONFIG_HOME= PATH="$STUB:$PATH" USER= USERNAME= \
+  CLAUDE_PLUGIN_ROOT="$REPO/plugins/rogue" PLUGIN_ROOT="$REPO/plugins/codex" \
+  ROGUE_ACTOR_EMAIL= ROGUE_ACTOR_NAME= CLAUDE_CODE_USER_EMAIL= STUB_HOSTNAME=devbox STUB_WHOAMI=jane \
+  "$SH" -c '. "$1"; printf "%s|%s|%s" "$ROGUE_ACTOR_EMAIL" "$ROGUE_ACTOR_NAME" "$(cat)"' _ "$ACTOR")"
+[ "$actual" = 'jane@devbox|jane|{"tool":"Bash"}' ] || { echo "FAIL [stdin include]: got <$actual>" >&2; exit 1; }
+echo "  ok: an include of /dev/stdin reads nothing; the payload survives for the bridge"
+
+# ── Case 22: a BOM-prefixed ~/.gitconfig (Windows editors write one) is read ───
+# git accepts the BOM; git-identity.ps1 and shared.mjs strip it, so the awk reader
+# must too, or the same user is two roster rows: sh reports login@host, ps1 the git identity.
+scenario
+write_gitconfig
+printf '\357\273\277[user]\n\temail = bom@corp.com\n\tname = Bom Me\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "bom@corp.com|Bom Me" ] || { echo "FAIL [bom]: got <$actual>" >&2; exit 1; }
+echo "  ok: a UTF-8 BOM before [user] does not hide the section"
+
+# ── Case 23: git's value syntax — escaped quotes, quoted comment characters ────
+scenario
+write_gitconfig
+printf '[user]\n\temail = jane@corp.com # work\n\tname = "Jane \\"JJ\\" Dev" ; nick\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'jane@corp.com|Jane "JJ" Dev' ] || { echo "FAIL [escapes]: got <$actual>" >&2; exit 1; }
+echo "  ok: backslash-escaped quotes survive and a trailing comment is dropped, as git reads them"
+
+echo "── scripts/shared/actor.sh (codex copy) ──"
+ACTOR="$SHARED_ACTOR"
+
+scenario
+SEED_EMAIL="mdm@corp.com"; SEED_NAME="MDM Provisioned"
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "mdm@corp.com|MDM Provisioned" "env file actor wins over the git identity"
+
+scenario
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "jane@corp.com|Jane Dev" "git identity from ~/.gitconfig when the env file has none"
+
+scenario
+SEED_EMAIL="mdm@corp.com"
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "mdm@corp.com|Jane Dev" "fields resolve independently"
+
+scenario
+assert_actor "jane@devbox|jane" "login@hostname and login when no git identity exists"
+
+scenario
+HOST_NAME=""
+assert_actor "jane|jane" "login alone when the hostname is unavailable"
+
+scenario
+HOST_NAME=""; WHO=""
+assert_actor "unknown|unknown" "the unknown marker when login and hostname are both unavailable, never blank"
+
+scenario
+write_gitconfig
+printf '[user]\r\n\temail = jane@corp.com\r\n\tname = Jane Dev\r\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = "jane@corp.com|Jane Dev" ] || { echo "FAIL [shared crlf]: got <$actual>" >&2; exit 1; }
+echo "  ok: CRLF git config read cleanly by the shared cascade"
+
+scenario
+write_gitconfig
+printf '\357\273\277[user]\n\temail = bom@corp.com\n\tname = "Bom \\"B\\" Me"\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'bom@corp.com|Bom "B" Me' ] || { echo "FAIL [shared bom]: got <$actual>" >&2; exit 1; }
+echo "  ok: BOM and escaped quotes read by the shared cascade"
+
+# ── git's control escapes: \n, \t and \b decode to a space, never to n/t/b ────
+# A real control character cannot travel in a header value and would split the
+# two-line output of git-identity.sh's scan, so all three collapse to a space.
+scenario
+write_gitconfig
+printf '[user]\n\temail = "a\\nb@corp.com"\n\tname = "Jane\\nQ\\tDev\\bX"\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'a b@corp.com|Jane Q Dev X' ] || { echo "FAIL [shared escapes]: got <$actual>" >&2; exit 1; }
+echo "  ok: quoted \\n, \\t and \\b decode to a space, not to the letters n/t/b"
+
+scenario
+write_gitconfig
+printf '[user]\n\tname = "C:\\\\dev\\\\me"\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'jane@devbox|C:\dev\me' ] || { echo "FAIL [shared backslash]: got <$actual>" >&2; exit 1; }
+echo "  ok: an escaped backslash stays one backslash"
+
+# ── whitespace-only ROGUE_ACTOR_* is absent, not present ──────────────────────
+# Untrimmed it would ship as a blank identity AND skip the git/login cascade,
+# while ship-logs.sh (which trims) sends a different identity for the same install.
+scenario
+SEED_EMAIL="   "; SEED_NAME="$(printf '\t \n')"
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "jane@corp.com|Jane Dev" "a whitespace-only ROGUE_ACTOR_* falls through to the git identity"
+
+scenario
+SEED_EMAIL="   "; SEED_NAME="   "
+assert_actor "jane@devbox|jane" "and on to login@hostname when there is no git identity either"
+
+scenario
+SEED_EMAIL="  mdm@corp.com  "; SEED_NAME="  MDM Provisioned  "
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "mdm@corp.com|MDM Provisioned" "a padded ROGUE_ACTOR_* is stored trimmed, as the shipper sends it"
+
+# ── The git binary was never run, in any case above ──────────────────────────
+if [ -s "$TRIPWIRE" ]; then
+  echo "FAIL [git tripwire]: the cascade invoked git:" >&2; cat "$TRIPWIRE" >&2; exit 1
+fi
+echo "  ok: git binary never invoked"
+
 echo
-echo "All actor.sh cascade tests passed (SH=$SH)."
+echo "All actor cascade tests passed (SH=$SH)."

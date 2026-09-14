@@ -393,24 +393,14 @@ to.
 
 **Hard rule, and the most fragile thing in this document.** "The shipper resolves the
 same cascade as the heartbeat, so the two cannot disagree" was hand-waving. Nothing
-enforces it, and two of the six plugins already break it:
-
-- **Cursor** resolves `actor_email` / `actor_name` as **shell locals** in
-  `plugins/cursor/scripts/hook.sh:147-158` — never exported, so a child process
-  inherits nothing.
-- **Gemini** resolves them as **module locals** in `heartbeat.mjs:36-37` (a duplicate
-  of `hook.mjs`'s `resolveActor`), never placed in `process.env`.
-
-And the cascades are **not** the same, so an independent re-resolve does not merely
-risk drift, it produces it. On a machine with no `git config --global user.email`:
-
-| | fallback | value |
-|---|---|---|
-| `scripts/actor.sh` (claude, codex, copilot, antigravity) | `hostname` | `amos-mbp` |
-| Cursor `hook.sh:151-158` | `$USER@$(hostname)` | `amos@amos-mbp` |
-
-Two identities for one machine, so the heartbeat's roster row and the shipper's
-`log_source` row would never meet. Nothing errors; the logs just attach to nothing.
+enforces it, and the cascades are not identical. Every sh bridge sources
+`scripts/actor.sh` (Cursor included, synced from `scripts/shared/actor.sh`) and ends
+at `<login>@<hostname>`, but `plugins/rogue`'s own `actor.sh` ranks
+`CLAUDE_CODE_USER_EMAIL` above git and screens the Cowork sandbox identity, and
+Gemini resolves in `shared.mjs` without touching `process.env`. A shipper that
+re-resolved would sooner or later pick a different level than its caller did, and
+the heartbeat's roster row and the shipper's `log_source` row would never meet.
+Nothing errors; the logs just attach to nothing.
 
 So the resolution order is:
 
@@ -1205,12 +1195,12 @@ Cases:
 - **the shipper has no actor cascade of its own**: with `ROGUE_ACTOR_EMAIL` unset and
   no `scripts/actor.sh` reachable, it **skips the file** and logs
   `outcome=skip reason=no-actor` — assert it does *not* fall back to `hostname`,
-  `whoami` or `$USER@$(hostname)`. This is the regression test for the Cursor drift:
-  `hook.sh`'s fallback is `$USER@$(hostname)` where `actor.sh`'s is `hostname`, so any
-  private cascade produces a second identity for the same machine;
+  `whoami` or `$USER@$(hostname)`. Any private cascade is a second identity for the
+  same machine: the Claude bridge's screening alone guarantees the cascades differ;
 - **every caller passes down what it resolved**: `cursor/scripts/hook.sh` prefixes the
-  invocation with `ROGUE_ACTOR_EMAIL=`/`ROGUE_ACTOR_NAME=` (its actor lives in plain
-  shell locals, so without that the child inherits nothing and skips),
+  invocation with `ROGUE_ACTOR_EMAIL=`/`ROGUE_ACTOR_NAME=` (`actor.sh` exports both,
+  so the prefix states the contract and covers an install whose `actor.sh` predates
+  that export),
   `gemini/scripts/heartbeat.mjs` assigns them into `process.env` before importing the
   shipper (`loadEnvFiles()` deliberately does not mutate `process.env`), and the five
   PowerShell callers set them as `$env:` before spawning. A wiring assertion like

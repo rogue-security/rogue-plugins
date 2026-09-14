@@ -31,7 +31,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { EXT_ROOT, loadEnvFiles, gitConfig, installId } from "./shared.mjs";
+import { EXT_ROOT, loadEnvFiles, resolveActor, installId } from "./shared.mjs";
 
 // ── beacon throttle ─────────────────────────────────────────────────────────
 // A NUMERIC ZERO DISABLES the throttle; a non-numeric value falls back to the
@@ -110,16 +110,8 @@ async function main() {
   const apiKey = env.ROGUE_API_KEY || "";
   if (!apiKey) return; // not configured → no-op
 
-  const email =
-    env.ROGUE_ACTOR_EMAIL || gitConfig("user.email") || os.hostname() || "";
-  let name = env.ROGUE_ACTOR_NAME || gitConfig("user.name");
-  if (!name) {
-    try {
-      name = os.userInfo().username;
-    } catch {
-      name = "";
-    }
-  }
+  // Same cascade hook.mjs runs, so the roster row and the event rows agree.
+  const { email, name } = resolveActor(env);
 
   const base = (env.ROGUE_BASE_URL || "https://api.rogue.security").replace(
     /\/+$/,
