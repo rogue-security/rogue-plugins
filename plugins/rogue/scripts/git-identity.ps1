@@ -34,8 +34,11 @@ function ConvertFrom-RogueGitValue {
 function Read-RogueGitConfig {
     param([string]$Path, [string]$UserHome, [hashtable]$Id, [int]$Depth)
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    # Per file, not per cascade: an unreadable XDG config must not stop ~/.gitconfig
+    # from being read, which is what the caller's single outer catch would do.
+    try { $lines = [System.IO.File]::ReadAllLines($Path) } catch { return }
     $section = ''
-    foreach ($raw in [System.IO.File]::ReadAllLines($Path)) {
+    foreach ($raw in $lines) {
         $line = $raw.Trim()
         if ($line -eq '' -or $line[0] -eq '#' -or $line[0] -eq ';') { continue }
         if ($line[0] -eq '[') {

@@ -95,6 +95,20 @@ try {
     Assert-Eq $id.Email 'home@corp.com' '~/.gitconfig overrides the XDG value'
     Assert-Eq $id.Name  'Xdg Me'        'a field only XDG carries survives'
 
+    # An unreadable file is skipped, not fatal: the cascade must still reach
+    # ~/.gitconfig. POSIX only - a deny ACL is not the same experiment on Windows.
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+        $h = New-TestHome
+        $xdgCfg = [System.IO.Path]::Combine($h, '.config', 'git', 'config')
+        Write-Cfg $xdgCfg "[user]`n`temail = xdg@corp.com`n"
+        Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`n`tname = Home Me`n"
+        & chmod 000 $xdgCfg
+        $id = Read-GitId
+        & chmod 600 $xdgCfg
+        Assert-Eq $id.Name  'Home Me' 'an unreadable XDG config does not stop ~/.gitconfig being read'
+        Assert-Eq $id.Email ''        'and contributes nothing itself'
+    }
+
     $h = New-TestHome
     Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`r`n`temail = jane@corp.com`r`n`tname = Jane Dev`r`n"
     $id = Read-GitId
