@@ -14,7 +14,8 @@
 #
 # Env knobs:
 #   ROGUE_NON_INTERACTIVE=1   no prompts (used by auto-update.sh re-invocation)
-#   ROGUE_API_KEY=...         pre-seed the API key (skips the prompt)
+#   ROGUE_API_KEY=...         pre-seed the API key (skips the prompt; ignored when
+#                             /etc/rogue/env already holds one — that file is read alone)
 #   ROGUE_ACTOR_EMAIL=...     pre-seed actor identity
 #   ROGUE_ACTOR_NAME=...
 #   ROGUE_PLUGIN_REPO=...     marketplace source (default below)
@@ -47,18 +48,26 @@
 #
 set -u
 
+# A base URL that ends in a slash composes "//api/v1/..." on every request, which
+# the API does not route. Applied wherever the value can enter.
+trim_base_url() {
+  while [ "${ROGUE_BASE_URL%/}" != "$ROGUE_BASE_URL" ]; do ROGUE_BASE_URL="${ROGUE_BASE_URL%/}"; done
+}
+
 # ── Config ──────────────────────────────────────────────────────────────────
 ROGUE_PLUGIN_REPO="${ROGUE_PLUGIN_REPO:-qualifire-dev/rogue-plugins}"
 ROGUE_BASE_URL_DEFAULT="https://api.rogue.security"
 BASE_URL_EXPLICIT=0
 [ -z "${ROGUE_BASE_URL:-}" ] || BASE_URL_EXPLICIT=1
 ROGUE_BASE_URL="${ROGUE_BASE_URL:-$ROGUE_BASE_URL_DEFAULT}"
+trim_base_url
 MARKETPLACE_NAME="rogue-marketplace"
 PLUGIN_NAME="rogue"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 STATUSLINE_PATH="$CONFIG_DIR/hooks/rogue-statusline.sh"
 SETTINGS_PATH="$CONFIG_DIR/settings.json"
 ENV_FILE="$HOME/.rogue-env"
+MACHINE_ENV_FILE="/etc/rogue/env"
 
 NON_INTERACTIVE="${ROGUE_NON_INTERACTIVE:-0}"
 # Explicit agent selection via --claude/--codex/--cursor. Empty = auto-detect all.
@@ -676,37 +685,102 @@ key_hint() { # key_hint <key>
   if [ "${#k}" -le 8 ]; then printf '%s' "$k"; else printf '%s…' "${k:0:8}"; fi
 }
 
+env_file_has_key() { # env_file_has_key <file>
+  [ -r "$1" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$1"
+}
+
+env_file_value() { # env_file_value <file> <VAR> — first assignment, unquoted, without sourcing
+  sed -nE "s/^[[:space:]]*(export[[:space:]]+)?$2=[\"']?([^\"'[:space:]]+).*/\2/p" "$1" | head -1
+}
+
+# Owner uid and octal mode, or nothing when stat cannot say.
+file_owner_mode() { # file_owner_mode <file>
+  stat -Lc '%u %a' "$1" 2>/dev/null || stat -Lf '%u %Lp' "$1" 2>/dev/null
+}
+
+# Same rule as rogue_env_is_trusted (scripts/shared/env-file.sh) for the system
+# path, inlined because this installer is one downloaded file: root-owned, and
+# neither group nor other may write.
+machine_env_is_trusted() { # machine_env_is_trusted <file>
+  local info owner mode
+  info="$(file_owner_mode "$1")" || return 1
+  owner="${info%% *}"; mode="${info#* }"
+  case "$owner:$mode" in *[!0-9:]*|:*) return 1 ;; esac
+  [ "$owner" = 0 ] && [ "$((0$mode & 022))" = 0 ]
+}
+
+# Resolve actor defaults (same cascade as plugins/rogue/scripts/actor.sh) so key
+# validation can register the roster row under the real email, deduped with the
+# later SessionStart heartbeats. Explicit flag/env beats on-disk.
+resolve_actor_defaults() { # resolve_actor_defaults <flag-email> <flag-name> → DEF_EMAIL, DEF_NAME
+  DEF_EMAIL="${1:-${ROGUE_ACTOR_EMAIL:-$(git config --global user.email 2>/dev/null)}}"
+  DEF_NAME="${2:-${ROGUE_ACTOR_NAME:-$(git config --global user.name 2>/dev/null)}}"
+  [ -n "$DEF_EMAIL" ] || DEF_EMAIL="${CLAUDE_CODE_USER_EMAIL:-}"
+  [ -n "$DEF_NAME" ]  || { DEF_NAME="${CLAUDE_CODE_USER_EMAIL:-}"; DEF_NAME="${DEF_NAME%@*}"; }
+  [ -n "$DEF_EMAIL" ] || DEF_EMAIL="$(hostname 2>/dev/null)"
+  [ -n "$DEF_NAME" ]  || DEF_NAME="$(whoami 2>/dev/null)"
+}
+
+# Validate the machine file's key (and register the roster row) the way the
+# hooks will use it: its own base URL, else the default; its own actor email,
+# else the cascade. Nothing is saved, so a bad key can only be reported.
+validate_machine_env_key() {
+  local key url code
+  key="$(env_file_value "$MACHINE_ENV_FILE" ROGUE_API_KEY)"
+  url="$(env_file_value "$MACHINE_ENV_FILE" ROGUE_BASE_URL)"
+  ROGUE_BASE_URL="${url:-$ROGUE_BASE_URL_DEFAULT}"
+  trim_base_url
+  resolve_actor_defaults "$(env_file_value "$MACHINE_ENV_FILE" ROGUE_ACTOR_EMAIL)" ""
+  code="$(status_check "$key" "$DEF_EMAIL")"
+  case "$code" in
+    200)     ok "Key validated${STATUS_ORG:+ — org: $STATUS_ORG}" ;;
+    401|403) warn "The key in $MACHINE_ENV_FILE is invalid (HTTP $code) — every hook fails open until the MDM script pushes a valid one" ;;
+    '')      warn "Could not reach $ROGUE_BASE_URL to validate the key in $MACHINE_ENV_FILE" ;;
+    *)       warn "Unexpected response (HTTP $code) validating the key in $MACHINE_ENV_FILE" ;;
+  esac
+}
+
+# The hooks read a keyed machine env file alone, so a user env file written
+# here would never be consulted, and a key passed to the installer goes nowhere.
+use_machine_env_file() {
+  ok "Credentials come from the machine env file ${C_DIM}$MACHINE_ENV_FILE${C_RESET} — no API key prompt, $ENV_FILE not written"
+  if [ -n "${ROGUE_API_KEY:-}" ] || [ "$BASE_URL_EXPLICIT" = "1" ]; then
+    warn "The passed API key / base URL is ignored: $MACHINE_ENV_FILE is read alone. Rotate it through the MDM script (docs/deployment.md, Rotating the API key)."
+  fi
+  validate_machine_env_key
+}
+
 configure_credentials() {
+  if env_file_has_key "$MACHINE_ENV_FILE"; then
+    if machine_env_is_trusted "$MACHINE_ENV_FILE"; then
+      use_machine_env_file
+      return
+    fi
+    # Kiro and the log shipper skip an untrusted machine file, so the user file
+    # must still be written for them.
+    warn "$MACHINE_ENV_FILE holds ROGUE_API_KEY but is not root-owned with mode 644 or stricter (owner/mode: $(file_owner_mode "$MACHINE_ENV_FILE")) — Kiro and log shipping ignore it; configuring $ENV_FILE instead"
+  fi
+
   # Capture explicit input (CLI flags / env vars) BEFORE sourcing the on-disk
-  # files — otherwise a stored key would clobber a key the caller passed to
+  # file — otherwise a stored key would clobber a key the caller passed to
   # rotate it. Explicit user intent wins; on-disk is the fallback.
   local flag_key="${ROGUE_API_KEY:-}"
   local flag_email="${ROGUE_ACTOR_EMAIL:-}"
   local flag_name="${ROGUE_ACTOR_NAME:-}"
   local flag_base_url="$ROGUE_BASE_URL"
 
-  # Pull anything already on disk into scope: the first env file holding
-  # ROGUE_API_KEY, as the hooks read it.
-  for _env_file in /etc/rogue/env "$ENV_FILE"; do
-    if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
-      . "$_env_file"; break
-    fi
-  done
+  # Whole file, not only a keyed one: a user file with no ROGUE_API_KEY can still
+  # carry the ROGUE_BASE_URL validation must use and the ROGUE_ACTOR_* identity
+  # write_env_file would otherwise replace from the cascade.
+  [ ! -r "$ENV_FILE" ] || . "$ENV_FILE"
 
   [ "$BASE_URL_EXPLICIT" = "1" ] && ROGUE_BASE_URL="$flag_base_url"
+  trim_base_url
 
   local cur_key="${flag_key:-${ROGUE_API_KEY:-}}"
 
-  # Resolve actor defaults up front (same cascade as plugins/rogue/scripts/actor.sh)
-  # so key validation can register the roster row under the real email, deduped
-  # with the later SessionStart heartbeats. Explicit flag/env beats on-disk.
-  local def_email def_name
-  def_email="${flag_email:-${ROGUE_ACTOR_EMAIL:-$(git config --global user.email 2>/dev/null)}}"
-  def_name="${flag_name:-${ROGUE_ACTOR_NAME:-$(git config --global user.name 2>/dev/null)}}"
-  [ -n "$def_email" ] || def_email="${CLAUDE_CODE_USER_EMAIL:-}"
-  [ -n "$def_name" ]  || { def_name="${CLAUDE_CODE_USER_EMAIL:-}"; def_name="${def_name%@*}"; }
-  [ -n "$def_email" ] || def_email="$(hostname 2>/dev/null)"
-  [ -n "$def_name" ]  || def_name="$(whoami 2>/dev/null)"
+  resolve_actor_defaults "$flag_email" "$flag_name"
+  local def_email="$DEF_EMAIL" def_name="$DEF_NAME"
 
   # Non-interactive: persist whatever key is in scope (env-passed or on-disk),
   # filling actor identity from the resolved cascade. A key passed only via the
@@ -993,7 +1067,7 @@ parse_args() {
       --actor-email)     [ -n "$val" ] || { val="$2"; shift; }; ROGUE_ACTOR_EMAIL="$val" ;;
       --actor-name)      [ -n "$val" ] || { val="$2"; shift; }; ROGUE_ACTOR_NAME="$val" ;;
       --plugin-repo)     [ -n "$val" ] || { val="$2"; shift; }; ROGUE_PLUGIN_REPO="$val" ;;
-      --base-url)        [ -n "$val" ] || { val="$2"; shift; }; ROGUE_BASE_URL="$val"; BASE_URL_EXPLICIT=1 ;;
+      --base-url)        [ -n "$val" ] || { val="$2"; shift; }; ROGUE_BASE_URL="$val"; trim_base_url; BASE_URL_EXPLICIT=1 ;;
       --claude)          WANT="$WANT claude" ;;
       --codex)           WANT="$WANT codex" ;;
       --cursor)          WANT="$WANT cursor" ;;
@@ -1053,7 +1127,7 @@ main() {
     [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
   fi
 
-  # Credentials once — every plugin reads the shared ~/.rogue-env.
+  # Credentials once — every plugin reads the machine env file, else the shared ~/.rogue-env.
   configure_credentials
 
   for a in $agents; do
