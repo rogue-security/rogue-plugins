@@ -48,7 +48,7 @@ function Send-RogueProtectionAck {
     if ((Get-Content -LiteralPath "$script:RPDirectory/ack" -Raw -ErrorAction SilentlyContinue) -eq $identity) { return }
     try {
         $body = @{ protocolVersion=1; revision=$state.revision; status='applied'; aidrPaused=[bool]$state.aidr.paused; aispmPaused=[bool]$state.aispm.paused } | ConvertTo-Json -Compress
-        $null = Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5
+        $null = Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5
         Write-RogueProtectionFile "$script:RPDirectory/ack" $identity
     } catch { }
 }
@@ -59,7 +59,7 @@ function Update-RogueProtection {
     } catch { return }
     try {
         Write-RogueProtectionFile "$script:RPDirectory/attempt" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString())
-        $state = Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/state" -Headers @{'x-rogue-api-key'=$script:RPKey} -TimeoutSec 5
+        $state = Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/state" -Headers @{'x-rogue-api-key'=$script:RPKey} -TimeoutSec 5
         $old = Get-RogueProtectionState
         if ((Test-RogueProtectionDecision $state) -and ($null -eq $old -or $state.revision -ge $old.revision)) {
             try {
@@ -70,7 +70,7 @@ function Update-RogueProtection {
                 $script:RPPersistenceFailed=$true
                 try { Write-RogueProtectionFile "$script:RPDirectory/persistence-failed" '1' } catch {}
                 $body=@{protocolVersion=1;revision=$state.revision;status='failed';aidrPaused=[bool]$state.aidr.paused;aispmPaused=[bool]$state.aispm.paused;error='state_persistence_failed'} | ConvertTo-Json -Compress
-                try { $null=Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
+                try { $null=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
             }
         }
     } catch { } finally { $lock.Dispose() }
@@ -81,7 +81,11 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
     if (-not $BaseUrl) { $BaseUrl='https://api.rogue.security' }
     $script:RPBase=$BaseUrl.TrimEnd('/')
     $root=$env:ROGUE_PROTECTION_DIR
-    if (-not $root) { $root=Join-Path ([Environment]::GetFolderPath('UserProfile')) '.rogue/protection' }
+    if (-not $root) {
+        $profilePath=$env:USERPROFILE
+        if (-not $profilePath) { $profilePath=[Environment]::GetFolderPath('UserProfile') }
+        $root=Join-Path $profilePath '.rogue/protection'
+    }
     $hash=[Security.Cryptography.SHA256]::Create()
     try { $id=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes("$script:RPBase`n$Key")))).Replace('-','').ToLowerInvariant() } finally { $hash.Dispose() }
     $script:RPDirectory=Join-Path $root "$Slug-default-$id"
@@ -99,7 +103,7 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
             if (-not $previousKey) { continue }
             try {
                 $body=@{type='coding_agent';name=$Slug;family=$Family;host=[Environment]::MachineName;version=$Version} | ConvertTo-Json -Compress
-                $restored=Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/enroll" -Method Post -Headers @{'x-rogue-api-key'=$Key;'x-rogue-installation-key'=$previousKey} -ContentType 'application/json' -Body $body -TimeoutSec 5
+                $restored=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/enroll" -Method Post -Headers @{'x-rogue-api-key'=$Key;'x-rogue-installation-key'=$previousKey} -ContentType 'application/json' -Body $body -TimeoutSec 5
                 if ($restored.apiKey -ne $previousKey) { continue }
                 Write-RogueProtectionFile "$script:RPDirectory/installation-directory" $previous.FullName
                 $script:RPDirectory=$previous.FullName
@@ -121,7 +125,7 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
                 if (-not $nonce) { $nonce=[Guid]::NewGuid().ToString('N'); Write-RogueProtectionFile "$script:RPDirectory/enrollment-nonce" $nonce }
                 $body=@{ enrollmentNonce=$nonce; type='coding_agent'; name=$Slug; family=$Family; host=[Environment]::MachineName; version=$Version } | ConvertTo-Json -Compress
                 Remove-Item -LiteralPath "$script:RPDirectory/legacy-server" -Force -ErrorAction SilentlyContinue
-                $enrolled=Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/enroll" -Method Post -Headers @{'x-rogue-api-key'=$Key} -ContentType 'application/json' -Body $body -TimeoutSec 5
+                $enrolled=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/enroll" -Method Post -Headers @{'x-rogue-api-key'=$Key} -ContentType 'application/json' -Body $body -TimeoutSec 5
                 if ($enrolled.alreadyEnrolled) { $enrolled | Add-Member -NotePropertyName apiKey -NotePropertyValue $Key -Force }
                 if ($enrolled.apiKey) { Write-RogueProtectionFile $credential $enrolled.apiKey }
             }
@@ -189,7 +193,7 @@ function Enter-RogueProtection {
             $state=Get-RogueProtectionState
             if ($state) {
                 $body=@{protocolVersion=1;revision=$state.revision;status='failed';aidrPaused=$state.aidr.paused;aispmPaused=$state.aispm.paused;error='state_persistence_failed'} | ConvertTo-Json -Compress
-                try { $null=Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
+                try { $null=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
             }
             return $false
         }

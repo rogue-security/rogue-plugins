@@ -19,11 +19,12 @@ function isolateEnv(directory) {
   }
 }
 isolateEnv(fixturePlugins);
-let revision=1, paused=true, available=true;
+let revision=1, paused=true, available=true, legacy=false;
 const requests=[];
 const server=http.createServer(async (req,res) => {
   let body=''; for await (const chunk of req) body+=chunk;
   requests.push({path:req.url, body, key:req.headers["x-rogue-api-key"], installationKey:req.headers["x-rogue-installation-key"]});
+  if (legacy && req.url.includes('/hooks/protection/')) { res.statusCode=404; res.end('{}'); return; }
   if (!available) { res.statusCode=503; res.end('{}'); return; }
   res.setHeader('content-type','application/json');
   if (req.url.endsWith('/enroll')) { res.end(JSON.stringify({apiKey:'installation_test_key', installation:{id:'test',type:'coding_agent',role:'coding'}})); return; }
@@ -107,6 +108,17 @@ try {
     assert(uploads.length>0, output.err + freshOutput.err + JSON.stringify({files:fs.readdirSync(directory),state:fs.readFileSync(path.join(directory,"state.json"),"utf8"),paths:requests.slice(start).map(call=>call.path)}));
     assert(uploads.every(call=>call.key==='installation_test_key' && !Buffer.from(JSON.parse(call.body).content_b64,'base64').toString().includes('paused-node-canary')));
     assert(uploads.some(call=>Buffer.from(JSON.parse(call.body).content_b64,'base64').toString().includes('fresh-node-canary')));
+  });
+  await test('PowerShell legacy enrollment works with the shipper error preference', {skip:!process.env.ROGUE_TEST_PWSH}, async () => {
+    legacy=true;
+    try {
+      const profile=path.join(temp,'ps-legacy-profile'); fs.mkdirSync(profile);
+      const script=`$ErrorActionPreference='SilentlyContinue'; . '${path.join(repo,'scripts/shared/protection.ps1')}'; $key=Initialize-RogueProtection -Key 'legacy_key' -BaseUrl '${base}' -Slug 'claude' -Family 'claude'; if ($key -ne 'legacy_key' -or -not (Enter-RogueProtection)) {exit 9}; Write-Output 'allowed'`;
+      const result=await run(process.env.ROGUE_TEST_PWSH,['-NoProfile','-Command',script],{USERPROFILE:profile,ROGUE_PROTECTION_DIR:''},'');
+      assert.equal(result.code,0,result.err); assert.match(result.out,/allowed/);
+      const root=path.join(profile,'.rogue/protection');
+      assert(fs.readdirSync(root).some(name=>fs.existsSync(path.join(root,name,'legacy-server'))));
+    } finally {legacy=false;}
   });
   await test('PowerShell gate persists the same pause contract', {skip:!process.env.ROGUE_TEST_PWSH}, async () => {
     paused=true; revision++;
