@@ -23,7 +23,15 @@ function ConvertFrom-RogueGitValue {
     $s = $Raw.Trim(); $sb = [System.Text.StringBuilder]::new(); $quoted = $false
     for ($i = 0; $i -lt $s.Length; $i++) {
         $c = $s[$i]
-        if ($c -eq '\' -and ($i + 1) -lt $s.Length) { $i++; [void]$sb.Append($s[$i]) }
+        if ($c -eq '\' -and ($i + 1) -lt $s.Length) {
+            $i++
+            # git decodes \n, \t and \b as control characters. A control character
+            # cannot travel in an HTTP header value and would split the two-line scan
+            # output of git-identity.sh, so all three land as a space; every other
+            # escape is the literal character, as git reads it.
+            if ('n', 't', 'b' -contains $s[$i]) { [void]$sb.Append(' ') }
+            else { [void]$sb.Append($s[$i]) }
+        }
         elseif ($c -eq '"') { $quoted = -not $quoted }
         elseif (-not $quoted -and ($c -eq '#' -or $c -eq ';')) { break }
         else { [void]$sb.Append($c) }

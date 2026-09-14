@@ -4,6 +4,19 @@
 # → marker "unknown", never blank.
 # Sourced by hook.sh and heartbeat.sh after PLUGIN_ROOT is set.
 
+# Trimmed before the presence test: a whitespace-only ROGUE_ACTOR_* must fall
+# through to the git/login cascade rather than ship as blank, and the stored value
+# has to match what ship-logs.sh (which trims) sends for the same install.
+# Parameter expansion only - this runs on every hook event, so no subshell.
+_rogue_trim() {
+  _rogue_tv="$1"
+  while :; do case "$_rogue_tv" in [[:space:]]*) _rogue_tv="${_rogue_tv#?}" ;; *) break ;; esac; done
+  while :; do case "$_rogue_tv" in *[[:space:]]) _rogue_tv="${_rogue_tv%?}" ;; *) break ;; esac; done
+}
+_rogue_trim "${ROGUE_ACTOR_EMAIL:-}"; ROGUE_ACTOR_EMAIL="$_rogue_tv"
+_rogue_trim "${ROGUE_ACTOR_NAME:-}";  ROGUE_ACTOR_NAME="$_rogue_tv"
+unset _rogue_tv
+
 if [ -z "${ROGUE_ACTOR_EMAIL:-}" ] || [ -z "${ROGUE_ACTOR_NAME:-}" ]; then
   ROGUE_GIT_EMAIL=""; ROGUE_GIT_NAME=""
   if [ -r "${PLUGIN_ROOT:-}/scripts/git-identity.sh" ]; then

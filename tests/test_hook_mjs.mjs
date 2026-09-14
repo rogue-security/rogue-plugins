@@ -273,6 +273,42 @@ test("BOM-prefixed config and git's escaped quotes read as git does (one rule wi
   }
 });
 
+test("git's control escapes decode to a space, not to the letters n/t/b", async () => {
+  // A real newline or backspace cannot travel in a header value, so all three of
+  // git's control escapes collapse to a space - one rule with sh/ps1.
+  const { server, seen, port } = await startServer(200, "{}");
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", {}, (home) =>
+      seedHome(home, { gitconfig: '[user]\n\temail = "a\\nb@corp.com"\n\tname = "Jane\\nQ\\tDev\\bX"\n' }),
+    );
+    assert.equal(seen.headers["x-rogue-actor-email"], "a b@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], "Jane Q Dev X");
+  } finally {
+    server.close();
+  }
+});
+
+test("a whitespace-only ROGUE_ACTOR_* is absent, so the git identity is used", async () => {
+  // Untrimmed it would ship a blank identity AND skip the cascade, while the log
+  // shipper (which trims) sends a different identity for the same install.
+  const { server, seen, port } = await startServer(200, "{}");
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", {}, (home) => {
+      seedHome(home, { gitconfig: GITCONFIG });
+      fs.appendFileSync(
+        path.join(home, ".rogue-env"),
+        "export ROGUE_ACTOR_EMAIL='   '\nexport ROGUE_ACTOR_NAME='  '\n",
+      );
+    });
+    assert.equal(seen.headers["x-rogue-actor-email"], "jane@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], "Jane Dev");
+  } finally {
+    server.close();
+  }
+});
+
 test("a non-Latin-1 git user.name still reaches the server, as the UTF-8 bytes curl would send", async () => {
   // fetch() throws on any header code unit above 0xFF; before headerBytes that
   // TypeError landed in the fail-open catch and every hook of such a user emitted {}.

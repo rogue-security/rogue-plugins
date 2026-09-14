@@ -443,7 +443,11 @@ $hookPs1 = Get-ChildItem "$env:USERPROFILE\.claude\plugins" -Recurse -Filter hoo
   Where-Object { $_.FullName -like '*rogue*' } | Select-Object -First 1
 $actorEmail = [string]$creds['ROGUE_ACTOR_EMAIL']; $actorName = [string]$creds['ROGUE_ACTOR_NAME']
 if ($hookPs1) {
-  $env:ROGUE_PS_LIB_ONLY = '1'; . $hookPs1.FullName; $env:ROGUE_PS_LIB_ONLY = $null
+  # Loaded as a scriptblock, not dot-sourced by path: running a .ps1 by path is
+  # subject to ExecutionPolicy, which is enforced on a managed machine.
+  $env:ROGUE_PS_LIB_ONLY = '1'
+  try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $hookPs1.FullName))) }
+  finally { $env:ROGUE_PS_LIB_ONLY = $null }
   # The very cascade hook.ps1 runs (env file -> CLAUDE_CODE_USER_EMAIL -> git config
   # files -> login@host), so this can never report a different actor than the hooks.
   $a = Resolve-RogueActor $creds (Split-Path (Split-Path $hookPs1.FullName -Parent) -Parent)

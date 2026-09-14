@@ -155,7 +155,14 @@ function gitConfigValue(raw) {
   let quoted = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
-    if (c === "\\" && i + 1 < s.length) out += s[++i];
+    // git decodes \n, \t and \b as control characters. A control character cannot
+    // travel in an HTTP header value and would split git-identity.sh's two-line scan
+    // output, so all three land as a space; every other escape is the literal
+    // character, as git reads it.
+    if (c === "\\" && i + 1 < s.length) {
+      const e = s[++i];
+      out += e === "n" || e === "t" || e === "b" ? " " : e;
+    }
     else if (c === '"') quoted = !quoted;
     else if (!quoted && (c === "#" || c === ";")) break;
     else out += c;
@@ -207,8 +214,11 @@ export function gitIdentity() {
 // row and the roster row can never carry different identities:
 //   env file → git config files → <login>@<hostname> / <login>.
 export function resolveActor(env) {
-  let email = env.ROGUE_ACTOR_EMAIL || "";
-  let name = env.ROGUE_ACTOR_NAME || "";
+  // Trimmed before the presence test: a whitespace-only ROGUE_ACTOR_* must fall
+  // through to the git/login cascade rather than ship as blank, and the stored value
+  // has to match what the shippers (which trim) send for the same install.
+  let email = (env.ROGUE_ACTOR_EMAIL || "").trim();
+  let name = (env.ROGUE_ACTOR_NAME || "").trim();
   if (!email || !name) {
     const git = gitIdentity();
     email = email || git.email;

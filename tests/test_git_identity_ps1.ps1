@@ -51,6 +51,22 @@ function Write-Cfg {
 }
 function Read-GitId { return (& ([scriptblock]::Create((Get-Content -Raw -LiteralPath $lib)))) }
 
+# True when the script invokes git in ANY command position: bare `git`, `& git`,
+# `git.exe`, `git.cmd`, a quoted name or a full path. The old check matched the
+# literal `& git ` spelling only, so `git config` slipped straight past it. Parsed
+# rather than grepped, so the word inside a string or a comment is not a hit.
+function Test-RogueCallsGit {
+    param([string]$Path)
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+    foreach ($cmd in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        $name = $cmd.GetCommandName()
+        if (-not $name) { continue }
+        $leaf = ($name -split '[\\/]')[-1]
+        if (@('git', 'git.exe', 'git.cmd') -contains $leaf.ToLowerInvariant()) { return $true }
+    }
+    return $false
+}
+
 # Tripwire: `git` on PATH records every invocation. Both a POSIX script and a
 # .cmd, so it fires on the Linux runner and under Windows PowerShell 5.1 alike.
 $trip = New-TestHome
@@ -126,6 +142,18 @@ try {
     $id = Read-GitId
     Assert-Eq $id.Email 'jane@corp.com'  'an unquoted trailing comment is dropped'
     Assert-Eq $id.Name  'Jane "JJ" Dev'  'backslash-escaped quotes survive, as git reads them'
+
+    # git decodes \n, \t and \b as control characters; the readers cannot carry one
+    # in a header value, so all three arrive as a space (see git-identity.ps1).
+    $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`n`tname = `"Jane\nQ\tDev\bX`"`n`temail = `"a\nb@corp.com`"`n"
+    $id = Read-GitId
+    Assert-Eq $id.Name  'Jane Q Dev X'   'quoted \n, \t and \b decode to a space, not to the letters n/t/b'
+    Assert-Eq $id.Email 'a b@corp.com'   'the same decoding applies to the email'
+
+    $h = New-TestHome
+    Write-Cfg ([System.IO.Path]::Combine($h, '.gitconfig')) "[user]`n`tname = `"C:\\dev\\me`"`n"
+    Assert-Eq (Read-GitId).Name 'C:\dev\me' 'an escaped backslash stays one backslash'
 
     $h = New-TestHome
     $id = Read-GitId
@@ -227,6 +255,17 @@ try {
     Assert-Eq $a.Email 'mdm@corp.com' 'shared: fields resolve independently (email from env)'
     Assert-Eq $a.Name  'Jane Dev'     'shared: fields resolve independently (name from git)'
 
+    # Untrimmed, a whitespace-only value ships as a blank identity AND skips the
+    # cascade, while ship-logs.ps1 (which trims) sends a different one for the
+    # same install.
+    $a = Resolve-RogueSharedActor @{ ROGUE_ACTOR_EMAIL = '   '; ROGUE_ACTOR_NAME = "`t `n" } $codexRoot
+    Assert-Eq $a.Email 'jane@corp.com' 'shared: a whitespace-only env email falls through to the git identity'
+    Assert-Eq $a.Name  'Jane Dev'      'shared: a whitespace-only env name falls through to the git identity'
+
+    $a = Resolve-RogueSharedActor @{ ROGUE_ACTOR_EMAIL = '  mdm@corp.com  '; ROGUE_ACTOR_NAME = '  MDM Provisioned  ' } $codexRoot
+    Assert-Eq $a.Email 'mdm@corp.com'    'shared: a padded env email is stored trimmed, as the shipper sends it'
+    Assert-Eq $a.Name  'MDM Provisioned' 'shared: a padded env name is stored trimmed'
+
     $h = New-TestHome
     $a = Resolve-RogueSharedActor @{} $codexRoot
     Assert-Eq $a.Email $sharedLoginAtHost 'shared level 3: <login>@<host> when there is no git identity'
@@ -245,13 +284,31 @@ try {
         }
     }
 
+    Write-Host '-- the guard itself catches every git spelling --'
+    $probe = [System.IO.Path]::Combine($trip, 'probe.ps1')
+    foreach ($planted in 'git config user.name',
+                         '& git config user.name',
+                         'git.exe config user.name',
+                         'git.cmd config user.name',
+                         '& "git" config user.name',
+                         '& "C:\Program Files\Git\cmd\git.exe" config user.name') {
+        Write-Cfg $probe $planted
+        Assert-Eq (Test-RogueCallsGit $probe) $true "a planted <$planted> fails the guard"
+    }
+    foreach ($clean in '$note = "run git config user.name by hand"',
+                       '# git config user.name',
+                       '$gitIdentity = Read-RogueGitIdentity $root') {
+        Write-Cfg $probe $clean
+        Assert-Eq (Test-RogueCallsGit $probe) $false "the guard ignores <$clean>"
+    }
+
     Write-Host '-- no bridge shells out to git --'
     Assert-Eq (Test-Path -LiteralPath $tripMarker) $false 'git binary never invoked'
     foreach ($p in 'rogue','codex','copilot','antigravity','kiro','cursor') {
-        foreach ($f in 'hook.ps1','heartbeat.ps1') {
+        foreach ($f in 'hook.ps1','heartbeat.ps1','git-identity.ps1','actor.ps1') {
             $src = [System.IO.Path]::Combine($repo, 'plugins', $p, 'scripts', $f)
             if (-not (Test-Path -LiteralPath $src)) { continue }
-            Assert-Eq ((Get-Content -Raw -LiteralPath $src) -match '&\s*git\s') $false "$p/$f does not call git"
+            Assert-Eq (Test-RogueCallsGit $src) $false "$p/$f does not call git"
         }
     }
 } finally {

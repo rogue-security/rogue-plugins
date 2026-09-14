@@ -24,8 +24,11 @@ function Read-RogueGitIdentityFile {
 function Resolve-RogueSharedActor {
     param([hashtable]$Creds, [string]$PluginRoot)
     if ($null -eq $Creds) { $Creds = @{} }
-    $name  = [string]$Creds['ROGUE_ACTOR_NAME']
-    $email = [string]$Creds['ROGUE_ACTOR_EMAIL']
+    # Trimmed before the presence test: a whitespace-only ROGUE_ACTOR_* must fall
+    # through to the git/login cascade rather than ship as blank, and the stored
+    # value has to match what ship-logs.ps1 (which trims) sends for the same install.
+    $name  = ([string]$Creds['ROGUE_ACTOR_NAME']).Trim()
+    $email = ([string]$Creds['ROGUE_ACTOR_EMAIL']).Trim()
     if (-not $name -or -not $email) {
         $git = Read-RogueGitIdentityFile $PluginRoot
         if (-not $name)  { $name  = [string]$git.Name }

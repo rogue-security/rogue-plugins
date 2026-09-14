@@ -299,6 +299,40 @@ actual="$(resolve)"
 [ "$actual" = 'bom@corp.com|Bom "B" Me' ] || { echo "FAIL [shared bom]: got <$actual>" >&2; exit 1; }
 echo "  ok: BOM and escaped quotes read by the shared cascade"
 
+# ── git's control escapes: \n, \t and \b decode to a space, never to n/t/b ────
+# A real control character cannot travel in a header value and would split the
+# two-line output of git-identity.sh's scan, so all three collapse to a space.
+scenario
+write_gitconfig
+printf '[user]\n\temail = "a\\nb@corp.com"\n\tname = "Jane\\nQ\\tDev\\bX"\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'a b@corp.com|Jane Q Dev X' ] || { echo "FAIL [shared escapes]: got <$actual>" >&2; exit 1; }
+echo "  ok: quoted \\n, \\t and \\b decode to a space, not to the letters n/t/b"
+
+scenario
+write_gitconfig
+printf '[user]\n\tname = "C:\\\\dev\\\\me"\n' > "$FAKE_HOME/.gitconfig"
+actual="$(resolve)"
+[ "$actual" = 'jane@devbox|C:\dev\me' ] || { echo "FAIL [shared backslash]: got <$actual>" >&2; exit 1; }
+echo "  ok: an escaped backslash stays one backslash"
+
+# ── whitespace-only ROGUE_ACTOR_* is absent, not present ──────────────────────
+# Untrimmed it would ship as a blank identity AND skip the git/login cascade,
+# while ship-logs.sh (which trims) sends a different identity for the same install.
+scenario
+SEED_EMAIL="   "; SEED_NAME="$(printf '\t \n')"
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "jane@corp.com|Jane Dev" "a whitespace-only ROGUE_ACTOR_* falls through to the git identity"
+
+scenario
+SEED_EMAIL="   "; SEED_NAME="   "
+assert_actor "jane@devbox|jane" "and on to login@hostname when there is no git identity either"
+
+scenario
+SEED_EMAIL="  mdm@corp.com  "; SEED_NAME="  MDM Provisioned  "
+GIT_EMAIL="jane@corp.com"; GIT_NAME="Jane Dev"
+assert_actor "mdm@corp.com|MDM Provisioned" "a padded ROGUE_ACTOR_* is stored trimmed, as the shipper sends it"
+
 # ── The git binary was never run, in any case above ──────────────────────────
 if [ -s "$TRIPWIRE" ]; then
   echo "FAIL [git tripwire]: the cascade invoked git:" >&2; cat "$TRIPWIRE" >&2; exit 1

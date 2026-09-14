@@ -18,11 +18,18 @@ _rogue_gitcfg_scan() {
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     # git syntax: a backslash escapes the next character, quotes toggle a region in
     # which # and ; are literal, and a comment ends the value outside one.
-    function value(s,   out, i, c, q, n) {
+    function value(s,   out, i, c, q, n, e) {
       s = trim(s); out = ""; q = 0; n = length(s)
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
-        if (c == "\\" && i < n) { i++; out = out substr(s, i, 1) }
+        # git decodes \n, \t and \b as control characters. A control character
+        # cannot travel in an HTTP header value and would split the two-line output
+        # below, so all three land as a space; every other escape is the literal
+        # character, as git reads it.
+        if (c == "\\" && i < n) {
+          i++; e = substr(s, i, 1)
+          out = out ((e == "n" || e == "t" || e == "b") ? " " : e)
+        }
         else if (c == "\"") q = !q
         else if (!q && (c == "#" || c == ";")) break
         else out = out c
