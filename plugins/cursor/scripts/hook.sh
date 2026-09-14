@@ -231,7 +231,7 @@ else
 fi
 
 # ── payload from stdin ─────────────────────────────────────────────────────
-PAYLOAD="$(rogue_protection_read_input 2>/dev/null)"
+PAYLOAD="$(rogue_protection_read_input 2>/dev/null)" || { printf '%s' '{}'; exit 0; }
 rogue_protection_current || { printf '%s' '{}'; exit 0; }
 [ -n "$PAYLOAD" ] || PAYLOAD='{}'
 # Strip a leading UTF-8 BOM if present. Cursor on Windows prepends one to the

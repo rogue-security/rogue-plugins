@@ -658,8 +658,8 @@ load_install_id() {
 # Buffer stdin so we can enrich it (PreInvocation/PostInvocation/Stop) before
 # POSTing.
 read_body() {
-  BODY="$(rogue_protection_read_input)"
-rogue_protection_current || { printf '%s' '{"decision":"allow"}'; exit 0; }
+  BODY="$(rogue_protection_read_input)" || { fail_open_default; exit 0; }
+rogue_protection_current || { fail_open_default; exit 0; }
 }
 
 # Heartbeat, fired detached so the hook itself returns immediately regardless of
@@ -786,7 +786,7 @@ post_and_relay() {
     fi
   fi
 
-rogue_protection_current || { printf '%s' '{"decision":"allow"}'; exit 0; }
+rogue_protection_current || { fail_open_default; exit 0; }
   _raw=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
     -H "x-rogue-api-key: $ROGUE_API_KEY" \
   -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
@@ -803,7 +803,7 @@ rogue_protection_current || { printf '%s' '{"decision":"allow"}'; exit 0; }
   _code=$(printf '%s' "$_raw" | tail -n1)
   _resp=$(printf '%s' "$_raw" | sed '$d')
 
-rogue_protection_current || { printf '%s' '{"decision":"allow"}'; exit 0; }
+rogue_protection_current || { fail_open_default; exit 0; }
   log "http=$_code rc=$_rc raw=$(sanitize "$_resp" | head -c 400)"
 
   # Fail-open on transport error, any non-200, or an empty body: emit the
@@ -829,10 +829,10 @@ main() {
   stand_down_under_git_bash
   locate_plugin_root
   load_env               # sources the env files, then every default derived from them
-[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{"decision":"allow"}'; exit 0; }
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { fail_open_default; exit 0; }
 . "${PLUGIN_ROOT}/scripts/protection.sh"
 rogue_protection_init antigravity antigravity "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
-rogue_protection_enter || { printf '%s' '{"decision":"allow"}'; exit 0; }
+rogue_protection_enter || { fail_open_default; exit 0; }
 trap 'rogue_protection_leave' EXIT
 
   require_api_key        # exits before stdin is read when there is no key

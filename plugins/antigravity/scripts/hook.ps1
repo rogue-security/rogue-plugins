@@ -312,7 +312,7 @@ function Resolve-Actor {
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────
 function Read-Payload {
     $script:payload = Read-RogueProtectionInput
-    if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
+    if (-not (Test-RogueProtectionCurrent)) { Write-Raw (Get-FailOpenDefault); exit 0 }
     if (-not $script:payload) { $script:payload = '{}' }
     try {
         $raw = [Console]::InputEncoding.GetBytes($script:payload)
@@ -914,7 +914,7 @@ function Invoke-Post {
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
     $resp = ''
     try {
-        if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
+        if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { Write-Raw (Get-FailOpenDefault); exit 0 }
     if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and $null -ne $script:RPRevision) { $headers['x-rogue-activity-revision']=[string]$script:RPRevision }
     $r = Invoke-WebRequest -Uri $url -Method Post `
             -Headers $headers -ContentType 'application/json' -Body $bodyBytes `
@@ -926,7 +926,7 @@ function Invoke-Post {
     } catch { Dbg "POST failed: $($_.Exception.Message)"; $resp = '' }
 
     $respHead = if ($resp.Length -gt 400) { $resp.Substring(0, 400) } else { $resp }
-    if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
+    if (-not (Test-RogueProtectionCurrent)) { Write-Raw (Get-FailOpenDefault); exit 0 }
 Log "raw=$(Sanitize $respHead)"
 
     # Fail-open on transport error, any non-200, or an empty body: emit the
@@ -963,10 +963,10 @@ function Invoke-Main {
     Assert-ApiKey          # exits before stdin is read when there is no key
     Resolve-Url
     Resolve-Actor
-if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { Write-Raw (Get-FailOpenDefault); exit 0 }
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
 $script:apiKey = Initialize-RogueProtection -Key $script:apiKey -BaseUrl $script:creds['ROGUE_BASE_URL'] -Slug 'antigravity' -Family 'antigravity'
-if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
+if (-not (Enter-RogueProtection)) { Write-Raw (Get-FailOpenDefault); exit 0 }
 try {
 
     Read-Payload

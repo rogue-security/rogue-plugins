@@ -452,7 +452,7 @@ try {
     Send-KiroRequest
 if (-not (Test-RogueProtectionCurrent)) { exit 0 }
     Write-KiroDecision
-} finally { Leave-RogueProtection }
+} finally { Leave-RogueProtection -TimeoutSec 1 }
 }
 
 # Dot-sourcing through the test seam defines every function without running it.
