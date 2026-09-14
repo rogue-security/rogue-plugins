@@ -372,19 +372,20 @@ ROGUE_HOOK_TIMEOUT=0 run_bridge PreToolUse kiro_cli "$FIX/cli3-PreToolUse-execut
 assert_fail_open "ROGUE_HOOK_TIMEOUT=0 keeps the default budget"
 KEEP_HOME=0
 
-# ── Case 17: credential precedence — later FILE wins, even over process env ─
-# hook.sh sources the files, so <root>/env → /etc/rogue/env → ~/.rogue-env each
-# overwrite what came before, including a value the hook inherited from Kiro's
-# environment (hook.ps1 differs: there the process env wins). Exercised on a
-# COPY of the plugin so <root>/env can be written without touching the tree.
+# ── Case 17: credential precedence — the first file holding the key, alone ──
+# hook.sh sources ONE file: the first of /etc/rogue/env → <root>/env → ~/.rogue-env
+# that holds ROGUE_API_KEY, and its values overwrite what the hook inherited from
+# Kiro's environment. Exercised on a COPY of the plugin so <root>/env can be
+# written without touching the tree; the machine candidate is covered by
+# tests/test_env_first_found.sh, which redirects its path.
 restart_mock '{}'
 PREC_ROOT="$(mktemp -d)"
 cp -R "$STAGE/." "$PREC_ROOT/"
 printf 'export ROGUE_API_KEY=bundled-key\nexport ROGUE_BASE_URL=http://127.0.0.1:%s\n' "$PORT" > "$PREC_ROOT/env"
-# run_prec <home> <process-env api key>
+# run_prec <home> <process-env api key> [process-env base url]
 run_prec() {
   set +e
-  HOME="$1" ROGUE_API_KEY="$2" ROGUE_BASE_URL='' ROGUE_LOG_FILE="$1/kiro.log" \
+  HOME="$1" ROGUE_API_KEY="$2" ROGUE_BASE_URL="${3:-}" ROGUE_LOG_FILE="$1/kiro.log" \
     "$SH" "$PREC_ROOT/scripts/hook.sh" PreToolUse kiro_cli \
     < "$FIX/cli3-PreToolUse-execute_bash.json" > "$OUT_FILE" 2> "$ERR_FILE"
   LAST_RC=$?
@@ -393,16 +394,20 @@ run_prec() {
 PREC_HOME="$(mktemp -d)"
 run_prec "$PREC_HOME" ''
 assert_header "x-rogue-api-key" "bundled-key" "<root>/env alone configures the bridge"
-printf 'export ROGUE_API_KEY=user-key\n' > "$PREC_HOME/.rogue-env"
+printf 'export ROGUE_API_KEY=user-key\nexport ROGUE_BASE_URL=http://127.0.0.1:%s\n' "$PORT" > "$PREC_HOME/.rogue-env"
+chmod 600 "$PREC_HOME/.rogue-env"
 run_prec "$PREC_HOME" ''
-assert_header "x-rogue-api-key" "user-key" "~/.rogue-env overrides <root>/env (later file wins)"
-assert_eq "$(posted_header x-rogue-event)" "PreToolUse" "...while <root>/env still supplies the base URL"
+assert_header "x-rogue-api-key" "bundled-key" "~/.rogue-env has no effect while <root>/env holds a key"
 run_prec "$PREC_HOME" 'process-key'
-assert_header "x-rogue-api-key" "user-key" "a sourced file overwrites the process env on the bash bridge"
+assert_header "x-rogue-api-key" "bundled-key" "the chosen file overwrites the process env on the bash bridge"
+printf 'export ROGUE_BASE_URL=http://127.0.0.1:%s\n' "$PORT" > "$PREC_ROOT/env"
+run_prec "$PREC_HOME" ''
+assert_header "x-rogue-api-key" "user-key" "a keyless <root>/env is skipped and ~/.rogue-env is next"
+assert_eq "$(posted_header x-rogue-event)" "PreToolUse" "...and nothing of the keyless file is merged"
 printf 'touch "%s/unsafe-executed"\n' "$PREC_HOME" >> "$PREC_HOME/.rogue-env"
 chmod 666 "$PREC_HOME/.rogue-env"
-run_prec "$PREC_HOME" ''
-assert_header "x-rogue-api-key" "bundled-key" "a writable env file cannot override trusted credentials"
+run_prec "$PREC_HOME" 'process-key' "http://127.0.0.1:$PORT"
+assert_header "x-rogue-api-key" "process-key" "a writable env file is not trusted, so no file is sourced"
 assert_eq "$([ -e "$PREC_HOME/unsafe-executed" ] && echo yes || echo no)" "no" "unsafe env code is never executed"
 rm -rf "$PREC_ROOT" "$PREC_HOME"
 

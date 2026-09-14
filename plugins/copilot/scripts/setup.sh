@@ -8,16 +8,16 @@ set -euo pipefail
 #
 # Usage: setup.sh <api-key> <email> <name>
 #
-# Hooks read credentials from (in order, later wins):
-#   1) ${PLUGIN_ROOT}/env   (bundled defaults, for compiled customer plugins)
-#   2) /etc/rogue/env       (system-wide, for MDM deployments)
+# Hooks read the first of these that holds ROGUE_API_KEY, alone:
+#   1) /etc/rogue/env       (machine, for MDM deployments)
+#   2) ${PLUGIN_ROOT}/env   (bundled, for compiled customer plugins)
 #   3) ~/.rogue-env         (per-user, written by this script)
 
 API_KEY="${1:?Usage: setup.sh <api-key> <email> <name>}"
 ACTOR_EMAIL="${2:-}"
 ACTOR_NAME="${3:-}"
 
-ENV_FILE="${ROGUE_ENV_FILE:-$HOME/.rogue-env}"
+ENV_FILE="$HOME/.rogue-env"
 
 . "$(dirname "$0")/env-file.sh"
 rogue_write_env_file "$ENV_FILE" \

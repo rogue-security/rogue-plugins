@@ -320,8 +320,9 @@ function Initialize-Args {
 }
 
 # ── stage 3: env files + knobs ─────────────────────────────────────────────
-# Same chain as every dispatcher (later file wins; process env wins over all):
-#   <plugin-root>\env  ->  C:\ProgramData\rogue\env (MDM)  ->  %USERPROFILE%\.rogue-env
+# Same rule as every dispatcher: the first trusted env file holding ROGUE_API_KEY
+# is used alone, and its values override the process env:
+#   C:\ProgramData\rogue\env (machine, MDM)  ->  <plugin-root>\env  ->  %USERPROFILE%\.rogue-env
 $SHIP_ENV_VARS = @(
     'ROGUE_API_KEY', 'ROGUE_BASE_URL', 'ROGUE_ACTOR_EMAIL', 'ROGUE_ACTOR_NAME',
     'ROGUE_LOG_FILE', 'ROGUE_LOG_DIR', 'ROGUE_SHIP_MIN_INTERVAL',
@@ -331,23 +332,30 @@ $SHIP_ENV_VARS = @(
 function Import-ShipEnv {
     $envLibrary = Join-Path $PluginRoot 'scripts/env-file.ps1'
     if ($PSCommandPath) { $envLibrary = Join-Path (Split-Path -Parent $PSCommandPath) 'env-file.ps1' }
-    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $envLibrary)))
+    # Fail open: with no readable helper, leave a no-op reader behind so the env
+    # files are skipped instead of the whole credential block dying on the load.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $envLibrary -ErrorAction Stop))) }
+    catch { function Read-RogueEnvFile { param([string]$Path) } }
     $resolved = @{}
-    $envFiles = @(
-        (Join-Path $PluginRoot 'env'),
-        'C:\ProgramData\rogue\env',
-        (Join-Path (Get-UserHome) '.rogue-env'))
-    foreach ($envFile in $envFiles) {
-        if (-not $envFile -or -not (Test-Path -LiteralPath $envFile)) { continue }
-        foreach ($line in (Read-RogueEnvFile $envFile)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-                $resolved[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            }
-        }
-    }
     foreach ($varName in $SHIP_ENV_VARS) {
         $processValue = [Environment]::GetEnvironmentVariable($varName)
         if ($processValue) { $resolved[$varName] = $processValue }
+    }
+    $envFiles = @(
+        'C:\ProgramData\rogue\env',
+        (Join-Path $PluginRoot 'env'),
+        (Join-Path (Get-UserHome) '.rogue-env'))
+    foreach ($envFile in $envFiles) {
+        if (-not $envFile -or -not (Test-Path -LiteralPath $envFile)) { continue }
+        $fileVals = @{}
+        foreach ($line in (Read-RogueEnvFile $envFile)) {
+            if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+                $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+            }
+        }
+        if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+        foreach ($varName in $fileVals.Keys) { $resolved[$varName] = $fileVals[$varName] }
+        break
     }
     $script:creds = $resolved
 }

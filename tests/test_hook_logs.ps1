@@ -314,14 +314,14 @@ foreach ($c in $cases) {
 # the merged map, or builds that map without the log keys. Neither is reachable
 # through the seam (the main body stands down off-Windows), so assert the source.
 Write-Host ""
-Write-Host "== wiring: log vars in the process-env override list, init after creds"
+Write-Host "== wiring: log vars in the process-env base list, init after creds"
 foreach ($c in $cases) {
     $src = Get-Content -Raw -LiteralPath (Join-Path $repo $c.path)
 
     $missing = @('ROGUE_LOG_FILE', 'ROGUE_LOG_DIR', 'ROGUE_LOG_MAX_BYTES') |
         Where-Object { $src -notmatch [regex]::Escape("'$_'") }
     if ($missing) { Fail "$($c.slug) never reads $($missing -join ', ') from the process env" }
-    else { Pass "$($c.slug) lists all three ROGUE_LOG_* in its process-env overrides" }
+    else { Pass "$($c.slug) lists all three ROGUE_LOG_* in its process-env base list" }
 
     # The call must pass an argument — a bare `Initialize-Logging` would silently
     # fall back to an empty map and ignore every env file.

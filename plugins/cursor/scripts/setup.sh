@@ -9,7 +9,7 @@ API_KEY="${1:?Usage: setup.sh <api-key> <email> <name>}"
 ACTOR_EMAIL="${2:-}"
 ACTOR_NAME="${3:-}"
 
-ENV_FILE="${ROGUE_ENV_FILE:-$HOME/.rogue-env}"
+ENV_FILE="$HOME/.rogue-env"
 
 . "$(dirname "$0")/env-file.sh"
 rogue_write_env_file "$ENV_FILE" \

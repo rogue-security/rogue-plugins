@@ -36,31 +36,53 @@ export function shellUnquote(raw) {
 }
 
 // ── Credential resolution ────────────────────────────────────────────────────
-// Same env-file precedence as the other monorepo plugins (later wins; process
-// env wins over all files):
-//   <ext>/env (bundled) → /etc/rogue/env (MDM) → ~/.rogue-env (per-user)
+// Only root or the current user may supply configuration, and nobody else may
+// write it; the machine file must be root's (env-file.sh's rule). Windows has no
+// POSIX owner or mode, so the machine file is skipped there: the ACL check the
+// PowerShell readers make has no Node equivalent.
+export function isTrustedEnvFile(file) {
+  let st;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    return false;
+  }
+  if (!st.isFile()) return false;
+  const system = file === "/etc/rogue/env" || file === "C:\\ProgramData\\rogue\\env";
+  if (IS_WIN) return !system;
+  if (st.uid !== 0 && (system || st.uid !== process.getuid())) return false;
+  return (st.mode & 0o022) === 0;
+}
+
+// Same env-file rule as the other monorepo plugins: the first trusted file holding
+// ROGUE_API_KEY is used alone, and its values override the process env:
+//   /etc/rogue/env (machine, MDM) → <ext>/env (bundled) → ~/.rogue-env (per-user)
 export function loadEnvFiles() {
   const merged = {};
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith("ROGUE_") && process.env[k]) merged[k] = process.env[k];
+  }
   const files = [
-    path.join(EXT_ROOT, "env"),
     IS_WIN ? "C:\\ProgramData\\rogue\\env" : "/etc/rogue/env",
+    path.join(EXT_ROOT, "env"),
     path.join(HOME, ".rogue-env"),
   ];
   for (const f of files) {
+    if (!isTrustedEnvFile(f)) continue;
     let text;
     try {
       text = fs.readFileSync(f, "utf8");
     } catch {
       continue;
     }
+    const vals = {};
     for (const line of text.split(/\r?\n/)) {
       const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (m) merged[m[1]] = shellUnquote(m[2]);
+      if (m) vals[m[1]] = shellUnquote(m[2]);
     }
-  }
-  // Process env wins (explicitly-set ROGUE_* / config knobs).
-  for (const k of Object.keys(process.env)) {
-    if (k.startsWith("ROGUE_") && process.env[k]) merged[k] = process.env[k];
+    if (!String(vals.ROGUE_API_KEY || "").trim()) continue;
+    Object.assign(merged, vals);
+    break;
   }
   return merged;
 }

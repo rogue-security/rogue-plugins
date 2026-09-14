@@ -544,9 +544,11 @@ ship "ROGUE_SHIP_MIN_INTERVAL=99999"
 check "a future .last is treated as stale" "2" "$(bodies)"
 # …and it must come from the ENV FILE too, not only process env: ~/.rogue-env is
 # the documented place to set it, and phase 1 shipped a bug of exactly this shape.
+# Every staged file carries ROGUE_API_KEY: a file without it is not the one in use.
 new_case throttle_envfile
 seed 1 3
-printf 'export ROGUE_SHIP_MIN_INTERVAL=99999\n' > "$CASE/home/.rogue-env"
+printf 'export ROGUE_API_KEY=test-key
+export ROGUE_SHIP_MIN_INTERVAL=99999\n' > "$CASE/home/.rogue-env"
 chmod 600 "$CASE/home/.rogue-env"
 ship "ROGUE_SHIP_MIN_INTERVAL="
 check "the first run ships" "1" "$(bodies)"
@@ -681,8 +683,10 @@ else
     glog="$CASE/home/.rogue/logs/gemini.log"
     seed 1 2 gemini "$glog"
     case "$variant" in
-      empty) printf 'export ROGUE_ACTOR_EMAIL=""\n' > "$CASE/home/.rogue-env" ;;
-      blank) printf 'export ROGUE_ACTOR_EMAIL="   "\n' > "$CASE/home/.rogue-env" ;;
+      empty) printf 'export ROGUE_API_KEY=test-key
+export ROGUE_ACTOR_EMAIL=""\n' > "$CASE/home/.rogue-env" ;;
+      blank) printf 'export ROGUE_API_KEY=test-key
+export ROGUE_ACTOR_EMAIL="   "\n' > "$CASE/home/.rogue-env" ;;
     esac
     chmod 600 "$CASE/home/.rogue-env"
     ship_mjs gemini 9.9.9 gemini "ROGUE_ACTOR_EMAIL=" "ROGUE_ACTOR_NAME="
@@ -737,13 +741,15 @@ ship "ROGUE_SHIP_LOGS=0"
 check "an inline 0 no longer disables" "1" "$(bodies)"
 new_case retired-flag-file
 seed 1 3
-printf 'export ROGUE_SHIP_LOGS=0\n' > "$CASE/home/.rogue-env"
+printf 'export ROGUE_API_KEY=test-key
+export ROGUE_SHIP_LOGS=0\n' > "$CASE/home/.rogue-env"
 chmod 600 "$CASE/home/.rogue-env"
 ship
 check "a 0 in an env file no longer disables" "1" "$(bodies)"
 new_case retired-flag-file-padded
 seed 1 3
-printf 'export ROGUE_SHIP_LOGS=00\n' > "$CASE/home/.rogue-env"
+printf 'export ROGUE_API_KEY=test-key
+export ROGUE_SHIP_LOGS=00\n' > "$CASE/home/.rogue-env"
 chmod 600 "$CASE/home/.rogue-env"
 ship
 check "a zero-padded 00 in a file no longer disables" "1" "$(bodies)"
@@ -753,7 +759,8 @@ if command -v node >/dev/null 2>&1; then
   new_case retired-flag-mjs
   glog="$CASE/home/.rogue/logs/gemini.log"
   seed 1 3 gemini "$glog"
-  printf 'export ROGUE_SHIP_LOGS=0\n' > "$CASE/home/.rogue-env"
+  printf 'export ROGUE_API_KEY=test-key
+export ROGUE_SHIP_LOGS=0\n' > "$CASE/home/.rogue-env"
   chmod 600 "$CASE/home/.rogue-env"
   ship_mjs gemini 9.9.9 gemini
   check "a 0 in an env file no longer disables (Node)" "1" "$(bodies)"

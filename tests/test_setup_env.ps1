@@ -150,10 +150,12 @@ if ($chmod) {
     Write-Host '  skip: chmod not available (failed-write case)'
 }
 
-$saveEnvFile = $env:ROGUE_ENV_FILE
+# The writers take the file from %USERPROFILE%, the only place the readers look.
+$saveSetupProfile = $env:USERPROFILE
 foreach ($plugin in @('rogue', 'cursor')) {
-    $path = New-SeededFile "$plugin.env"
-    $env:ROGUE_ENV_FILE = $path
+    New-Item -ItemType Directory -Path (Join-Path $sandbox "$plugin-home") -Force | Out-Null
+    $path = New-SeededFile "$plugin-home/.rogue-env"
+    $env:USERPROFILE = Join-Path $sandbox "$plugin-home"
     & (Join-Path $repo "plugins/$plugin/scripts/setup.ps1") 'new-key' 'new@example.com' 'New Name' `
         -WarningAction SilentlyContinue | Out-Null
     Check "${plugin}: api key replaced" 'new-key'               (Get-EnvValue $path 'ROGUE_API_KEY')
@@ -161,7 +163,7 @@ foreach ($plugin in @('rogue', 'cursor')) {
     Check "${plugin}: log dir kept"     '/var/log/rogue'        (Get-EnvValue $path 'ROGUE_LOG_DIR')
     Check "${plugin}: one header line"  1 (Count-Matching $path 'Read by hook subprocesses')
 }
-$env:ROGUE_ENV_FILE = $saveEnvFile
+$env:USERPROFILE = $saveSetupProfile
 
 foreach ($plugin in @('rogue', 'codex', 'cursor', 'copilot', 'antigravity')) {
     $text = Get-Content -Raw -LiteralPath (Join-Path $repo "plugins/$plugin/scripts/setup.ps1")
@@ -269,11 +271,13 @@ $env:USERPROFILE = $saveProfile
 
 $bash = Get-Command bash -ErrorAction SilentlyContinue
 if ($bash) {
-    $shFile = New-SeededFile 'cmp-sh.env'
+    New-Item -ItemType Directory -Path (Join-Path $sandbox 'cmp-sh') -Force | Out-Null
+    $shFile = New-SeededFile 'cmp-sh/.rogue-env'
     $psFile = New-SeededFile 'cmp-ps.env'
-    $env:ROGUE_ENV_FILE = $shFile
+    $saveShHome = $env:HOME
+    $env:HOME = Join-Path $sandbox 'cmp-sh'
     & $bash.Source (Join-Path $repo 'plugins/rogue/scripts/setup.sh') 'new-key' 'new@example.com' 'New Name' | Out-Null
-    $env:ROGUE_ENV_FILE = $saveEnvFile
+    $env:HOME = $saveShHome
     Write-RogueEnvFile -Path $psFile -Values ([ordered]@{
         ROGUE_API_KEY     = 'new-key'
         ROGUE_ACTOR_EMAIL = 'new@example.com'

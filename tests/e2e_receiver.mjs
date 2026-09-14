@@ -37,9 +37,9 @@ fs.mkdirSync(workDir, { recursive: true });
 const EXPECTED_KEY = process.env.E2E_API_KEY || "e2e-key";
 // E2E_ACCEPT_ANY_KEY=1 accepts whatever key arrives. Needed by
 // tests/manual/live_session.sh, where the request comes from a REAL Claude Code
-// session: the sh dispatchers source ~/.rogue-env after reading the process
-// environment, so that file's ROGUE_API_KEY wins over the sandbox's and the run would
-// 401 on the developer's own credential.
+// session: the dispatchers' env file in use overrides the process environment, so
+// that file's ROGUE_API_KEY wins over the sandbox's and the run would 401 on the
+// developer's own credential.
 const ACCEPT_ANY_KEY = process.env.E2E_ACCEPT_ANY_KEY === "1";
 
 function readStatusCode() {
@@ -69,8 +69,8 @@ const server = http.createServer((req, res) => {
       if (!ACCEPT_ANY_KEY && req.headers["x-rogue-api-key"] !== EXPECTED_KEY) {
         // A FINGERPRINT, never the key. This used to append the rejected value
         // verbatim, and the live-session run put a developer's real ROGUE_API_KEY
-        // into a world-readable file under /tmp: the sh dispatchers let ~/.rogue-env
-        // override the process environment, so the key that arrives here is not
+        // into a world-readable file under /tmp: the dispatchers' env file overrides
+        // the process environment, so the key that arrives here is not
         // necessarily the sandbox's. Eight hex characters is enough to tell two
         // wrong keys apart, which is all this file is for.
         const received = String(req.headers["x-rogue-api-key"] ?? "");

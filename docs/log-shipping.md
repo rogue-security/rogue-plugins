@@ -135,10 +135,10 @@ which is literally "a task that runs on a single computer in a fleet".
 **Which files.** Resolve the log directory the same way the dispatchers do, or the
 agent reads a path nothing writes to:
 
-1. `ROGUE_LOG_DIR` / `ROGUE_LOG_FILE` from the shared env-file chain
-   (`/etc/rogue/env` or `C:\ProgramData\rogue\env`, then `~/.rogue-env`) — the
-   MDM files are the ones that matter here, and phase 1 made all eleven
-   dispatchers honor them.
+1. `ROGUE_LOG_DIR` / `ROGUE_LOG_FILE` from the env file in use (the first of
+   `/etc/rogue/env` or `C:\ProgramData\rogue\env`, the bundled `env`, and
+   `~/.rogue-env` that holds `ROGUE_API_KEY`) — the MDM file is the one that
+   matters here, and phase 1 made all eleven dispatchers honor it.
 2. Otherwise `~/.rogue/logs/` (`%USERPROFILE%\.rogue\logs\`).
 
 **`ROGUE_LOG_FILE` is an exact path and takes precedence over the glob** — when it

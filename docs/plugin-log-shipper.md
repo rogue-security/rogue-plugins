@@ -116,11 +116,11 @@ is still derived from `$0`/`$PSCommandPath` so the bundled `env` is not skipped.
 
 ```text
  1. Git Bash stand-down: uname = MINGW*/MSYS*/CYGWIN* → exit 0   (ps1 owns Windows)
- 2. load env files, later wins — the SAME platform-aware chain the dispatchers use:
-      <plugin-root>/env
+ 2. load ONE env file, the first holding ROGUE_API_KEY — the SAME rule the dispatchers use:
       /etc/rogue/env            (POSIX)   |  C:\ProgramData\rogue\env  (Windows, MDM)
+      <plugin-root>/env
       $HOME/.rogue-env          (POSIX)   |  %USERPROFILE%\.rogue-env   (Windows)
-    process env wins over all files
+    its values override the process env
  3. no ROGUE_API_KEY → exit 0
  4. resolve which log file(s) to ship — own slug only by default
  5. mkdir -p ~/.rogue/ship
@@ -974,8 +974,8 @@ failed one.
 
 ## Environment knobs
 
-All resolved from the shared env-file chain, so `/etc/rogue/env` can set them
-fleet-wide, and process env still wins:
+All resolved from the env file in use, so `/etc/rogue/env` can set them
+fleet-wide; the process env supplies what that file does not set:
 
 | var | default | meaning |
 |---|---|---|

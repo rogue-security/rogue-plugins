@@ -39,6 +39,7 @@ mkdir -p "$TMPROOT/bin" "$ROOT/.claude-plugin" "$ROOT/scripts" "$HOME_SB"
 cp "$REPO/plugins/rogue/scripts/heartbeat.sh" \
    "$REPO/plugins/rogue/scripts/surface.sh" \
    "$REPO/plugins/rogue/scripts/beacon.sh" \
+   "$REPO/plugins/rogue/scripts/env-file.sh" \
    "$REPO/plugins/rogue/scripts/actor.sh" "$ROOT/scripts/"
 echo '{"version":"9.9.9"}' > "$ROOT/.claude-plugin/plugin.json"
 printf '#!/bin/sh\necho POST >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/bin/curl"

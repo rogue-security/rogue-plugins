@@ -24,8 +24,8 @@ REPO="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 # Scrub every knob the shipper reads from the environment. NOT optional hygiene: a
 # developer running this almost certainly has ROGUE_API_KEY exported for their own
-# install, and PROCESS ENV WINS over the env file by design - so without this the
-# sandbox would authenticate with the developer's real credentials (and a leaked
+# install, and the process env supplies every knob the env file in use does not set
+# - so without this the sandbox could run with the developer's own values (and a leaked
 # ROGUE_LOG_DIR would point the "sandboxed" run at their real logs). Found the hard
 # way: the receiver logged a rejected key that this script never set.
 unset ROGUE_API_KEY ROGUE_BASE_URL ROGUE_ACTOR_EMAIL ROGUE_ACTOR_NAME \

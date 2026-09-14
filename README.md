@@ -93,10 +93,11 @@ scripts/setup.sh / setup.ps1 — credential storage helpers
 All hooks are `type: "command"`. Each event registers **two** entries — a POSIX
 `sh` one (`hook.sh`, for macOS/Linux/WSL) and a PowerShell one (`hook.ps1`, for
 native Windows) — and exactly one does real work per machine (`hook.sh` stands
-down under Git Bash so the PowerShell entry owns Windows). They resolve
-credentials from `${CLAUDE_PLUGIN_ROOT}/env` (bundled), `/etc/rogue/env` /
-`C:\ProgramData\rogue\env` (MDM), or `~/.rogue-env` / `%USERPROFILE%\.rogue-env`
-(per-user) at runtime, then POST the event payload to
+down under Git Bash so the PowerShell entry owns Windows). They read one env file
+at runtime — the first of `/etc/rogue/env` / `C:\ProgramData\rogue\env` (MDM),
+`${CLAUDE_PLUGIN_ROOT}/env` (bundled), and `~/.rogue-env` /
+`%USERPROFILE%\.rogue-env` (per-user) that holds `ROGUE_API_KEY` — then POST the
+event payload to
 `https://api.rogue.security/api/v1/hooks/claude`.
 
 If `ROGUE_API_KEY` is empty, hooks return `{}` (allow) — fail-open by design,
@@ -121,7 +122,8 @@ export ROGUE_ACTOR_NAME='Your Name'
 ```
 
 System-wide MDM deployment can drop the same exports into `/etc/rogue/env` —
-hooks check that path first.
+hooks check that path first, and when it holds `ROGUE_API_KEY` they read no other
+file. Values in the file in use override the process environment.
 
 To revoke: `rm ~/.rogue-env` (per-user) or `sudo rm /etc/rogue/env` (MDM).
 

@@ -112,20 +112,26 @@ function Get-BeaconLibrary {
 # ── credential resolution ──────────────────────────────────────────────────
 function Import-Credentials {
     $script:creds = @{}
-    foreach ($f in @((Join-Path $pluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-        foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $script:creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            }
-        }
-    }
-    # ROGUE_HEARTBEAT_MIN_INTERVAL rides this list so a process-env value still beats
-    # the files, which is what makes the resolved precedence identical to
-    # heartbeat.sh's.
+    # Fail open: with no readable helper, leave a no-op reader behind so the env
+    # files are skipped instead of the whole credential block dying on the load.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+    catch { function Read-RogueEnvFile { param([string]$Path) } }
     foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                    'ROGUE_HEARTBEAT_MIN_INTERVAL') {
         $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $script:creds[$k] = $val }
+    }
+    # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+    foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+        $fileVals = @{}
+        foreach ($line in (Read-RogueEnvFile $f)) {
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+                $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+            }
+        }
+        if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+        foreach ($k in $fileVals.Keys) { $script:creds[$k] = $fileVals[$k] }
+        break
     }
     $script:apiKey = $script:creds['ROGUE_API_KEY']
 }

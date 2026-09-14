@@ -99,8 +99,8 @@ if ! git -C "$REPO_ROOT" diff --quiet 2>/dev/null || ! git -C "$REPO_ROOT" diff 
 fi
 
 # Optionally bake the API key + config into ${CLAUDE_PLUGIN_ROOT}/env. Hooks
-# source this before /etc/rogue/env and ~/.rogue-env, so per-user overrides
-# still win.
+# source this when no /etc/rogue/env holds a key, and then read ~/.rogue-env
+# not at all.
 #
 # Deliberately NO actor pre-seed here. This file used to emit
 #   : "${ROGUE_ACTOR_EMAIL:=$(git config --global user.email)}"

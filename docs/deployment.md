@@ -2,7 +2,8 @@
 
 How to roll out Rogue Security AIDR to a managed Claude Code fleet, using
 the Claude management UI for plugin distribution and an MDM (Kandji, Jamf,
-etc.) for per-user identity provisioning.
+etc.) to provision the machine env file: the org API key plus the assigned
+user's identity.
 
 If you are an individual user installing for yourself, see the [README](../README.md)
 and run `/rogue:setup` instead — this guide doesn't apply.
@@ -25,12 +26,12 @@ produce correctly-attributed events:
                                            │
 ┌────────────────────┐                     │
 │ MDM (Kandji/Jamf)  │  push script        │
-│  + per-user vars   │─────────────────────┤
+│  key + user vars   │─────────────────────┤
 └────────────────────┘                     ▼
                                ┌────────────────────────┐
                                │ User Device            │
                                │  ~/.claude/plugins/…   │  (plugin)
-                               │  /etc/rogue/env        │  (identity)
+                               │  /etc/rogue/env        │  (key + identity)
                                │                        │
                                │  hook fires → POSTs    │
                                │  org key + real actor  │
@@ -67,7 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/sc
 #!/usr/bin/env bash
 set -e
 [ -n "$USER_EMAIL" ] && [ -n "$USER_FULL_NAME" ] || exit 0
-ROGUE_ACTOR_EMAIL="$USER_EMAIL" ROGUE_ACTOR_NAME="$USER_FULL_NAME" \
+ROGUE_API_KEY="<your-rsk-key>" ROGUE_ACTOR_EMAIL="$USER_EMAIL" ROGUE_ACTOR_NAME="$USER_FULL_NAME" \
   bash <(curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/scripts/mdm-provision-actor.sh)
 
 # 4. On a test device, verify
@@ -118,14 +119,19 @@ In your org's Claude management UI:
 4. Push it to your user group(s). Users receive it on their next Claude
    Code session start.
 
-At this point users have the plugin and the API key. Events will POST to
-Rogue but with empty actor headers until Step 3 lands.
+At this point users have the plugin and the API key. Until Step 3 lands the
+hooks read the bundled `env`, and the actor is whatever the device's git config
+or login name says.
 
 ## Step 3 — Deploy the MDM actor provisioning script
 
 `scripts/mdm-provision-actor.sh` writes `/etc/rogue/env` on the target
-device with the assigned user's identity. The plugin hooks pick up that
-file at hook-fire time.
+device with the org API key and the assigned user's identity. It is the first
+file the hooks look at, and once it holds `ROGUE_API_KEY` it is the only one
+read: nothing from the bundled `env` is merged, so the script also pins
+`ROGUE_AUTO_UPDATE=0` (pass `--mode block` if the bundle was compiled with
+it). A file without the key is skipped whole, which is why the script refuses
+to write one.
 
 ### Kandji (Custom Script)
 
@@ -145,6 +151,7 @@ set -e
 [ -n "$USER_EMAIL" ] || exit 0
 [ -n "$USER_FULL_NAME" ] || exit 0
 
+ROGUE_API_KEY="<your-rsk-key>" \
 ROGUE_ACTOR_EMAIL="$USER_EMAIL" \
 ROGUE_ACTOR_NAME="$USER_FULL_NAME" \
   bash <(curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/scripts/mdm-provision-actor.sh)
@@ -162,28 +169,29 @@ Management → Scripts. Set the script parameter labels:
 
 - `Parameter 4` → "Email"
 - `Parameter 5` → "Full name"
+- `Parameter 6` → "API key"
 
 Create a Policy that runs the script with the user's email and name passed
-as parameters (typically populated by an LDAP/AD attribute mapping). The
-script accepts `--email "$4" --name "$5"` natively:
+as parameters (typically populated by an LDAP/AD attribute mapping) and the
+org API key as the third:
 
 ```bash
 #!/usr/bin/env bash
 set -e
 EMAIL="$4"
 NAME="$5"
-[ -n "$EMAIL" ] && [ -n "$NAME" ] || exit 0
+KEY="$6"
+[ -n "$EMAIL" ] && [ -n "$NAME" ] && [ -n "$KEY" ] || exit 0
 bash <(curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/scripts/mdm-provision-actor.sh) \
-  --email "$EMAIL" --name "$NAME"
+  --email "$EMAIL" --name "$NAME" --key "$KEY"
 ```
 
 ### Other MDMs
 
-The script accepts identity via either env vars (`ROGUE_ACTOR_EMAIL`,
-`ROGUE_ACTOR_NAME`) or CLI args (`--email`, `--name`). Use whichever your
-MDM substitutes natively. Optional flags `--key`, `--mode`, `--base-url`
-let MDM also push the API key or enforcement mode if you prefer
-fully-centralized control over those.
+The script accepts its inputs via either env vars (`ROGUE_API_KEY`,
+`ROGUE_ACTOR_EMAIL`, `ROGUE_ACTOR_NAME`) or CLI args (`--key`, `--email`,
+`--name`). Use whichever your MDM substitutes natively. `--mode`,
+`--base-url` and `--auto-update` are optional.
 
 ### Offline / air-gapped fleets
 
@@ -198,6 +206,7 @@ On a single test device after both deploys land:
 ```bash
 # 1. MDM landed
 ls -la /etc/rogue/env             # expect: -rw-r--r-- root wheel ...
+grep -c ROGUE_API_KEY /etc/rogue/env   # expect: 1 (a keyless file is not read)
 grep ACTOR /etc/rogue/env         # expect: ROGUE_ACTOR_EMAIL=alice@yourorg.com
 
 # 2. Plugin landed
@@ -217,35 +226,32 @@ full pipeline is healthy.
 Every hook in the plugin runs this preamble before POSTing the event:
 
 ```sh
-[ -r "${CLAUDE_PLUGIN_ROOT}/env" ] && . "${CLAUDE_PLUGIN_ROOT}/env"
-[ -r /etc/rogue/env ]              && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ]          && . "$HOME/.rogue-env"
+for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
+  if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+    . "$_env_file"; break
+  fi
+done
 ```
 
-Three credential sources, sourced in order. Later sources override earlier:
+Three candidates. The first that holds `ROGUE_API_KEY` is sourced alone; its
+values override the process environment, and a file without the key is skipped:
 
 | Source | Written by | Carries |
 | --- | --- | --- |
-| `${CLAUDE_PLUGIN_ROOT}/env` | Compile script (Step 1) | Org API key, enforcement mode, auto-update pin |
-| `/etc/rogue/env` | MDM script (Step 3) | Per-user actor identity (and optionally a per-machine key) |
-| `~/.rogue-env` | User running `/rogue:setup` | Per-user override; not used in managed deployments |
-
-The hook payload comes out with: org API key (from bundle) + per-user actor
-(from MDM) + org enforcement mode (from bundle).
+| `/etc/rogue/env` | MDM script (Step 3) | Org API key, identity, mode, auto-update pin; first candidate |
+| `${CLAUDE_PLUGIN_ROOT}/env` | Compile script (Step 1) | Org API key, enforcement mode, auto-update pin; read until Step 3 lands |
+| `~/.rogue-env` | User running `/rogue:setup` | Per-user; not used in managed deployments |
 
 ## Operations
 
 ### Rotating the API key
 
-**Standard path** — recompile, re-upload to the Claude management UI. All
-devices pick up the new key on next plugin sync (typically next session
-start).
+**MDM** — push the new `--key` through the MDM script. The next enforcement
+cycle rewrites `/etc/rogue/env`, and every hook fire after that uses the new key;
+revoke the old one in the dashboard afterward.
 
-**Emergency path** — push a new `--key` value through the MDM script. Since
-`/etc/rogue/env` is sourced *after* the bundle, the MDM-supplied key wins
-on every hook fire. Useful if you suspect the bundled key is compromised
-and need same-hour mitigation; revoke the old key in the dashboard
-immediately afterward.
+**Bundle** — recompile and re-upload as well, so a device the MDM has not
+reached yet does not keep posting with the old key.
 
 ### Shipping plugin updates
 
@@ -277,26 +283,25 @@ overwrites `/etc/rogue/env` with the new identity. No manual cleanup.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `/rogue:status` shows the *compiler's* identity (your IT lead's email) | MDM script didn't run yet; plugin fell back to compile-time git config | Force MDM enforcement: Kandji "Run library item now", Jamf `sudo jamf policy` |
+| `/rogue:status` shows the user's git identity, not the MDM-assigned one | MDM script didn't run yet, so the hooks read the bundled `env` (`/rogue:status` marks `/etc/rogue/env` "not read" when it lacks the key) | Force MDM enforcement: Kandji "Run library item now", Jamf `sudo jamf policy` |
 | `/rogue:status` shows blank identity | MDM ran with empty placeholders, or fell back to a no-op | Verify MDM user binding; confirm the `[ -n "$USER_EMAIL" ]` guard in your payload |
 | `/rogue:status` says "not configured" | Plugin didn't deploy, or `${CLAUDE_PLUGIN_ROOT}/env` was stripped | Re-upload via Claude management UI; verify zip has `env` at root |
-| Events in dashboard have blank actor | Plugin landed before MDM script (race during rollout) | Wait for next MDM enforcement cycle, or kick it manually |
+| Events in dashboard carry the user's git identity, not the MDM-assigned one | Plugin landed before MDM script (race during rollout): the bundled `env` is read until `/etc/rogue/env` holds the key | Wait for next MDM enforcement cycle, or kick it manually |
 | No events at all in dashboard | Hooks fail-open silently on curl timeout or network error | Check device can reach `api.rogue.security`; inspect `~/.rogue/auto-update.log` for clues |
 | macOS modal alert doesn't fire on blocked prompts | Expected on every surface except **Claude Cowork local** — the CLI and the Desktop app render the block reason natively and are suppressed deliberately. Otherwise: a cloud Cowork session (`CLAUDE_CODE_REMOTE=true`, a headless container with no GUI), `ROGUE_ALERT=0`, an event excluded by `ROGUE_ALERT_EVENTS`, or no `osascript` on `PATH` | Read `~/.rogue/hook.log`: `alert_skipped=1` names the gate input that declined (`entrypoint=` / `cowork=` / `remote=` / `agent=`), and `alert_rc=<status>` (plus `alert_err="…"`) reports a modal that was attempted and failed. **No Automation permission is needed** — the alert does not use `tell application "System Events"`, so a Privacy & Security → Automation grant is not the fix |
 | Plugin upload rejected by Claude management UI | Hooks file declares unsupported events, or marketplace.json missing | Recompile with the latest `compile-customer-plugin.sh` — the script filters hooks and generates marketplace.json |
 
 ## Security notes
 
-- **Org-wide API key.** The compiled bundle carries a single API key shared
-  by every user it's pushed to. Per-user attribution comes from the actor
-  headers (set by MDM), not from per-user keys. If you require true
-  per-user keys, deploy them via MDM by passing `--key` per device — but
-  this means revocation must also happen via MDM, not via re-compile.
+- **Org-wide API key.** The bundle and `/etc/rogue/env` both carry a single
+  API key shared by every user. Per-user attribution comes from the actor
+  headers (set by MDM), not from per-user keys. Per-device keys are possible
+  (`--key` per device), but then revocation happens via MDM, not re-compile.
 
-- **`/etc/rogue/env` is world-readable by default** (`0644`, root-owned).
-  If your MDM script writes the API key here too, tighten to `0640` and
-  add a `_rogue` group whose members are the human users you want to read
-  it. Modify the script's `chmod` line accordingly.
+- **`/etc/rogue/env` is world-readable** (`0644`, root-owned): the hooks run
+  as each user and must read it, and it carries the org key. To narrow
+  readers, change the script's `chmod` to `0640` and add a group whose
+  members are the human users.
 
 - **The compiled zip is sensitive.** Anyone with the file can extract the
   API key in cleartext. Distribute only through the Claude management UI;
@@ -317,8 +322,8 @@ overwrites `/etc/rogue/env` with the new identity. No manual cleanup.
 - **Hot-desk / shared devices.** This guide assumes one identity per
   device. For machines where multiple users sign in over time, identity
   provisioning should happen at user login (LaunchAgent, PAM hook) and
-  write `~/.rogue-env` instead of `/etc/rogue/env`. Contact Rogue support
-  for a reference setup.
+  write `~/.rogue-env`, with `/etc/rogue/env` absent: a machine file holding a
+  key is read alone. Contact Rogue support for a reference setup.
 
 - **Non-managed installs.** Users installing the plugin themselves via
   the public marketplace should follow the [README](../README.md) and run
