@@ -929,8 +929,8 @@ function Invoke-Main {
     . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $PluginRoot 'scripts')
     $script:creds['ROGUE_API_KEY'] = Initialize-RogueProtection -Key $script:creds['ROGUE_API_KEY'] -BaseUrl $script:creds['ROGUE_BASE_URL'] -Slug $ShipperSlug -Family $AgentFamily -Version $ShipperVersion
     if ($script:RPDirectory) { $script:creds['ROGUE_LOG_FILE']=$env:ROGUE_LOG_FILE }
-    if (-not (Enter-RogueProtection)) { exit 0 }
     try {
+    if (-not (Enter-RogueProtection)) { exit 0 }
     Resolve-Knobs
     if (-not $script:apiKey) { Write-ShipDebug 'not configured -> no-op'; exit 0 }
     if (-not (Resolve-ShipActor)) {
