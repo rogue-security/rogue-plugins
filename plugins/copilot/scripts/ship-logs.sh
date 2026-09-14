@@ -628,6 +628,7 @@ find_line_end() { # <file> <offset>
 # (which is NOT always the bytes sent - an over-long line is skipped forward).
 # Returns non-zero when nothing was shipped and the offset must NOT move.
 ship_next_chunk() { # <file> <offset> <rotated:0|1> <expected-head>
+  rogue_protection_current || return 1
   ADVANCE_BYTES=0
   _chunk_source_file="${1:-}"
   _chunk_offset="${2:-0}"
@@ -763,6 +764,7 @@ ship_oversize_line() { # <file> <offset> <rotated> <expected-head> <file-size>
 # body is passed as --data-binary @file rather than -d, because a 1 MiB chunk is
 # ~1.4 MiB of base64 and macOS's ARG_MAX is 1 MiB for args plus environment.
 post_chunk() { # <chunk-file> <offset> <bytes> <rotated:0|1>
+  rogue_protection_current || return 1
   _post_chunk_file="${1:-}"
   _post_offset="${2:-0}"
   _post_bytes="${3:-0}"
@@ -784,6 +786,7 @@ post_chunk() { # <chunk-file> <offset> <bytes> <rotated:0|1>
   debug "POST $SHIP_URL file=$TARGET_BASENAME offset=$_post_offset bytes=$_post_bytes rotated=$_post_rotated_json"
   _post_http_code=$(curl -sS --max-time "$HTTP_TIMEOUT" -X POST "$SHIP_URL" \
     -H "x-rogue-api-key: $API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
     -H 'Content-Type: application/json' \
     --data-binary @"$_post_body_file" \
     -o /dev/null -w '%{http_code}' 2>/dev/null)
@@ -839,6 +842,12 @@ ship_log_file() { # <path>
   read_state "$STATE_KEY" "$_target_abs_path"
   _target_file_bytes=$(file_size "$_target_file")
   _target_head=$(first_line_fingerprint "$_target_file")
+  if [ -n "${ROGUE_PROTECTION_STATE:-}" ] && [ "${ROGUE_PROTECTION_REVISION:-0}" -gt 0 ] && [ "$(cat "$ROGUE_PROTECTION_STATE/ship-revision" 2>/dev/null)" != "$ROGUE_PROTECTION_REVISION" ]; then
+    write_state "$STATE_KEY" "$_target_file_bytes" "$_target_head" "$_target_file_bytes" "$_target_abs_path"
+    printf '%s' "$ROGUE_PROTECTION_REVISION" > "$ROGUE_PROTECTION_STATE/ship-revision"
+    release_lock
+    return 0
+  fi
   RUN_BYTES_SENT=0
 
   _target_rotated=0
@@ -890,6 +899,9 @@ main() {
   stand_down_on_git_bash
   parse_args "$@"
   load_env
+  . "$PLUGIN_ROOT/scripts/protection.sh"
+  rogue_protection_init "$SHIPPER_SLUG" "$AGENT_FAMILY" "$PLUGIN_ROOT/scripts"
+  rogue_protection_enter || exit 0
   resolve_knobs
   [ -n "$API_KEY" ] || { debug 'not configured -> no-op'; exit 0; }
   command -v curl >/dev/null 2>&1 || { log 'outcome=fail reason=no-curl'; exit 0; }
@@ -902,12 +914,12 @@ main() {
     exit 0
   fi
 
-  STATE_DIR="$HOME/.rogue/ship"
+  STATE_DIR="${ROGUE_PROTECTION_STATE:-$HOME/.rogue}/ship"
   mkdir -p "$STATE_DIR" 2>/dev/null
   [ -d "$STATE_DIR" ] || { debug "cannot create $STATE_DIR"; exit 0; }
   TMP_DIR=$(mktemp -d "$STATE_DIR/.tmp.XXXXXX" 2>/dev/null) || TMP_DIR=""
   [ -n "$TMP_DIR" ] || { debug 'cannot create a temp dir'; exit 0; }
-  trap 'cleanup' EXIT INT TERM
+  trap 'cleanup; rogue_protection_leave' EXIT INT TERM
 
   # A redirect, not a pipe: a `while` on the right of a pipe runs in a subshell in
   # POSIX sh, and log paths can contain spaces, so read them line by line.

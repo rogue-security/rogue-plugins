@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { Protection } from "./protection.mjs";
 // Rogue Security — Gemini CLI presence heartbeat.
 //
 // Usage: heartbeat.mjs [TriggerEvent]     (default SessionStart)
@@ -107,7 +108,8 @@ function claimBeaconSlot(env, unthrottled) {
 
 async function main() {
   const env = loadEnvFiles();
-  const apiKey = env.ROGUE_API_KEY || "";
+  const protection = await Protection.connect(env);
+  const apiKey = protection?.key || env.ROGUE_API_KEY || "";
   if (!apiKey) return; // not configured → no-op
 
   // Same cascade hook.mjs runs, so the roster row and the event rows agree.

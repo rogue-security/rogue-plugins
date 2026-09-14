@@ -169,6 +169,8 @@ main() {
   locate_plugin_root
   load_env          # sources the env files, then normalises the base URL
   require_api_key   # exits 0 when this install is not configured
+  . "${PLUGIN_ROOT}/scripts/protection.sh"
+  rogue_protection_init kiro kiro "${PLUGIN_ROOT}/scripts"
   load_actor
   resolve_surface "${1:-}"
   resolve_version   # after the surface: install-id.sh keys the agent on it

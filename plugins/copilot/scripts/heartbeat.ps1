@@ -124,6 +124,8 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'copilot' -Family 'copilot'
 
 # ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
 # env file → git config files → <login>@<host> → unknown. A damaged install with

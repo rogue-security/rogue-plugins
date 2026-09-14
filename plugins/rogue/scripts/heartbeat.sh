@@ -71,6 +71,9 @@ set -u
 # fixed enum value "claude". Backslash- and quote-escape each value so a
 # name/host with a " or \ can't break the JSON.
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+. "${CLAUDE_PLUGIN_ROOT}/scripts/protection.sh"
+rogue_protection_init claude claude "${CLAUDE_PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
+
 BODY=$(printf '{"agent_family":"claude","agent":"%s","version":"%s","host":"%s","actor_email":"%s","actor_name":"%s"}' \
   "$(esc "${ROGUE_INSTALL_AGENT:-claude_code}")" "$(esc "${ROGUE_INSTALL_VERSION:-unknown}")" \
   "$(esc "${ROGUE_INSTALL_HOST:-unknown}")" \

@@ -148,6 +148,8 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'claude' -Family 'claude'
 
 # -- actor resolution: hook.ps1's Resolve-RogueActor -------------------------
 # The ONE Claude cascade (env file -> CLAUDE_CODE_USER_EMAIL -> git config files ->

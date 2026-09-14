@@ -1,0 +1,17 @@
+# Pause coding protection from Fleet
+
+Organization owners and admins can pause a supported coding installation from its existing Fleet detail sheet. AIDR pause stops Rogue hook payload collection, evaluation, blocking, local activity logs and log uploads. The host receives its normal allow response. Management requests continue so the client can receive a resume decision.
+
+Protocol 1 is included in the source versions Claude 1.0.30, Codex 1.0.4, Cursor 1.1.6, Copilot 1.2.5, Gemini 1.0.29, Antigravity 1.0.27 and Kiro 1.0.1. Release and deployment remain separate steps. Windows uses the PowerShell bridge; macOS and Linux use shell bridges, with Node for Gemini.
+
+Choose a reason and a duration of one hour, four hours, 24 hours or until resumed. Any organization admin may resume or change duration without another reason. AISPM discovery is controlled on the endpoint that runs scans. An independent API-key pause still applies after the installation is resumed.
+
+The bridge exchanges its provisioning key for an installation credential at `/api/v1/hooks/protection/enroll`. Identity is server-assigned and persists in the user's private protection directory. A hostname or email cannot claim an existing identity. Related host variants that use the same bridge configuration share that installation. Independent configurations remain separate. After provisioning-key rotation, the bridge restores its existing authenticated installation and reuses its saved decision and active-work tracking. An unavailable server postpones restoration without collecting activity under an unscoped key.
+
+The bridge fetches the current decision before collecting hook input and keeps a short-lived background poller while the installation is in use. Polling runs every 15 seconds; the delivery target is 60 seconds online. The server displays applied only after a current acknowledgement. Pending, offline, unsupported or failed are not proof that local work stopped. A state-storage failure blocks the current hook and reports a failure acknowledgement. A saved finite pause expires offline; an indefinite pause remains until confirmed resume.
+
+Registered installations store their hook logs inside their private protection directory and ship them with their own credential. The scoped log path takes precedence over a shared custom log destination. On resume, the shipper advances its own offsets past buffered content without modifying the source log. It sends only fresh subsequent entries. An endpoint's mixed-log diagnostic uploader cannot attribute these installations and must not bypass their pauses.
+
+Older plugins and native HTTP hooks without a local gate have limited coverage. Their API-key pause can suppress server work but cannot stop local collection or CPU use. Use an updated command bridge for local suspension. Existing activity already committed before a pause remains historical.
+
+Run `node --test tests/test_protection.mjs` for isolated HTTP and child-process checks. Set `ROGUE_TEST_PWSH=pwsh` to include the PowerShell gate. The test owns its credentials, files and polling processes; it never sends test activity to production. Signed native endpoint, Windows host and vendor application verification require their respective environments.
