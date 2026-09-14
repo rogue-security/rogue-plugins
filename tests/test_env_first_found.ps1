@@ -212,6 +212,24 @@ try {
     Check 'codex warn.ps1: stops at the first file with a key' $true ($warn -match 'if \(\$key\) \{ break \}')
     Check 'codex warn.ps1: reads through the trust gate' $true ($warn -match 'foreach \(\$line in \(Read-RogueEnvFile \$f\)\)')
     Check 'codex warn.ps1: process env only when no file has a key' $true ($warn -match "if \(-not \`$key\) \{ \`$key = \[Environment\]::GetEnvironmentVariable\('ROGUE_API_KEY'\) \}")
+
+    # Every reader above is exercised with its plugin-root variable already set, so
+    # a dot-source placed BEFORE that variable is assigned passes here and loads
+    # nothing in production - Read-RogueEnvFile is then undefined and the whole
+    # credential block dies silently. Hold the shipped source to the order.
+    Write-Host '== structural: env-file.ps1 is dot-sourced after the plugin root is known'
+    foreach ($file in (Get-ChildItem -Path (Join-Path $repo 'plugins') -Recurse -Filter *.ps1 -File)) {
+        $text = Get-Content -Raw -LiteralPath $file.FullName
+        $load = [regex]::Match($text, "Join-Path \`$([\w:]+) 'scripts/env-file\.ps1'")
+        if (-not $load.Success) { continue }
+        $var = $load.Groups[1].Value
+        # $env:... is read straight from the environment, so there is nothing to assign.
+        if ($var -like 'env:*') { continue }
+        # Matches both a plain assignment and the `param([string]$PluginRoot = '')` form.
+        $assign = [regex]::Match($text, "\`$(?:script:)?$var\s*=", 'IgnoreCase')
+        Check "$($file.Name): plugin root assigned before env-file.ps1 is loaded" $true `
+            ($assign.Success -and $assign.Index -lt $load.Index)
+    }
 } finally {
     foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
     Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
