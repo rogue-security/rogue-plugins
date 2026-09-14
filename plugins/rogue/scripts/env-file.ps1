@@ -34,6 +34,19 @@ function Test-RogueEnvFile {
     } catch { return $false }
 }
 
+# A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty
+# value - the same test every reader makes before selecting it.
+function Test-RogueEnvFileHasKey {
+    param([string]$Path)
+    # Guard the read: -Encoding is a FileSystem-provider dynamic parameter, and a
+    # Windows machine path evaluated off Windows resolves to no provider at all.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        if ($line -match '^\s*(?:export\s+)?ROGUE_API_KEY=["'']?[^"''\s]') { return $true }
+    }
+    return $false
+}
+
 function Read-RogueEnvFile {
     param([string]$Path)
     if (Test-RogueEnvFile $Path -System:($Path -eq 'C:\ProgramData\rogue\env')) {

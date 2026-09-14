@@ -34,6 +34,10 @@ export function shellUnquote(raw) {
   return v;
 }
 
+// The MDM-managed machine file, named once so setup.mjs and the readers cannot
+// disagree about which path is policy.
+export const MACHINE_ENV_FILE = IS_WIN ? "C:\\ProgramData\\rogue\\env" : "/etc/rogue/env";
+
 // ── Credential resolution ────────────────────────────────────────────────────
 // Only root or the current user may supply configuration, and nobody else may
 // write it; the machine file must be root's (env-file.sh's rule). Windows has no
@@ -53,6 +57,17 @@ export function isTrustedEnvFile(file) {
   return (st.mode & 0o022) === 0;
 }
 
+// A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty value.
+export function envFileHasKey(file) {
+  try {
+    return /^[ \t]*(?:export[ \t]+)?ROGUE_API_KEY=["']?[^"'\s]/m.test(
+      fs.readFileSync(file, "utf8"),
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Same env-file rule as the other monorepo plugins: the first trusted file holding
 // ROGUE_API_KEY is used alone, and its values override the process env:
 //   /etc/rogue/env (machine, MDM) → <ext>/env (bundled) → ~/.rogue-env (per-user)
@@ -62,7 +77,7 @@ export function loadEnvFiles() {
     if (k.startsWith("ROGUE_") && process.env[k]) merged[k] = process.env[k];
   }
   const files = [
-    IS_WIN ? "C:\\ProgramData\\rogue\\env" : "/etc/rogue/env",
+    MACHINE_ENV_FILE,
     path.join(EXT_ROOT, "env"),
     path.join(HOME, ".rogue-env"),
   ];
