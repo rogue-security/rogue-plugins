@@ -35,6 +35,7 @@ BIN="$WORK/bin"; mkdir -p "$BIN"
 # any other call is the key validation POST and answers `{}` with CURL_CODE.
 cat > "$BIN/curl" <<'STUB'
 #!/usr/bin/env bash
+[ -z "${CURL_LOG:-}" ] || printf '%s\n' "$*" >> "$CURL_LOG"
 out=""
 while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; esac; shift; done
 if [ -n "$out" ]; then cp "$TARBALL" "$out"; exit 0; fi
@@ -201,6 +202,43 @@ H="$WORK/home4c"
 run_install "$H" ROGUE_API_KEY="passed-key" ROGUE_TEST_MACHINE_OWNER="$(id -u)"
 check "user-owned machine file: warning names the file" "1" "$(count "$MACHINE holds ROGUE_API_KEY but is not root-owned")"
 check "user-owned machine file: user env file holds the passed key" "export ROGUE_API_KEY='passed-key'" "$(grep '^export ROGUE_API_KEY=' "$H/.rogue-env" || :)"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. User env file with no key: it still carries the base URL validation must use
+#    and the identity the rewrite must keep, and a trailing slash never doubles
+# ══════════════════════════════════════════════════════════════════════════════
+rm -f "$MACHINE"
+H="$WORK/home5"; mkdir -p "$H"
+cat > "$H/.rogue-env" <<'USERENV'
+export ROGUE_BASE_URL='https://api.example.invalid/'
+export ROGUE_ACTOR_EMAIL='stored@example.com'
+export ROGUE_ACTOR_NAME='Stored Name'
+USERENV
+CURL5="$WORK/curl5.log"
+run_install "$H" ROGUE_API_KEY="passed-key" CURL_LOG="$CURL5"
+check "keyless user file: install exits 0" "0" "$LAST_RC"
+[ "$LAST_RC" = 0 ] || cat "$ERR"
+check "keyless user file: the passed key wins" "export ROGUE_API_KEY='passed-key'" "$(grep '^export ROGUE_API_KEY=' "$H/.rogue-env" || :)"
+check "keyless user file: stored actor email kept" "export ROGUE_ACTOR_EMAIL='stored@example.com'" "$(grep '^export ROGUE_ACTOR_EMAIL=' "$H/.rogue-env" || :)"
+check "keyless user file: stored actor name kept" "export ROGUE_ACTOR_NAME='Stored Name'" "$(grep '^export ROGUE_ACTOR_NAME=' "$H/.rogue-env" || :)"
+
+# Only the interactive path validates a typed key, so the base URL the user file
+# carries is exercised there.
+H="$WORK/home5b"; mkdir -p "$H"
+cp "$WORK/home5/.rogue-env" "$H/.rogue-env"
+sed -i.bak "s/^export ROGUE_API_KEY=.*//" "$H/.rogue-env" && rm -f "$H/.rogue-env.bak"
+CURL5B="$WORK/curl5b.log"
+printf 'typed-key\n\n\n' > "$WORK/input5"
+run_configure "$H" "$WORK/input5" ROGUE_API_KEY="" CURL_LOG="$CURL5B"
+check "keyless user file: validated against the stored base URL" "1" "$(grep -c 'https://api.example.invalid/api/v1/hooks/status' "$CURL5B" || :)"
+check "keyless user file: the trailing slash was not doubled" "0" "$(grep -c '[^:]//api/v1/hooks/status' "$CURL5B" || :)"
+
+# The machine file's own base URL is normalized the same way.
+seed_machine "export ROGUE_API_KEY='machine-key'" "export ROGUE_BASE_URL='https://mdm.example.invalid//'"
+H="$WORK/home5c"
+CURL5C="$WORK/curl5c.log"
+run_install "$H" ROGUE_API_KEY="" CURL_LOG="$CURL5C"
+check "machine file base URL: validated without a doubled slash" "1" "$(grep -c 'https://mdm.example.invalid/api/v1/hooks/status' "$CURL5C" || :)"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all install env-file tests passed"; else echo "$fails FAILED"; exit 1; fi

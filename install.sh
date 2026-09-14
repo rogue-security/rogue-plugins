@@ -48,12 +48,19 @@
 #
 set -u
 
+# A base URL that ends in a slash composes "//api/v1/..." on every request, which
+# the API does not route. Applied wherever the value can enter.
+trim_base_url() {
+  while [ "${ROGUE_BASE_URL%/}" != "$ROGUE_BASE_URL" ]; do ROGUE_BASE_URL="${ROGUE_BASE_URL%/}"; done
+}
+
 # ── Config ──────────────────────────────────────────────────────────────────
 ROGUE_PLUGIN_REPO="${ROGUE_PLUGIN_REPO:-qualifire-dev/rogue-plugins}"
 ROGUE_BASE_URL_DEFAULT="https://api.rogue.security"
 BASE_URL_EXPLICIT=0
 [ -z "${ROGUE_BASE_URL:-}" ] || BASE_URL_EXPLICIT=1
 ROGUE_BASE_URL="${ROGUE_BASE_URL:-$ROGUE_BASE_URL_DEFAULT}"
+trim_base_url
 MARKETPLACE_NAME="rogue-marketplace"
 PLUGIN_NAME="rogue"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -722,6 +729,7 @@ validate_machine_env_key() {
   key="$(env_file_value "$MACHINE_ENV_FILE" ROGUE_API_KEY)"
   url="$(env_file_value "$MACHINE_ENV_FILE" ROGUE_BASE_URL)"
   ROGUE_BASE_URL="${url:-$ROGUE_BASE_URL_DEFAULT}"
+  trim_base_url
   resolve_actor_defaults "$(env_file_value "$MACHINE_ENV_FILE" ROGUE_ACTOR_EMAIL)" ""
   code="$(status_check "$key" "$DEF_EMAIL")"
   case "$code" in
@@ -761,9 +769,13 @@ configure_credentials() {
   local flag_name="${ROGUE_ACTOR_NAME:-}"
   local flag_base_url="$ROGUE_BASE_URL"
 
-  ! env_file_has_key "$ENV_FILE" || . "$ENV_FILE"
+  # Whole file, not only a keyed one: a user file with no ROGUE_API_KEY can still
+  # carry the ROGUE_BASE_URL validation must use and the ROGUE_ACTOR_* identity
+  # write_env_file would otherwise replace from the cascade.
+  [ ! -r "$ENV_FILE" ] || . "$ENV_FILE"
 
   [ "$BASE_URL_EXPLICIT" = "1" ] && ROGUE_BASE_URL="$flag_base_url"
+  trim_base_url
 
   local cur_key="${flag_key:-${ROGUE_API_KEY:-}}"
 
@@ -1055,7 +1067,7 @@ parse_args() {
       --actor-email)     [ -n "$val" ] || { val="$2"; shift; }; ROGUE_ACTOR_EMAIL="$val" ;;
       --actor-name)      [ -n "$val" ] || { val="$2"; shift; }; ROGUE_ACTOR_NAME="$val" ;;
       --plugin-repo)     [ -n "$val" ] || { val="$2"; shift; }; ROGUE_PLUGIN_REPO="$val" ;;
-      --base-url)        [ -n "$val" ] || { val="$2"; shift; }; ROGUE_BASE_URL="$val"; BASE_URL_EXPLICIT=1 ;;
+      --base-url)        [ -n "$val" ] || { val="$2"; shift; }; ROGUE_BASE_URL="$val"; trim_base_url; BASE_URL_EXPLICIT=1 ;;
       --claude)          WANT="$WANT claude" ;;
       --codex)           WANT="$WANT codex" ;;
       --cursor)          WANT="$WANT cursor" ;;
