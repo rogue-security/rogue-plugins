@@ -51,6 +51,7 @@ SH_PLUGINS='rogue codex cursor copilot antigravity kiro'
 mkdir -p "$T/bin"
 cat > "$T/bin/curl" <<'STUB'
 #!/bin/sh
+for a in "$@"; do case "$a" in */hooks/protection/*) printf '\n404'; exit 0 ;; esac; done
 n=0
 while [ -e "$CAP/body.$n" ]; do n=$((n + 1)); done
 for a in "$@"; do

@@ -68,7 +68,6 @@ while [ "${_lcap#0}" != "$_lcap" ]; do _lcap="${_lcap#0}"; done
 if [ "${#_lcap}" -gt 18 ]; then ROGUE_LOG_MAX_BYTES=10485760; fi
 rotate_log() {
   if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
-  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -150,6 +149,7 @@ _rogue_want_alert() {
   return 0
 }
 
+[ -r "${CLAUDE_PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{}'; exit 0; }
 . "${CLAUDE_PLUGIN_ROOT}/scripts/protection.sh"
 rogue_protection_init claude claude "${CLAUDE_PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
 rogue_protection_enter || { printf '%s' '{}'; exit 0; }
@@ -171,7 +171,9 @@ fi
 # reports itself imprecisely to the fleet roster.
 [ -n "${ROGUE_INSTALL_ID_ERROR:-}" ] && log "error=install-id $ROGUE_INSTALL_ID_ERROR"
 
-RESP=$(curl -sS -X POST "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/claude" \
+BODY="$(rogue_protection_read_input)"
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
+RESP=$(printf '%s' "$BODY" | curl -sS -X POST "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/claude" \
   -H "x-rogue-api-key: $ROGUE_API_KEY" \
   -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
   -H "x-rogue-event: $EVENT" \

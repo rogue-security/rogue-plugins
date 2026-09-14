@@ -442,7 +442,7 @@ class Shipper {
   }
 
   readState(stateKey, normalizedPath) {
-    const state = { offset: 0, head: "", size: 0, path: "" };
+    const state = { offset: 0, head: "", size: 0, path: "", revision: "" };
     let text;
     try {
       text = fs.readFileSync(path.join(this.stateDir, `${stateKey}.state`), "utf8");
@@ -455,6 +455,7 @@ class Shipper {
       if (field[1] === "offset") state.offset = /^[0-9]+$/.test(field[2]) ? Number(field[2]) : 0;
       else if (field[1] === "head") state.head = field[2];
       else if (field[1] === "size") state.size = /^[0-9]+$/.test(field[2]) ? Number(field[2]) : 0;
+      else if (field[1] === "revision") state.revision = field[2];
       else if (field[1] === "path") state.path = field[2];
     }
     // The key is a BASENAME, so /a/claude.log and /b/claude.log key alike: changing
@@ -467,6 +468,7 @@ class Shipper {
       state.offset = 0;
       state.head = "";
       state.size = 0;
+      state.revision = "";
     }
     return state;
   }
@@ -480,10 +482,11 @@ class Shipper {
       const tempFile = path.join(this.stateDir, `.state-tmp-${process.pid}`);
       fs.writeFileSync(
         tempFile,
-        `offset=${offset}\nhead=${head}\nsize=${size}\npath=${normalizedPath}\n`,
+        `offset=${offset}\nhead=${head}\nsize=${size}\npath=${normalizedPath}\nrevision=${this.protection?.revision ?? ""}\n`,
       );
       fs.renameSync(tempFile, destination);
-    } catch {}
+      return true;
+    } catch { return false; }
   }
 
   async sendChunkRequest(bytes, offset, count, rotated) {
@@ -653,7 +656,7 @@ class Shipper {
       if (advanceBytes <= 0) return { offset, complete: false };
       offset += advanceBytes;
       this.runBytesSent += advanceBytes;
-      this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath);
+      if (!this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath)) return {offset, complete:false};
     }
     return { offset, complete: true };
   }
@@ -693,9 +696,8 @@ class Shipper {
       const fileBytes = fileSize(filePath);
       const currentHead = firstLineFingerprint(filePath);
       this.runBytesSent = 0;
-      if (this.protection?.revision > 0 && (fs.existsSync(this.protection.file('ship-revision')) ? fs.readFileSync(this.protection.file('ship-revision'), 'utf8') : '') !== String(this.protection.revision)) {
+      if (this.protection?.revision > 0 && state.revision !== String(this.protection.revision)) {
         this.writeState(stateKey, fileBytes, currentHead, fileBytes, normalizedPath);
-        fs.writeFileSync(this.protection.file('ship-revision'), String(this.protection.revision), {mode:0o600});
         return;
       }
       let offset = state.offset;

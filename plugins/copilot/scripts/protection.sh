@@ -121,16 +121,22 @@ rogue_protection_init() {
   fi
   if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then
     _rp_enroll_attempt=$(cat "$ROGUE_PROTECTION_STATE/enroll-attempt" 2>/dev/null) || _rp_enroll_attempt=0
-    if [ $(( $(rogue_protection_now) - ${_rp_enroll_attempt:-0} )) -lt 60 ]; then ROGUE_PROTECTION_STATE=''; return 0; fi
+    if [ $(( $(rogue_protection_now) - ${_rp_enroll_attempt:-0} )) -lt 60 ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 0; fi
     rogue_protection_lock "$ROGUE_PROTECTION_STATE/enroll.lock" || return 0
     rogue_protection_now > "$ROGUE_PROTECTION_STATE/enroll-attempt"
-    _rp_response=$(curl -fsS --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H 'content-type: application/json' --data "{\"type\":\"coding_agent\",\"name\":\"$1\",\"family\":\"$2\",\"host\":\"$(rogue_protection_escape "$(hostname)")\",\"version\":\"$(rogue_protection_escape "${ROGUE_INSTALL_VERSION:-unknown}")\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/enroll" 2>/dev/null) || _rp_response=''
+    if [ ! -s "$ROGUE_PROTECTION_STATE/enrollment-nonce" ]; then
+      (umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$ROGUE_PROTECTION_STATE/enrollment-nonce.tmp" && mv "$ROGUE_PROTECTION_STATE/enrollment-nonce.tmp" "$ROGUE_PROTECTION_STATE/enrollment-nonce") || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 0; }
+    fi
+    _rp_nonce=$(cat "$ROGUE_PROTECTION_STATE/enrollment-nonce")
+    [ "${#_rp_nonce}" -eq 64 ] || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 0; }
+    _rp_response=$(curl -sS -w '\n%{http_code}' --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H 'content-type: application/json' --data "{\"enrollmentNonce\":\"$_rp_nonce\",\"type\":\"coding_agent\",\"name\":\"$1\",\"family\":\"$2\",\"host\":\"$(rogue_protection_escape "$(hostname)")\",\"version\":\"$(rogue_protection_escape "${ROGUE_INSTALL_VERSION:-unknown}")\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/enroll" 2>/dev/null) || _rp_response=''
+    if [ "$(printf '%s' "$_rp_response" | tail -n 1)" = 404 ]; then touch "$ROGUE_PROTECTION_STATE/legacy-server"; else rm -f "$ROGUE_PROTECTION_STATE/legacy-server"; fi
     _rp_key=$(printf '%s' "$_rp_response" | sed -n 's/.*"apiKey":"\([A-Za-z0-9_-][A-Za-z0-9_-]*\)".*/\1/p')
     case "$_rp_response" in *'"alreadyEnrolled":true'*) _rp_key=$ROGUE_API_KEY ;; esac
     if [ -n "$_rp_key" ]; then (umask 077; printf '%s' "$_rp_key" > "$ROGUE_PROTECTION_STATE/credential.tmp"; mv "$ROGUE_PROTECTION_STATE/credential.tmp" "$ROGUE_PROTECTION_STATE/credential"); fi
     rm -f "$ROGUE_PROTECTION_STATE/enroll.lock" 2>/dev/null || true
   fi
-  if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then ROGUE_PROTECTION_STATE=''; return 0; fi
+  if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 0; fi
   ROGUE_API_KEY=$(cat "$ROGUE_PROTECTION_STATE/credential")
   ROGUE_LOG_FILE="$ROGUE_PROTECTION_STATE/$1.log"
   export ROGUE_API_KEY ROGUE_PROTECTION_STATE ROGUE_PROTECTION_BASE ROGUE_LOG_FILE
@@ -146,9 +152,37 @@ rogue_protection_init() {
   rogue_protection_load && ROGUE_PROTECTION_REVISION=$RP_AIDR_REV
   export ROGUE_PROTECTION_REVISION
 }
+rogue_protection_fail() {
+  RP_PERSISTENCE_FAILED=1
+  rogue_protection_load || return 0
+  _rp_a=false; [ "$RP_AIDR" = 1 ] && _rp_a=true
+  _rp_s=false; [ "$RP_AISPM" = 1 ] && _rp_s=true
+  curl -fsS --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H 'content-type: application/json' --data "{\"protocolVersion\":1,\"revision\":$RP_REV,\"status\":\"failed\",\"aidrPaused\":$_rp_a,\"aispmPaused\":$_rp_s,\"error\":\"state_persistence_failed\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/ack" >/dev/null 2>&1 || true
+}
+rogue_protection_read_input() (
+  rogue_protection_current || exit 1
+  [ -n "${ROGUE_PROTECTION_STATE:-}" ] || { cat; exit; }
+  umask 077
+  _rp_input=$(mktemp "$ROGUE_PROTECTION_STATE/input.XXXXXX") || exit 1
+  exec 3<&0
+  cat <&3 > "$_rp_input" &
+  _rp_reader=$!
+  (
+    while kill -0 "$_rp_reader" 2>/dev/null; do
+      if ! rogue_protection_current || ! kill -0 "$$" 2>/dev/null; then kill "$_rp_reader" 2>/dev/null; exit; fi
+      sleep 0.2
+    done
+  ) >&2 &
+  _rp_watch=$!
+  trap 'kill "$_rp_reader" "$_rp_watch" 2>/dev/null; rm -f "$_rp_input"' EXIT
+  wait "$_rp_reader" || exit 1
+  kill "$_rp_watch" 2>/dev/null
+  rogue_protection_current || exit 1
+  cat "$_rp_input"
+)
 rogue_protection_enter() {
   rogue_protection_current || return 1
-  [ -z "${ROGUE_PROTECTION_STATE:-}" ] || printf '%s' "${ROGUE_PROTECTION_REVISION:-0}" > "$ROGUE_PROTECTION_STATE/active.$$"
+  if [ -n "${ROGUE_PROTECTION_STATE:-}" ] && ! printf '%s' "${ROGUE_PROTECTION_REVISION:-0}" > "$ROGUE_PROTECTION_STATE/active.$$"; then rogue_protection_fail; return 1; fi
   rogue_protection_current
 }
 if [ "${0##*/}" = protection.sh ] && [ "${1:-}" = --poll ]; then

@@ -963,9 +963,11 @@ function Invoke-Main {
     Assert-ApiKey          # exits before stdin is read when there is no key
     Resolve-Url
     Resolve-Actor
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
 $script:apiKey = Initialize-RogueProtection -Key $script:apiKey -BaseUrl $script:creds['ROGUE_BASE_URL'] -Slug 'antigravity' -Family 'antigravity'
 if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{"decision":"allow"}'); exit 0 }
+try {
 
     Read-Payload
     # Immediately after the payload, and BEFORE anything that logs or sends - the
@@ -993,6 +995,7 @@ if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{"decision":"allow"}')
     # This script MUST always exit 0: a block is carried in the relayed JSON body
     # on stdout, never in the exit code.
     exit 0
+} finally { Leave-RogueProtection }
 }
 
 # Test seam: dot-sourcing with ROGUE_PS_LIB_ONLY=1 loads the functions above

@@ -7,11 +7,21 @@ $script:RPKey=$null
 function Write-RogueProtectionFile([string]$Path, [string]$Value) {
     $temp = "$Path.$PID.tmp"
     [IO.File]::WriteAllText($temp, $Value, (New-Object Text.UTF8Encoding($false)))
-    Move-Item -LiteralPath $temp -Destination $Path -Force -ErrorAction Stop
+    if ([IO.File]::Exists($Path)) { [IO.File]::Replace($temp, $Path, [NullString]::Value) }
+    else { [IO.File]::Move($temp, $Path) }
+}
+function Test-RogueProtectionDecision($Decision) {
+    if ($null -eq $Decision -or $Decision.protocolVersion -ne 1 -or $Decision.revision -isnot [long] -and $Decision.revision -isnot [int] -or $Decision.revision -lt 0) { return $false }
+    foreach ($cap in 'aidr','aispm') {
+        $value=$Decision.$cap
+        if ($null -eq $value -or $value.paused -isnot [bool] -or ($value.revision -isnot [long] -and $value.revision -isnot [int]) -or $value.revision -lt 0) { return $false }
+    }
+    return $true
 }
 function Get-RogueProtectionState {
     try {
         $value = Get-Content -LiteralPath "$script:RPDirectory/state.json" -Raw | ConvertFrom-Json
+        if (-not (Test-RogueProtectionDecision $value.decision)) { return $null }
         $serverNow = ([DateTimeOffset]$value.decision.serverTime).AddSeconds(([DateTimeOffset]::UtcNow - ([DateTimeOffset]$value.receivedAt)).TotalSeconds)
         foreach ($cap in 'aidr','aispm') {
             if ($value.decision.$cap.expiresAt -and ([DateTimeOffset]$value.decision.$cap.expiresAt) -le $serverNow) { $value.decision.$cap.paused = $false }
@@ -51,7 +61,7 @@ function Update-RogueProtection {
         Write-RogueProtectionFile "$script:RPDirectory/attempt" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString())
         $state = Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/state" -Headers @{'x-rogue-api-key'=$script:RPKey} -TimeoutSec 5
         $old = Get-RogueProtectionState
-        if ($state.protocolVersion -eq 1 -and ($null -eq $old -or $state.revision -ge $old.revision)) {
+        if ((Test-RogueProtectionDecision $state) -and ($null -eq $old -or $state.revision -ge $old.revision)) {
             try {
                 Write-RogueProtectionFile "$script:RPDirectory/state.json" (@{ decision=$state; receivedAt=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json -Depth 8 -Compress)
                 Remove-Item -LiteralPath "$script:RPDirectory/persistence-failed" -Force -ErrorAction SilentlyContinue
@@ -102,19 +112,24 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
     if (-not (Test-Path -LiteralPath $credential)) {
         $enrollAttempt=0L
         $null=[long]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/enroll-attempt" -Raw -ErrorAction SilentlyContinue), [ref]$enrollAttempt)
-        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $enrollAttempt -lt 60) { $script:RPDirectory=$null; return $Key }
+        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $enrollAttempt -lt 60) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
         try { $lock=[IO.File]::Open("$script:RPDirectory/enroll.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch { return $Key }
         try {
             if (-not (Test-Path -LiteralPath $credential)) {
                 Write-RogueProtectionFile "$script:RPDirectory/enroll-attempt" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString())
-                $body=@{ type='coding_agent'; name=$Slug; family=$Family; host=[Environment]::MachineName; version=$Version } | ConvertTo-Json -Compress
+                $nonce=Get-Content -LiteralPath "$script:RPDirectory/enrollment-nonce" -Raw -ErrorAction SilentlyContinue
+                if (-not $nonce) { $nonce=[Guid]::NewGuid().ToString('N'); Write-RogueProtectionFile "$script:RPDirectory/enrollment-nonce" $nonce }
+                $body=@{ enrollmentNonce=$nonce; type='coding_agent'; name=$Slug; family=$Family; host=[Environment]::MachineName; version=$Version } | ConvertTo-Json -Compress
+                Remove-Item -LiteralPath "$script:RPDirectory/legacy-server" -Force -ErrorAction SilentlyContinue
                 $enrolled=Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/enroll" -Method Post -Headers @{'x-rogue-api-key'=$Key} -ContentType 'application/json' -Body $body -TimeoutSec 5
                 if ($enrolled.alreadyEnrolled) { $enrolled | Add-Member -NotePropertyName apiKey -NotePropertyValue $Key -Force }
                 if ($enrolled.apiKey) { Write-RogueProtectionFile $credential $enrolled.apiKey }
             }
-        } catch { } finally { $lock.Dispose() }
+        } catch {
+            if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { try { Write-RogueProtectionFile "$script:RPDirectory/legacy-server" '1' } catch {} }
+        } finally { $lock.Dispose() }
     }
-    if (-not (Test-Path -LiteralPath $credential)) { $script:RPDirectory=$null; return $Key }
+    if (-not (Test-Path -LiteralPath $credential)) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
     $script:RPKey=Get-Content -LiteralPath $credential -Raw
     $attempt=0L
     $null=[long]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/attempt" -Raw -ErrorAction SilentlyContinue), [ref]$attempt)
@@ -160,9 +175,25 @@ function Read-RogueProtectionInput {
     if (Test-RogueProtectionCurrent) { return [Console]::InputEncoding.GetString($bytes) }
     return ''
 }
+function Leave-RogueProtection {
+    if (-not $script:RPDirectory) { return }
+    Remove-Item -LiteralPath "$script:RPDirectory/active.$PID" -Force -ErrorAction SilentlyContinue
+    Send-RogueProtectionAck
+}
 function Enter-RogueProtection {
     if (-not (Test-RogueProtectionCurrent)) { return $false }
-    if ($script:RPDirectory) { Write-RogueProtectionFile "$script:RPDirectory/active.$PID" ([string]$script:RPRevision) }
+    if ($script:RPDirectory) {
+        try { Write-RogueProtectionFile "$script:RPDirectory/active.$PID" ([string]$script:RPRevision) }
+        catch {
+            $script:RPPersistenceFailed=$true
+            $state=Get-RogueProtectionState
+            if ($state) {
+                $body=@{protocolVersion=1;revision=$state.revision;status='failed';aidrPaused=$state.aidr.paused;aispmPaused=$state.aispm.paused;error='state_persistence_failed'} | ConvertTo-Json -Compress
+                try { $null=Invoke-RestMethod -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
+            }
+            return $false
+        }
+    }
     return Test-RogueProtectionCurrent
 }
 if ($Poll) {

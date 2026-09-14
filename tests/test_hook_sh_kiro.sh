@@ -281,7 +281,10 @@ assert_fail_open "timeout"
 # ── Case 12: server down (connection refused) → fail-open ───────────────────
 stop_mock
 run_bridge PreToolUse kiro_cli "$FIX/cli3-PreToolUse-execute_bash.json"
-assert_fail_open "connection refused"
+assert_eq "$LAST_RC" "0" "connection refused: exit 0"
+assert_eq "$(cat "$OUT_FILE")$(cat "$ERR_FILE")" "" "connection refused: silent allow"
+[ ! -f "$LAST_HOME/kiro.log" ] || { echo "FAIL: collected activity before enrollment" >&2; exit 1; }
+rm -rf "$LAST_HOME"
 KEEP_HOME=0
 
 # ── Case 13: unconfigured (no API key) → fail-open, no request ──────────────

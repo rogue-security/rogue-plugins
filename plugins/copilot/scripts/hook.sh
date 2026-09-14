@@ -82,7 +82,6 @@ if [ "${#_lcap}" -gt 18 ]; then ROGUE_LOG_MAX_BYTES=10485760; fi
 # NOWHERE else in this file — unlike `_p`/`_n`, which are shared (see below).
 rotate_log() {
   if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
-  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -367,6 +366,7 @@ reattribute_subagent() {
 
 # Not configured: emit the SessionStart hint (so the user knows to run setup) or a
 # clean allow for every other event. Never POST without a key.
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{}'; exit 0; }
 . "${PLUGIN_ROOT}/scripts/protection.sh"
 rogue_protection_init copilot copilot "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
 rogue_protection_enter || { printf '%s' '{}'; exit 0; }
@@ -395,7 +395,8 @@ fi
 URL="${ROGUE_API_URL:-${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/copilot}"
 
 # Buffer stdin so we can enrich it (agentStop/subagentStop) before POSTing.
-BODY="$(cat)"
+BODY="$(rogue_protection_read_input)"
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 # Re-attribute a subagent's event to its parent session BEFORE any tail
 # augmentation (a subagent agentStop has no transcriptPath, so augment no-ops).
 reattribute_subagent
@@ -466,6 +467,7 @@ case "$SUBAGENT_ID" in
     ;;
 esac
 
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 RAW=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
   "$@" \
   -H 'Content-Type: application/json' \

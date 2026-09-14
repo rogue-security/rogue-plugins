@@ -122,7 +122,6 @@ load_env() {
 # never runs anything else, so a cap enforced anywhere else would not hold.
 rotate_log() {
   if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
-  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -659,7 +658,8 @@ load_install_id() {
 # Buffer stdin so we can enrich it (PreInvocation/PostInvocation/Stop) before
 # POSTing.
 read_body() {
-  BODY="$(cat)"
+  BODY="$(rogue_protection_read_input)"
+rogue_protection_current || { printf '%s' '{"decision":"allow"}'; exit 0; }
 }
 
 # Heartbeat, fired detached so the hook itself returns immediately regardless of
@@ -786,6 +786,7 @@ post_and_relay() {
     fi
   fi
 
+rogue_protection_current || { printf '%s' '{"decision":"allow"}'; exit 0; }
   _raw=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
     -H "x-rogue-api-key: $ROGUE_API_KEY" \
   -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
@@ -828,6 +829,7 @@ main() {
   stand_down_under_git_bash
   locate_plugin_root
   load_env               # sources the env files, then every default derived from them
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{"decision":"allow"}'; exit 0; }
 . "${PLUGIN_ROOT}/scripts/protection.sh"
 rogue_protection_init antigravity antigravity "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
 rogue_protection_enter || { printf '%s' '{"decision":"allow"}'; exit 0; }

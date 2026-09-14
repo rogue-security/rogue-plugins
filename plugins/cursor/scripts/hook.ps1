@@ -870,9 +870,11 @@ if (Test-Path -LiteralPath $pluginJson) {
 }
 
 # ── payload from stdin ─────────────────────────────────────────────────────
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { [Console]::Out.Write('{}'); exit 0 }
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
-$apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'cursor' -Family 'cursor'
+$apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'cursor' -Family 'cursor' -Version $pluginVersion
 if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{}'); exit 0 }
+try {
 
 $payload = Read-RogueProtectionInput
 if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
@@ -1132,3 +1134,4 @@ if ($null -ne $hbUnthrottled) {
 }
 
 exit 0
+} finally { Leave-RogueProtection }

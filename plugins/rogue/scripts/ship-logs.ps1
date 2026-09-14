@@ -92,8 +92,8 @@ $script:targetFamily = ''
 $script:stateKey = ''
 $script:offset = 0
 $script:stateHead = ''
-$script:stateSize = 0
-$script:statePath = ''
+$script:stateSize = 0; $script:stateRevision = ''
+$script:statePath = ''; $script:stateRevision = ''
 $script:advanceBytes = 0
 $script:runBytesSent = 0
 $script:lineLength = 0
@@ -604,7 +604,7 @@ function Unlock-StateKey {
 # ── stage 7: state ─────────────────────────────────────────────────────────
 function Read-ShipState {
     param([string]$Key, [string]$NormalizedPath)
-    $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:statePath = ''
+    $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:statePath = ''; $script:stateRevision = ''
     $stateFile = Join-Path $script:stateDir "$Key.state"
     if (-not (Test-Path -LiteralPath $stateFile)) { return }
     try {
@@ -625,6 +625,8 @@ function Read-ShipState {
             } elseif ($line -match '^size=(.*)$') {
                 $rawSize = $Matches[1]
                 if ($rawSize -match '^[0-9]+$') { $script:stateSize = [int64]$rawSize } else { $script:stateSize = 0 }
+            } elseif ($line -match '^revision=(.*)$') {
+                $script:stateRevision = $Matches[1]
             } elseif ($line -match '^path=(.*)$') {
                 $script:statePath = $Matches[1]
             }
@@ -635,27 +637,18 @@ function Read-ShipState {
     # shipper at a different file holding the previous file's offset.
     if ($script:statePath -and $script:statePath -ne $NormalizedPath) {
         Write-ShipDebug "state path mismatch ($($script:statePath) != $NormalizedPath) -> treating state as absent"
-        $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0
+        $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:stateRevision = ''
     }
 }
 
-# Write-to-temp-then-move, so a crash mid-write cannot leave a half-written offset.
-# The temp sits in the SAME directory as the destination. The destination is removed
-# first: `Move-Item -Force` onto an existing file is not reliable on Windows
-# PowerShell 5.1, and under -ErrorAction SilentlyContinue a failure there would
-# silently freeze the offset forever.
+# Commit the discard offset and its pause revision in one file replacement.
 function Write-ShipState {
     param([string]$Key, [int64]$Offset, [string]$Head, [int64]$Size, [string]$Path)
-    try {
-        $destination = Join-Path $script:stateDir "$Key.state"
-        $tempFile = Join-Path $script:stateDir (".state-tmp-" + $PID)
-        [System.IO.File]::WriteAllText(
-            $tempFile,
-            "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`n",
-            (New-Object System.Text.UTF8Encoding($false)))
-        Remove-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
-        Move-Item -LiteralPath $tempFile -Destination $destination -Force -ErrorAction SilentlyContinue
-    } catch {}
+    $destination = Join-Path $script:stateDir "$Key.state"
+    $tempFile = Join-Path $script:stateDir (".state-tmp-" + $PID)
+    [IO.File]::WriteAllText($tempFile, "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`nrevision=$script:RPRevision`n", (New-Object Text.UTF8Encoding($false)))
+    if ([IO.File]::Exists($destination)) { [IO.File]::Replace($tempFile, $destination, [NullString]::Value) }
+    else { [IO.File]::Move($tempFile, $destination) }
 }
 
 # ── stage 8: chunks ────────────────────────────────────────────────────────
@@ -872,9 +865,8 @@ function Ship-LogFile {
         Read-ShipState $script:stateKey $normalizedPath
         $fileBytes = Get-FileLength $Path
         $currentHead = Get-FirstLineFingerprint $Path
-        if ($script:RPDirectory -and $script:RPRevision -gt 0 -and (Get-Content -LiteralPath "$script:RPDirectory/ship-revision" -Raw -ErrorAction SilentlyContinue) -ne [string]$script:RPRevision) {
+        if ($script:RPDirectory -and $script:RPRevision -gt 0 -and $script:stateRevision -ne [string]$script:RPRevision) {
             Write-ShipState $script:stateKey $fileBytes $currentHead $fileBytes $normalizedPath
-            Write-RogueProtectionFile "$script:RPDirectory/ship-revision" ([string]$script:RPRevision)
             return
         }
         $script:runBytesSent = 0
@@ -931,10 +923,12 @@ function Invoke-Main {
 
     Initialize-Args
     Import-ShipEnv
+    if (-not (Test-Path -LiteralPath (Join-Path $script:PluginRoot 'scripts/protection.ps1') -PathType Leaf)) { exit 0 }
     . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $script:PluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $script:PluginRoot 'scripts')
     $script:creds['ROGUE_API_KEY'] = Initialize-RogueProtection -Key $script:creds['ROGUE_API_KEY'] -BaseUrl $script:creds['ROGUE_BASE_URL'] -Slug $script:ShipperSlug -Family $script:AgentFamily
     if ($script:RPDirectory) { $script:creds['ROGUE_LOG_FILE']=$env:ROGUE_LOG_FILE }
     if (-not (Enter-RogueProtection)) { exit 0 }
+    try {
     Resolve-Knobs
     if (-not $script:apiKey) { Write-ShipDebug 'not configured -> no-op'; exit 0 }
     if (-not (Resolve-ShipActor)) {
@@ -956,6 +950,7 @@ function Invoke-Main {
         Ship-LogFile $target
     }
     exit 0
+    } finally { Leave-RogueProtection }
 }
 
 # The ROGUE_PS_LIB_ONLY seam: load the helpers WITHOUT running the shipper, so
@@ -963,4 +958,4 @@ function Invoke-Main {
 # main body stands down). Every pure helper is defined ABOVE this line.
 if ($env:ROGUE_PS_LIB_ONLY) { return }
 
-Invoke-Main
+try { Invoke-Main } catch { exit 0 }
