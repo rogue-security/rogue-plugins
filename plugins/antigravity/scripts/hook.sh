@@ -71,12 +71,16 @@ locate_plugin_root() {
 # sourcing, because the env file must be able to set any of them — computing them
 # at file scope would freeze the built-in default before the file is read.
 load_env() {
-  # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
-  for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
-    if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
-      . "$_env_file"; break
-    fi
-  done
+  # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+  _env_lib="$(dirname -- "$0")/env-file.sh"
+  if [ -r "$_env_lib" ]; then
+    . "$_env_lib"
+    for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+      if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+        . "$_env_file"; break
+      fi
+    done
+  fi
 
   # Log destination — ONE FILE PER AGENT. Every Rogue plugin shares ~/.rogue, so
   # a machine running Antigravity + Claude Code + Cursor + … used to interleave

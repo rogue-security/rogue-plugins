@@ -90,15 +90,16 @@ if (-not (Get-Command Request-RogueBeaconSlot -ErrorAction SilentlyContinue)) {
 
 # ── credential resolution ──────────────────────────────────────────────────
 $creds = @{}
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1'))))
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                'ROGUE_HEARTBEAT_MIN_INTERVAL') {
     $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $creds[$k] = $val }
 }
-# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
 foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
     if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
     $fileVals = @{}
-    foreach ($line in (Get-Content -LiteralPath $f)) {
+    foreach ($line in (Read-RogueEnvFile $f)) {
         if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
             $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
         }

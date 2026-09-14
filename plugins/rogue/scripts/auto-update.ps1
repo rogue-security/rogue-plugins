@@ -79,17 +79,20 @@ try {
 # quoting, but the only flags we read here are simple tokens).
 function ReadEnvVar {
     param([string]$Key)
-    # Same rule as the dispatcher: the first env file holding ROGUE_API_KEY is used
-    # alone (machine, bundled, user) and overrides the process env. The bundled
-    # ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed plugins pin flags like
-    # ROGUE_AUTO_UPDATE=0 / ROGUE_PLUGIN_VERSION.
+    # Same rule as the dispatcher: the first trusted env file holding ROGUE_API_KEY
+    # is used alone (machine, bundled, user) and overrides the process env. The
+    # bundled ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed plugins pin flags
+    # like ROGUE_AUTO_UPDATE=0 / ROGUE_PLUGIN_VERSION.
     $files = @('C:\ProgramData\rogue\env')
-    if ($env:CLAUDE_PLUGIN_ROOT) { $files += (Join-Path $env:CLAUDE_PLUGIN_ROOT 'env') }
+    if ($env:CLAUDE_PLUGIN_ROOT) {
+        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $env:CLAUDE_PLUGIN_ROOT 'scripts/env-file.ps1'))))
+        $files += (Join-Path $env:CLAUDE_PLUGIN_ROOT 'env')
+    }
     $files += (Join-Path $env:USERPROFILE '.rogue-env')
     foreach ($f in $files) {
         if (-not (Test-Path -LiteralPath $f)) { continue }
         $vals = @{}
-        foreach ($line in (Get-Content -LiteralPath $f)) {
+        foreach ($line in (Read-RogueEnvFile $f)) {
             if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
                 $vals[$Matches[1]] = $Matches[2].Trim().Trim("'").Trim('"')
             }

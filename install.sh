@@ -829,8 +829,9 @@ write_statusline_script() {
 # Rogue Security status badge (installed by install.sh). Status circle then
 # teal bracketed label: 🟢 [Rogue Security] configured, 🔴 [Rogue Security] not.
 set -u
+# Presence only: the badge never executes an env file.
 for f in /etc/rogue/env "$HOME/.rogue-env"; do
-  if [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f"; then . "$f"; break; fi
+  if [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f"; then ROGUE_API_KEY=found; break; fi
 done
 if [ -n "${ROGUE_API_KEY:-}" ]; then
   dot='🟢'

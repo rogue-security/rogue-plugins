@@ -113,6 +113,16 @@ for reader in $READERS; do
   check "$reader: machine file wins with all three present" "machine-key" "$(key_sent)"
   check "$reader: nothing merged from the user file"        "http://machine.invalid" "$(host_sent)"
 
+  # A machine file others can write is not a candidate, key or no key.
+  home="$(new_home "$reader-u")"
+  envf "$MACHINE" 'export ROGUE_API_KEY=machine-key' 'export ROGUE_BASE_URL=http://machine.invalid'
+  chmod 666 "$MACHINE"
+  envf "$bundled" 'export ROGUE_API_KEY=bundled-key' 'export ROGUE_BASE_URL=http://bundled.invalid'
+  envf "$home/.rogue-env" 'export ROGUE_API_KEY=user-key' 'export ROGUE_BASE_URL=http://user.invalid'
+  run "$reader" "$home"
+  check "$reader: a world-writable machine file is skipped"  "bundled-key" "$(key_sent)"
+  check "$reader: ...and contributes nothing"                "http://bundled.invalid" "$(host_sent)"
+
   # A machine file without ROGUE_API_KEY is skipped whole; the bundled file is next.
   home="$(new_home "$reader-b")"
   envf "$MACHINE" 'export ROGUE_BASE_URL=http://machine.invalid'
@@ -162,6 +172,12 @@ rm -f "$home/.rogue-env"
 out="$(HOME="$home" ROGUE_API_KEY='' "$SH" "$T/plugins/rogue/scripts/statusline.sh")"
 case "$out" in *🔴*) got=red ;; *) got=other ;; esac
 check "statusline: a keyless machine file alone is unconfigured" red "$got"
+envf "$MACHINE" 'export ROGUE_API_KEY=machine-key' "touch '$T/badge-executed'"
+out="$(HOME="$home" ROGUE_API_KEY='' "$SH" "$T/plugins/rogue/scripts/statusline.sh")"
+case "$out" in *🟢*) got=green ;; *) got=other ;; esac
+check "statusline: a keyed machine file shows configured" green "$got"
+[ -e "$T/badge-executed" ] && got=executed || got=not-executed
+check "statusline: the badge never executes the env file" not-executed "$got"
 
 [ "$fails" = 0 ] || { echo "$fails check(s) failed"; exit 1; }
 echo "all env-file first-found checks passed"

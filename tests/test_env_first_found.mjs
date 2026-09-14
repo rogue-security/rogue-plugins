@@ -90,6 +90,21 @@ test("loadEnvFiles: the machine file wins with all three present, nothing merged
   }
 });
 
+test("loadEnvFiles: a machine file others can write is skipped, key or no key", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  try {
+    write(sb.machine, ["export ROGUE_API_KEY=machine-key", "export ROGUE_BASE_URL=http://machine.invalid"]);
+    fs.chmodSync(sb.machine, 0o666);
+    write(sb.bundled, ["export ROGUE_API_KEY=bundled-key", "export ROGUE_BASE_URL=http://bundled.invalid"]);
+    write(sb.user, ["export ROGUE_API_KEY=user-key"]);
+    const env = await resolve(sb, {});
+    assert.equal(env.ROGUE_API_KEY, "bundled-key");
+    assert.equal(env.ROGUE_BASE_URL, "http://bundled.invalid");
+  } finally {
+    sb.cleanup();
+  }
+});
+
 test("loadEnvFiles: a machine file without ROGUE_API_KEY is skipped whole", async () => {
   const sb = sandbox();
   try {
@@ -176,16 +191,21 @@ test("hook.mjs sends the machine file's key, not the user file's or the process 
 });
 
 // ship-logs.mjs keeps its own loader; hold it to the same rule through main().
-test("ship-logs.mjs uploads with the machine file's key and skips a keyless machine file", async () => {
-  for (const { machineLines, expected } of [
+test("ship-logs.mjs uploads with the machine file's key and skips a keyless or world-writable one", async () => {
+  const cases = [
     { machineLines: ["export ROGUE_API_KEY=machine-key"], expected: "machine-key" },
     { machineLines: ["export ROGUE_BASE_URL=http://machine.invalid"], expected: "bundled-key" },
-  ]) {
+  ];
+  if (process.platform !== "win32") {
+    cases.push({ machineLines: ["export ROGUE_API_KEY=machine-key"], mode: 0o666, expected: "bundled-key" });
+  }
+  for (const { machineLines, mode, expected } of cases) {
     const sb = sandbox();
     const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, ROGUE_API_KEY: process.env.ROGUE_API_KEY };
     const savedFetch = globalThis.fetch;
     try {
       write(sb.machine, machineLines);
+      if (mode) fs.chmodSync(sb.machine, mode);
       write(sb.bundled, ["export ROGUE_API_KEY=bundled-key"]);
       write(sb.user, ["export ROGUE_API_KEY=user-key"]);
       fs.writeFileSync(path.join(sb.home, ".rogue", "logs", "gemini.log"), "2026-01-01T00:00:00Z provider=gemini event=BeforeTool\n");

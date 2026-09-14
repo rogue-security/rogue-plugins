@@ -36,7 +36,25 @@ export function shellUnquote(raw) {
 }
 
 // ── Credential resolution ────────────────────────────────────────────────────
-// Same env-file rule as the other monorepo plugins: the first file holding
+// Only root or the current user may supply configuration, and nobody else may
+// write it; the machine file must be root's (env-file.sh's rule). Windows has no
+// POSIX owner or mode, so the machine file is skipped there: the ACL check the
+// PowerShell readers make has no Node equivalent.
+export function isTrustedEnvFile(file) {
+  let st;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    return false;
+  }
+  if (!st.isFile()) return false;
+  const system = file === "/etc/rogue/env";
+  if (IS_WIN) return !system;
+  if (st.uid !== 0 && (system || st.uid !== process.getuid())) return false;
+  return (st.mode & 0o022) === 0;
+}
+
+// Same env-file rule as the other monorepo plugins: the first trusted file holding
 // ROGUE_API_KEY is used alone, and its values override the process env:
 //   /etc/rogue/env (machine, MDM) → <ext>/env (bundled) → ~/.rogue-env (per-user)
 export function loadEnvFiles() {
@@ -50,6 +68,7 @@ export function loadEnvFiles() {
     path.join(HOME, ".rogue-env"),
   ];
   for (const f of files) {
+    if (!isTrustedEnvFile(f)) continue;
     let text;
     try {
       text = fs.readFileSync(f, "utf8");

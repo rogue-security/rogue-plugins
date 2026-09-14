@@ -29,7 +29,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { shellUnquote, IS_WIN } from "./shared.mjs";
+import { shellUnquote, isTrustedEnvFile, IS_WIN } from "./shared.mjs";
 
 // ── constants ──────────────────────────────────────────────────────────────
 const SHIP_ENDPOINT_PATH = "/api/v1/hooks/logs";
@@ -66,7 +66,7 @@ function loadEnv(pluginRoot) {
     path.join(HOME, ".rogue-env"),
   ];
   for (const envFile of envFiles) {
-    if (!envFile) continue;
+    if (!envFile || !isTrustedEnvFile(envFile)) continue;
     let text;
     try {
       text = fs.readFileSync(envFile, "utf8");

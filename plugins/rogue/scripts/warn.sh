@@ -7,12 +7,16 @@ case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*) exit 0 ;;
 esac
 
-# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
-for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
-  if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
-    . "$_env_file"; break
-  fi
-done
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+_env_lib="$(dirname -- "$0")/env-file.sh"
+if [ -r "$_env_lib" ]; then
+  . "$_env_lib"
+  for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
+fi
 
 [ -z "${CLAUDE_CODE_ENTRYPOINT:-}" ] && exit 0
 

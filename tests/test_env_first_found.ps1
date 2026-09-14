@@ -41,6 +41,14 @@ function Set-EnvFile { param([string]$Path, [string[]]$Lines)
     [System.IO.File]::WriteAllText($Path, (($Lines -join "`n") + "`n"), $utf8)
 }
 function Clear-EnvFiles { foreach ($f in @($machine, $bundled, $user)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+# Lets identities other than the owner write the file, as tests/test_env_file_trust.ps1 does.
+function Set-WorldWritable { param([string]$Path)
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { & chmod 666 $Path; return }
+    $acl = Get-Acl -LiteralPath $Path
+    $everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($everyone, 'Write', 'Allow')))
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
 
 $saved = @{}
 foreach ($k in 'USERPROFILE', 'HOME', 'ROGUE_API_KEY', 'ROGUE_BASE_URL', 'ROGUE_ACTOR_EMAIL',
@@ -154,9 +162,22 @@ try {
         Check "${L}: machine file wins with all three present" 'machine-key' $m['ROGUE_API_KEY']
         Check "${L}: nothing merged from the user file" 'http://machine.invalid' $m['ROGUE_BASE_URL']
 
-        # A machine file without ROGUE_API_KEY is skipped whole; the bundled file is next.
-        Set-EnvFile $machine @('export ROGUE_BASE_URL=http://machine.invalid')
+        # A machine file others can write is not a candidate, key or no key.
+        Clear-EnvFiles
+        Set-EnvFile $machine @('export ROGUE_API_KEY=machine-key', 'export ROGUE_BASE_URL=http://machine.invalid')
+        Set-WorldWritable $machine
+        Set-EnvFile $bundled @('export ROGUE_API_KEY=bundled-key', 'export ROGUE_BASE_URL=http://bundled.invalid')
+        Set-EnvFile $user    @('export ROGUE_API_KEY=user-key',    'export ROGUE_BASE_URL=http://user.invalid')
         Set-ProcessEnv @{}
+        $m = & $r.resolve
+        Check "${L}: a world-writable machine file is skipped" 'bundled-key' $m['ROGUE_API_KEY']
+        Check "${L}: ...and contributes nothing" 'http://bundled.invalid' $m['ROGUE_BASE_URL']
+
+        # A machine file without ROGUE_API_KEY is skipped whole; the bundled file is next.
+        Clear-EnvFiles
+        Set-EnvFile $machine @('export ROGUE_BASE_URL=http://machine.invalid')
+        Set-EnvFile $bundled @('export ROGUE_API_KEY=bundled-key', 'export ROGUE_BASE_URL=http://bundled.invalid')
+        Set-EnvFile $user    @('export ROGUE_API_KEY=user-key',    'export ROGUE_BASE_URL=http://user.invalid')
         $m = & $r.resolve
         Check "${L}: keyless machine file is skipped" 'bundled-key' $m['ROGUE_API_KEY']
         Check "${L}: ...and contributes nothing" 'http://bundled.invalid' $m['ROGUE_BASE_URL']
@@ -189,6 +210,7 @@ try {
     $warn = Get-Content -Raw -LiteralPath (Join-Path $repo 'plugins/codex/scripts/warn.ps1')
     Check 'codex warn.ps1: machine path first' $true ($warn.IndexOf("'C:\ProgramData\rogue\env'") -lt $warn.IndexOf("Join-Path `$pluginRoot 'env'"))
     Check 'codex warn.ps1: stops at the first file with a key' $true ($warn -match 'if \(\$key\) \{ break \}')
+    Check 'codex warn.ps1: reads through the trust gate' $true ($warn -match 'foreach \(\$line in \(Read-RogueEnvFile \$f\)\)')
     Check 'codex warn.ps1: process env only when no file has a key' $true ($warn -match "if \(-not \`$key\) \{ \`$key = \[Environment\]::GetEnvironmentVariable\('ROGUE_API_KEY'\) \}")
 } finally {
     foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
@@ -198,7 +220,7 @@ try {
 Write-Host ''
 # A dispatcher that reached an `exit` while being loaded would end this process
 # early with a clean status; the count proves every reader ran every scenario.
-if ($script:count -lt ($readers.Count * 9)) { Write-Host "only $script:count checks ran"; exit 1 }
+if ($script:count -lt ($readers.Count * 11)) { Write-Host "only $script:count checks ran"; exit 1 }
 if ($script:fails -gt 0) { Write-Host "$script:fails of $script:count checks FAILED"; exit 1 }
 Write-Host "all $script:count env-file first-found checks passed"
 exit 0

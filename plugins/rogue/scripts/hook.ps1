@@ -331,12 +331,13 @@ Dbg "surface=$($script:surface)"
 
 # -- credential resolution ---------------------------------------------------
 $creds = @{}
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1'))))
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
     $val = [Environment]::GetEnvironmentVariable($k)
     if ($val) { $creds[$k] = $val }
 }
-# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
 $credFiles = @(
     'C:\ProgramData\rogue\env',
     (Join-Path $pluginRoot 'env'),
@@ -346,7 +347,7 @@ foreach ($f in $credFiles) {
     if (-not $f) { continue }
     if (-not (Test-Path -LiteralPath $f)) { Dbg "cred file absent: $f"; continue }
     $fileVals = @{}
-    foreach ($line in (Get-Content -LiteralPath $f)) {
+    foreach ($line in (Read-RogueEnvFile $f)) {
         if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
             # Decode shell quoting/escaping so the value round-trips with the
             # `source`-based parse in hook.sh (mirrors shlex.split).

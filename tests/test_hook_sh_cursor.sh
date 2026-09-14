@@ -125,7 +125,7 @@ run_hook() {
 make_nojq_path() {
   local d b src
   d="$(mktemp -d)"
-  for b in "$SH" sh dirname basename date mkdir cat sed grep tr head base64 sleep curl stat rm; do
+  for b in "$SH" sh dirname basename date mkdir cat sed grep tr head base64 sleep curl stat id rm; do
     src="$(command -v "$b" 2>/dev/null || true)"
     if [ -z "$src" ]; then echo "FAIL [nojq farm]: '$b' is not on PATH" >&2; exit 1; fi
     ln -s "$src" "$d/$(basename "$src")" 2>/dev/null || true

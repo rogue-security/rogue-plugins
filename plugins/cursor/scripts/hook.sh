@@ -83,13 +83,17 @@ if [ -z "$PLUGIN_ROOT" ]; then
 fi
 
 # Env files are bash-quoted (`export KEY=value`, written via printf %q), so
-# sourcing them is correct. The first file holding ROGUE_API_KEY is used alone:
-# machine, bundled, user.
-for _f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
-  if [ -r "$_f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_f"; then
-    dbg "cred file in use: $_f"; . "$_f" 2>/dev/null; break
-  else dbg "cred file skipped: $_f"; fi
-done
+# sourcing them is correct. The first trusted file holding ROGUE_API_KEY is used
+# alone: machine, bundled, user.
+_env_lib="$(dirname -- "$0")/env-file.sh"
+if [ -r "$_env_lib" ]; then
+  . "$_env_lib"
+  for _f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_f" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_f"; then
+      dbg "cred file in use: $_f"; . "$_f" 2>/dev/null; break
+    else dbg "cred file skipped: $_f"; fi
+  done
+fi
 
 # ── hook log ───────────────────────────────────────────────────────────────
 # `dbg` above only writes to stderr under ROGUE_DEBUG, which Cursor keeps in its

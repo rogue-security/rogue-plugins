@@ -40,12 +40,16 @@ EVENT="$1"
 PLUGIN_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)"
 [ -n "$PLUGIN_ROOT" ] || PLUGIN_ROOT="${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}"
 
-# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
-for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
-  if [ -r "$_env_file" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
-    . "$_env_file"; break
-  fi
-done
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+_env_lib="$(dirname -- "$0")/env-file.sh"
+if [ -r "$_env_lib" ]; then
+  . "$_env_lib"
+  for _env_file in /etc/rogue/env "${PLUGIN_ROOT}/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
+fi
 
 # Log destination — ONE FILE PER AGENT. Every Rogue plugin shares ~/.rogue, so a
 # machine running Copilot CLI + Claude Code + Cursor + … used to interleave all of
