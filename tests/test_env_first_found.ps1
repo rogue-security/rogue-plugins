@@ -190,6 +190,24 @@ try {
         Check "${L}: an empty key line does not select the file" 'user-key' $m['ROGUE_API_KEY']
         Check "${L}: ...and contributes nothing either" 'http://user.invalid' $m['ROGUE_BASE_URL']
 
+        # A quoted whitespace-only key is not a key: the sh predicate requires a
+        # non-whitespace character after the optional quote, so the readers must agree.
+        Clear-EnvFiles
+        Set-EnvFile $machine @('export ROGUE_API_KEY="   "', 'export ROGUE_BASE_URL=http://machine.invalid')
+        Set-EnvFile $user    @('export ROGUE_API_KEY=user-key', 'export ROGUE_BASE_URL=http://user.invalid')
+        Set-ProcessEnv @{}
+        $m = & $r.resolve
+        Check "${L}: a whitespace-only key does not select the file" 'user-key' $m['ROGUE_API_KEY']
+        Check "${L}: ...and contributes nothing at all" 'http://user.invalid' $m['ROGUE_BASE_URL']
+
+        # An empty assignment in the chosen file is a VALUE, and clears the process
+        # one - exactly what sourcing the file does in the sh readers.
+        Clear-EnvFiles
+        Set-EnvFile $user @('export ROGUE_API_KEY=user-key', 'export ROGUE_BASE_URL=')
+        Set-ProcessEnv @{ ROGUE_BASE_URL = 'http://process.invalid' }
+        $m = & $r.resolve
+        Check "${L}: an empty assignment clears the process value" '' $m['ROGUE_BASE_URL']
+
         # The chosen file overrides the process env; keys it does not set are kept.
         Clear-EnvFiles
         Set-EnvFile $user @('export ROGUE_API_KEY=user-key')
@@ -238,7 +256,7 @@ try {
 Write-Host ''
 # A dispatcher that reached an `exit` while being loaded would end this process
 # early with a clean status; the count proves every reader ran every scenario.
-if ($script:count -lt ($readers.Count * 11)) { Write-Host "only $script:count checks ran"; exit 1 }
+if ($script:count -lt ($readers.Count * 14)) { Write-Host "only $script:count checks ran"; exit 1 }
 if ($script:fails -gt 0) { Write-Host "$script:fails of $script:count checks FAILED"; exit 1 }
 Write-Host "all $script:count env-file first-found checks passed"
 exit 0

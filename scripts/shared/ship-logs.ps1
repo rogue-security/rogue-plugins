@@ -332,7 +332,10 @@ $SHIP_ENV_VARS = @(
 function Import-ShipEnv {
     $envLibrary = Join-Path $PluginRoot 'scripts/env-file.ps1'
     if ($PSCommandPath) { $envLibrary = Join-Path (Split-Path -Parent $PSCommandPath) 'env-file.ps1' }
-    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $envLibrary)))
+    # Fail open: with no readable helper, leave a no-op reader behind so the env
+    # files are skipped instead of the whole credential block dying on the load.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $envLibrary -ErrorAction Stop))) }
+    catch { function Read-RogueEnvFile { param([string]$Path) } }
     $resolved = @{}
     foreach ($varName in $SHIP_ENV_VARS) {
         $processValue = [Environment]::GetEnvironmentVariable($varName)
@@ -350,7 +353,7 @@ function Import-ShipEnv {
                 $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
             }
         }
-        if (-not $fileVals['ROGUE_API_KEY']) { continue }
+        if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
         foreach ($varName in $fileVals.Keys) { $resolved[$varName] = $fileVals[$varName] }
         break
     }

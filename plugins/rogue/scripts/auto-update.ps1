@@ -83,9 +83,12 @@ function ReadEnvVar {
     # is used alone (machine, bundled, user) and overrides the process env. The
     # bundled ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed plugins pin flags
     # like ROGUE_AUTO_UPDATE=0 / ROGUE_PLUGIN_VERSION.
+    # Fail open: a no-op reader stands in until the helper loads, so a missing or
+    # unreadable one skips the env files instead of killing the whole lookup.
+    function Read-RogueEnvFile { param([string]$Path) }
     $files = @('C:\ProgramData\rogue\env')
     if ($env:CLAUDE_PLUGIN_ROOT) {
-        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $env:CLAUDE_PLUGIN_ROOT 'scripts/env-file.ps1'))))
+        try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $env:CLAUDE_PLUGIN_ROOT 'scripts/env-file.ps1') -ErrorAction Stop))) } catch {}
         $files += (Join-Path $env:CLAUDE_PLUGIN_ROOT 'env')
     }
     $files += (Join-Path $env:USERPROFILE '.rogue-env')
@@ -93,11 +96,11 @@ function ReadEnvVar {
         if (-not (Test-Path -LiteralPath $f)) { continue }
         $vals = @{}
         foreach ($line in (Read-RogueEnvFile $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
                 $vals[$Matches[1]] = $Matches[2].Trim().Trim("'").Trim('"')
             }
         }
-        if (-not $vals['ROGUE_API_KEY']) { continue }
+        if (-not ([string]$vals['ROGUE_API_KEY']).Trim()) { continue }
         if ($vals.ContainsKey($Key)) { return $vals[$Key] }
         break
     }

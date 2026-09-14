@@ -5,7 +5,10 @@ $ErrorActionPreference = 'SilentlyContinue'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { exit 0 }
 
 $pluginRoot = $env:PLUGIN_ROOT
-. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1'))))
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
 
 # Mirror the real resolution order: the first trusted env file holding ROGUE_API_KEY
 # is used alone (machine, bundled, user), and it overrides the process env.

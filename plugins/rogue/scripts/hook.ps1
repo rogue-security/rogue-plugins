@@ -331,7 +331,10 @@ Dbg "surface=$($script:surface)"
 
 # -- credential resolution ---------------------------------------------------
 $creds = @{}
-. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1'))))
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
     $val = [Environment]::GetEnvironmentVariable($k)
@@ -348,13 +351,13 @@ foreach ($f in $credFiles) {
     if (-not (Test-Path -LiteralPath $f)) { Dbg "cred file absent: $f"; continue }
     $fileVals = @{}
     foreach ($line in (Read-RogueEnvFile $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
             # Decode shell quoting/escaping so the value round-trips with the
             # `source`-based parse in hook.sh (mirrors shlex.split).
             $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
         }
     }
-    if (-not $fileVals['ROGUE_API_KEY']) { Dbg "cred file skipped: $f"; continue }
+    if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { Dbg "cred file skipped: $f"; continue }
     Dbg "cred file in use: $f"
     foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
     break

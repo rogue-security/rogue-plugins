@@ -48,7 +48,7 @@ export function isTrustedEnvFile(file) {
     return false;
   }
   if (!st.isFile()) return false;
-  const system = file === "/etc/rogue/env";
+  const system = file === "/etc/rogue/env" || file === "C:\\ProgramData\\rogue\\env";
   if (IS_WIN) return !system;
   if (st.uid !== 0 && (system || st.uid !== process.getuid())) return false;
   return (st.mode & 0o022) === 0;
@@ -80,7 +80,7 @@ export function loadEnvFiles() {
       const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
       if (m) vals[m[1]] = shellUnquote(m[2]);
     }
-    if (!vals.ROGUE_API_KEY) continue;
+    if (!String(vals.ROGUE_API_KEY || "").trim()) continue;
     Object.assign(merged, vals);
     break;
   }

@@ -88,7 +88,10 @@ if (-not (Get-Command Request-RogueBeaconSlot -ErrorAction SilentlyContinue)) {
 
 # ── credential resolution ──────────────────────────────────────────────────
 $creds = @{}
-. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1'))))
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL','ROGUE_CODEX_SURFACE',
                'ROGUE_HEARTBEAT_MIN_INTERVAL') {
     $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $creds[$k] = $val }
@@ -98,11 +101,11 @@ foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Joi
     if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
     $fileVals = @{}
     foreach ($line in (Read-RogueEnvFile $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
             $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
         }
     }
-    if (-not $fileVals['ROGUE_API_KEY']) { continue }
+    if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
     foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
     break
 }

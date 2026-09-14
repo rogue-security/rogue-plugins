@@ -78,7 +78,7 @@ function loadEnv(pluginRoot) {
       const assignment = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
       if (assignment) vals[assignment[1]] = shellUnquote(assignment[2]);
     }
-    if (!vals.ROGUE_API_KEY) continue;
+    if (!String(vals.ROGUE_API_KEY || "").trim()) continue;
     Object.assign(merged, vals);
     break;
   }

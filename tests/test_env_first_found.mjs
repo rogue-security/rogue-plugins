@@ -133,6 +133,30 @@ test("loadEnvFiles: an empty ROGUE_API_KEY, quoted or bare, does not select the 
   }
 });
 
+test("loadEnvFiles: a quoted whitespace-only ROGUE_API_KEY does not select the file", async () => {
+  const sb = sandbox();
+  try {
+    write(sb.machine, ['export ROGUE_API_KEY="   "', "export ROGUE_BASE_URL=http://machine.invalid"]);
+    write(sb.user, ["export ROGUE_API_KEY=user-key", "export ROGUE_BASE_URL=http://user.invalid"]);
+    const env = await resolve(sb, {});
+    assert.equal(env.ROGUE_API_KEY, "user-key");
+    assert.equal(env.ROGUE_BASE_URL, "http://user.invalid");
+  } finally {
+    sb.cleanup();
+  }
+});
+
+// Structural, because the sandbox rewrites the machine literal and a POSIX runner
+// cannot exercise the Windows branch: isTrustedEnvFile must recognise BOTH machine
+// paths as system, or `if (IS_WIN) return !system` trusts C:\ProgramData\rogue\env
+// unchecked - the one candidate Node cannot verify, since it cannot read an ACL.
+test("isTrustedEnvFile: the Windows machine path counts as a system candidate", () => {
+  const source = fs.readFileSync(path.join(SCRIPTS, "shared.mjs"), "utf8");
+  const predicate = source.match(/const system = .*/)[0];
+  assert.match(predicate, /"\/etc\/rogue\/env"/);
+  assert.match(predicate, /"C:\\\\ProgramData\\\\rogue\\\\env"/);
+});
+
 test("loadEnvFiles: the chosen file overrides the process env; unset keys are kept", async () => {
   const sb = sandbox();
   try {
