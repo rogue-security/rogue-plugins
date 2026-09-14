@@ -21,6 +21,18 @@ try {
     }
     if (Test-RogueEnvFile $file) { throw 'world-writable env was trusted' }
     if (@(Read-RogueEnvFile $file).Count -ne 0) { throw 'unsafe env was read' }
+    # A write grant to the current user is fine for the user file and disqualifies the machine file.
+    [System.IO.File]::WriteAllText($file, 'ROGUE_TEST_VALUE=trusted')
+    if ($unix) { & chmod 600 $file }
+    else {
+        if (-not (Protect-RogueEnvFile $file)) { throw $script:RogueEnvProtectError }
+        $acl = Get-Acl -LiteralPath $file
+        $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'Write', 'Allow')))
+        Set-Acl -LiteralPath $file -AclObject $acl
+    }
+    if (-not (Test-RogueEnvFile $file)) { throw 'user-writable user env was rejected' }
+    if (Test-RogueEnvFile $file -System) { throw 'user-writable machine env was trusted' }
     if (Test-RogueEnvFile (Join-Path $dir 'missing')) { throw 'missing env was trusted' }
     Write-Host 'env-file trust: all checks passed'
 } finally { Remove-Item -Recurse -Force $dir }
