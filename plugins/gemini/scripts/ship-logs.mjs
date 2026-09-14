@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { Protection } from "./protection.mjs";
 // Rogue Security - hook-log shipper (Gemini CLI). Siblings: scripts/shared/ship-logs.sh
 // and scripts/shared/ship-logs.ps1, whose behaviour this mirrors exactly.
 //
@@ -241,6 +242,7 @@ class Shipper {
   // rotation-under-us hazard firstLineFingerprint re-checks for. Rotation stays the
   // dispatcher's job.
   log(message) {
+    if (this.protection && !this.protection.current()) return;
     // ALSO to stderr under ROGUE_DEBUG, and unconditionally - before the selfLogFile
     // gate below. The no-argument support invocation has no slug, so it has no log
     // file of its own to write to, and every failure reason (`http=<code>`,
@@ -435,7 +437,7 @@ class Shipper {
   }
 
   readState(stateKey, normalizedPath) {
-    const state = { offset: 0, head: "", size: 0, path: "" };
+    const state = { offset: 0, head: "", size: 0, path: "", revision: "" };
     let text;
     try {
       text = fs.readFileSync(path.join(this.stateDir, `${stateKey}.state`), "utf8");
@@ -448,6 +450,7 @@ class Shipper {
       if (field[1] === "offset") state.offset = /^[0-9]+$/.test(field[2]) ? Number(field[2]) : 0;
       else if (field[1] === "head") state.head = field[2];
       else if (field[1] === "size") state.size = /^[0-9]+$/.test(field[2]) ? Number(field[2]) : 0;
+      else if (field[1] === "revision") state.revision = field[2];
       else if (field[1] === "path") state.path = field[2];
     }
     // The key is a BASENAME, so /a/claude.log and /b/claude.log key alike: changing
@@ -460,6 +463,7 @@ class Shipper {
       state.offset = 0;
       state.head = "";
       state.size = 0;
+      state.revision = "";
     }
     return state;
   }
@@ -473,10 +477,11 @@ class Shipper {
       const tempFile = path.join(this.stateDir, `.state-tmp-${process.pid}`);
       fs.writeFileSync(
         tempFile,
-        `offset=${offset}\nhead=${head}\nsize=${size}\npath=${normalizedPath}\n`,
+        `offset=${offset}\nhead=${head}\nsize=${size}\npath=${normalizedPath}\nrevision=${this.protection?.revision ?? ""}\n`,
       );
       fs.renameSync(tempFile, destination);
-    } catch {}
+      return true;
+    } catch { return false; }
   }
 
   async sendChunkRequest(bytes, offset, count, rotated) {
@@ -501,7 +506,7 @@ class Shipper {
     try {
       const response = await fetch(this.shipUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-rogue-api-key": this.apiKey },
+        headers: { "Content-Type": "application/json", "x-rogue-api-key": this.apiKey, ...(this.protection?.revision !== undefined ? {"x-rogue-activity-revision":String(this.protection.revision)} : {}) },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       });
@@ -633,6 +638,7 @@ class Shipper {
     let offset = startOffset;
     let iteration = 0;
     while (offset < fileBytes) {
+      if (this.protection && !this.protection.current()) return { offset, complete: false };
       if (this.runBytesSent >= this.maxRunBytes) {
         this.debug("run budget spent");
         return { offset, complete: false };
@@ -645,7 +651,7 @@ class Shipper {
       if (advanceBytes <= 0) return { offset, complete: false };
       offset += advanceBytes;
       this.runBytesSent += advanceBytes;
-      this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath);
+      if (!this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath)) return {offset, complete:false};
     }
     return { offset, complete: true };
   }
@@ -685,6 +691,10 @@ class Shipper {
       const fileBytes = fileSize(filePath);
       const currentHead = firstLineFingerprint(filePath);
       this.runBytesSent = 0;
+      if (this.protection?.revision > 0 && state.revision !== String(this.protection.revision)) {
+        this.writeState(stateKey, fileBytes, currentHead, fileBytes, normalizedPath);
+        return;
+      }
       let offset = state.offset;
 
       let rotated = fileBytes < offset;
@@ -749,6 +759,12 @@ class Shipper {
 
   async run() {
     this.env = loadEnv(this.pluginRoot);
+    this.protection = await Protection.connect(this.env, this.shipperSlug, this.agentFamily);
+    if (this.protection) {
+      this.env.ROGUE_API_KEY=this.protection.key;
+      this.env.ROGUE_LOG_FILE=this.protection.file(`${this.shipperSlug}.log`);
+      if (!this.protection.enter()) return;
+    }
     this.resolveKnobs();
     if (!this.apiKey) {
       this.debug("not configured -> no-op");
@@ -761,7 +777,7 @@ class Shipper {
       this.log("outcome=skip reason=no-actor");
       return;
     }
-    this.stateDir = path.join(HOME, ".rogue", "ship");
+    this.stateDir = this.protection ? this.protection.file("ship") : path.join(HOME, ".rogue", "ship");
     try {
       fs.mkdirSync(this.stateDir, { recursive: true });
     } catch {

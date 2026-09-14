@@ -99,7 +99,7 @@ MAX_RUN_BYTES=10485760
 MAX_LINE_BYTES=4194304
 # per-target working state
 TARGET_BASENAME=""; TARGET_FAMILY=""; STATE_KEY=""
-OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""
+OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""; STATE_REVISION=""
 ADVANCE_BYTES=0; RUN_BYTES_SENT=0
 LINE_LENGTH=0; LINE_SEARCH_HIT_EOF=0
 
@@ -546,7 +546,7 @@ cleanup() {
 
 # ── stage 7: state ─────────────────────────────────────────────────────────
 read_state() { # <key> <abs-path>
-  OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""
+  OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_PATH=""; STATE_REVISION=""
   _state_file="$STATE_DIR/${1:-}.state"
   [ -r "$_state_file" ] || return 0
   while IFS= read -r _state_line; do
@@ -560,6 +560,7 @@ read_state() { # <key> <abs-path>
         _state_value="${_state_line#size=}"
         case "$_state_value" in ''|*[!0-9]*) _state_value=0 ;; esac
         STATE_SIZE="$_state_value" ;;
+      revision=*) STATE_REVISION="${_state_line#revision=}" ;;
       path=*) STATE_PATH="${_state_line#path=}" ;;
     esac
   done < "$_state_file"
@@ -570,7 +571,7 @@ read_state() { # <key> <abs-path>
   # directly is cheaper and clearer.
   if [ -n "$STATE_PATH" ] && [ "$STATE_PATH" != "${2:-}" ]; then
     debug "state path mismatch ($STATE_PATH != ${2:-}) -> treating state as absent"
-    OFFSET=0; STATE_HEAD=""; STATE_SIZE=0
+    OFFSET=0; STATE_HEAD=""; STATE_SIZE=0; STATE_REVISION=""
   fi
   return 0
 }
@@ -579,10 +580,10 @@ read_state() { # <key> <abs-path>
 # The temp lives in the SAME directory as the destination, or the mv is not atomic.
 write_state() { # <key> <offset> <head> <size> <path>
   _state_tmp_file="$STATE_DIR/.state-tmp-$$"
-  printf 'offset=%s\nhead=%s\nsize=%s\npath=%s\n' \
-    "${2:-0}" "${3:-}" "${4:-0}" "${5:-}" > "$_state_tmp_file" 2>/dev/null || return 0
+  printf 'offset=%s\nhead=%s\nsize=%s\npath=%s\nrevision=%s\n' \
+    "${2:-0}" "${3:-}" "${4:-0}" "${5:-}" "${ROGUE_PROTECTION_REVISION:-}" > "$_state_tmp_file" 2>/dev/null || return 1
+  [ ! -d "$STATE_DIR/${1:-}.state" ] || return 1
   mv -f "$_state_tmp_file" "$STATE_DIR/${1:-}.state" 2>/dev/null
-  return 0
 }
 
 # ── stage 8: chunks ────────────────────────────────────────────────────────
@@ -638,6 +639,7 @@ find_line_end() { # <file> <offset>
 # (which is NOT always the bytes sent - an over-long line is skipped forward).
 # Returns non-zero when nothing was shipped and the offset must NOT move.
 ship_next_chunk() { # <file> <offset> <rotated:0|1> <expected-head>
+  rogue_protection_current || return 1
   ADVANCE_BYTES=0
   _chunk_source_file="${1:-}"
   _chunk_offset="${2:-0}"
@@ -773,6 +775,7 @@ ship_oversize_line() { # <file> <offset> <rotated> <expected-head> <file-size>
 # body is passed as --data-binary @file rather than -d, because a 1 MiB chunk is
 # ~1.4 MiB of base64 and macOS's ARG_MAX is 1 MiB for args plus environment.
 post_chunk() { # <chunk-file> <offset> <bytes> <rotated:0|1>
+  rogue_protection_current || return 1
   _post_chunk_file="${1:-}"
   _post_offset="${2:-0}"
   _post_bytes="${3:-0}"
@@ -792,8 +795,10 @@ post_chunk() { # <chunk-file> <offset> <bytes> <rotated:0|1>
     printf '"}'
   } > "$_post_body_file" 2>/dev/null
   debug "POST $SHIP_URL file=$TARGET_BASENAME offset=$_post_offset bytes=$_post_bytes rotated=$_post_rotated_json"
+  rogue_protection_current || return 1
   _post_http_code=$(curl -sS --max-time "$HTTP_TIMEOUT" -X POST "$SHIP_URL" \
     -H "x-rogue-api-key: $API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
     -H 'Content-Type: application/json' \
     --data-binary @"$_post_body_file" \
     -o /dev/null -w '%{http_code}' 2>/dev/null)
@@ -827,7 +832,7 @@ drain_file() { # <file> <size> <rotated:0|1> <expected-head> <persist-head> <per
     [ "$ADVANCE_BYTES" -gt 0 ] || return 1
     OFFSET=$((OFFSET + ADVANCE_BYTES))
     RUN_BYTES_SENT=$((RUN_BYTES_SENT + ADVANCE_BYTES))
-    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path"
+    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path" || return 1
   done
   return 0
 }
@@ -849,6 +854,11 @@ ship_log_file() { # <path>
   read_state "$STATE_KEY" "$_target_abs_path"
   _target_file_bytes=$(file_size "$_target_file")
   _target_head=$(first_line_fingerprint "$_target_file")
+  if [ -n "${ROGUE_PROTECTION_STATE:-}" ] && [ "${ROGUE_PROTECTION_REVISION:-0}" -gt 0 ] && [ "$STATE_REVISION" != "$ROGUE_PROTECTION_REVISION" ]; then
+    write_state "$STATE_KEY" "$_target_file_bytes" "$_target_head" "$_target_file_bytes" "$_target_abs_path" || { rogue_protection_fail; release_lock; return 0; }
+    release_lock
+    return 0
+  fi
   RUN_BYTES_SENT=0
 
   _target_rotated=0
@@ -900,6 +910,11 @@ main() {
   stand_down_on_git_bash
   parse_args "$@"
   load_env
+  [ -r "$PLUGIN_ROOT/scripts/protection.sh" ] || exit 0
+  . "$PLUGIN_ROOT/scripts/protection.sh"
+  rogue_protection_init "$SHIPPER_SLUG" "$AGENT_FAMILY" "$PLUGIN_ROOT/scripts"
+  rogue_protection_enter || exit 0
+  trap 'rogue_protection_leave' EXIT
   resolve_knobs
   [ -n "$API_KEY" ] || { debug 'not configured -> no-op'; exit 0; }
   command -v curl >/dev/null 2>&1 || { log 'outcome=fail reason=no-curl'; exit 0; }
@@ -912,12 +927,12 @@ main() {
     exit 0
   fi
 
-  STATE_DIR="$HOME/.rogue/ship"
+  STATE_DIR="${ROGUE_PROTECTION_STATE:-$HOME/.rogue}/ship"
   mkdir -p "$STATE_DIR" 2>/dev/null
   [ -d "$STATE_DIR" ] || { debug "cannot create $STATE_DIR"; exit 0; }
   TMP_DIR=$(mktemp -d "$STATE_DIR/.tmp.XXXXXX" 2>/dev/null) || TMP_DIR=""
   [ -n "$TMP_DIR" ] || { debug 'cannot create a temp dir'; exit 0; }
-  trap 'cleanup' EXIT INT TERM
+  trap 'cleanup; rogue_protection_leave' EXIT INT TERM
 
   # A redirect, not a pipe: a `while` on the right of a pipe runs in a subshell in
   # POSIX sh, and log paths can contain spaces, so read them line by line.

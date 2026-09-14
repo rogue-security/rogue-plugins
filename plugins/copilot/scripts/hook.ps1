@@ -150,6 +150,7 @@ function Rotate-Log {
 
 function Log {
     param([string]$Msg)
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return }
     try {
         if (-not $logFile) { return }
         $dir = Split-Path $logFile
@@ -335,7 +336,14 @@ if (-not $actorEmail) {
 }
 
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────
-$payload = [Console]::In.ReadToEnd()
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { [Console]::Out.Write('{}'); exit 0 }
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'copilot' -Family 'copilot'
+if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{}'); exit 0 }
+try {
+
+$payload = Read-RogueProtectionInput
+if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
 if (-not $payload) { $payload = '{}' }
 try {
     $raw = [Console]::InputEncoding.GetBytes($payload)
@@ -619,6 +627,8 @@ if ($subagentId -and ($subagentId -match '^[A-Za-z0-9_-]+$')) {
 $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 $resp = ''
 try {
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and $null -ne $script:RPRevision) { $headers['x-rogue-activity-revision']=[string]$script:RPRevision }
     $r = Invoke-WebRequest -Uri $url -Method Post `
         -Headers $headers -ContentType 'application/json' -Body $bodyBytes `
         -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
@@ -629,6 +639,7 @@ try {
 } catch { Dbg "POST failed: $($_.Exception.Message)"; $resp = '' }
 
 $respHead = if ($resp.Length -gt 400) { $resp.Substring(0, 400) } else { $resp }
+if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
 Log "raw=$(Sanitize $respHead)"
 
 if (-not $resp) { Write-Raw '{}'; exit 0 }
@@ -647,3 +658,4 @@ if ($EventName -eq 'userPromptSubmitted' -and
 
 Write-Raw $resp
 exit 0
+} finally { Leave-RogueProtection }

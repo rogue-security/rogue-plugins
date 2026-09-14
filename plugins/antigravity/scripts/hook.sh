@@ -114,6 +114,7 @@ load_env() {
 # periodic job on purpose: an UNCONFIGURED install writes a line per event and
 # never runs anything else, so a cap enforced anywhere else would not hold.
 rotate_log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -126,6 +127,7 @@ rotate_log() {
 }
 
 log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   # 0700 dir / 0600 file. The logged text is not only ours: it carries the
   # server's block reason, which quotes the content that tripped the rule - a
   # secret, a command, a slice of a prompt. Under the default umask the log
@@ -649,7 +651,8 @@ load_install_id() {
 # Buffer stdin so we can enrich it (PreInvocation/PostInvocation/Stop) before
 # POSTing.
 read_body() {
-  BODY="$(cat)"
+  BODY="$(rogue_protection_read_input)" || { fail_open_default; exit 0; }
+rogue_protection_current || { fail_open_default; exit 0; }
 }
 
 # Heartbeat, fired detached so the hook itself returns immediately regardless of
@@ -776,8 +779,10 @@ post_and_relay() {
     fi
   fi
 
+rogue_protection_current || { fail_open_default; exit 0; }
   _raw=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
     -H "x-rogue-api-key: $ROGUE_API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
     -H "x-rogue-event: $EVENT" \
     -H "x-rogue-actor-email: $ROGUE_ACTOR_EMAIL" \
     -H "x-rogue-actor-name: $ROGUE_ACTOR_NAME" \
@@ -791,6 +796,7 @@ post_and_relay() {
   _code=$(printf '%s' "$_raw" | tail -n1)
   _resp=$(printf '%s' "$_raw" | sed '$d')
 
+rogue_protection_current || { fail_open_default; exit 0; }
   log "http=$_code rc=$_rc raw=$(sanitize "$_resp" | head -c 400)"
 
   # Fail-open on transport error, any non-200, or an empty body: emit the
@@ -816,6 +822,12 @@ main() {
   stand_down_under_git_bash
   locate_plugin_root
   load_env               # sources the env files, then every default derived from them
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { fail_open_default; exit 0; }
+. "${PLUGIN_ROOT}/scripts/protection.sh"
+rogue_protection_init antigravity antigravity "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
+rogue_protection_enter || { fail_open_default; exit 0; }
+trap 'rogue_protection_leave' EXIT
+
   require_api_key        # exits before stdin is read when there is no key
   load_actor
   read_body

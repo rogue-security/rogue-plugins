@@ -36,6 +36,8 @@ SRC="$REPO/scripts/shared"
 # CLAUDE_CODE_USER_EMAIL above git and screens the Cowork sandbox identity), and
 # cursor resolves the actor inline.
 ROWS=(
+  "protection.sh|rogue codex cursor copilot antigravity kiro"
+  "protection.ps1|rogue codex cursor copilot antigravity kiro"
   "ship-logs.sh|rogue codex cursor copilot antigravity kiro"
   "ship-logs.ps1|rogue codex cursor copilot antigravity kiro"
   "beacon.sh|rogue codex cursor copilot antigravity kiro"

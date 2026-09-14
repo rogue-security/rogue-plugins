@@ -10,8 +10,8 @@
   "plugins": [
     {
       "name": "rogue",
-      "version": "1.2.4",
-      "description": "Rogue Security AIDR — real-time AI agent detection and response for GitHub Copilot CLI",
+      "version": "1.2.5",
+      "description": "Rogue Security AIDR \u2014 real-time AI agent detection and response for GitHub Copilot CLI",
       "author": {
         "name": "Rogue Security",
         "url": "https://www.rogue.security"

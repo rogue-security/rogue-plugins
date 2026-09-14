@@ -50,6 +50,9 @@ PLUGIN_ROOT="${PLUGIN_ROOT:-}"
 
 # Family is the fixed enum "openai"; the surface rides the agent field.
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+. "${PLUGIN_ROOT}/scripts/protection.sh"
+rogue_protection_init codex openai "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
+
 BODY=$(printf '{"agent_family":"openai","agent":"%s","version":"%s","host":"%s","actor_email":"%s","actor_name":"%s"}' \
   "$(esc "${ROGUE_INSTALL_AGENT:-codex_cli}")" "$(esc "${ROGUE_INSTALL_VERSION:-unknown}")" \
   "$(esc "${ROGUE_INSTALL_HOST:-unknown}")" \

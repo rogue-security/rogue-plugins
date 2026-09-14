@@ -47,6 +47,7 @@ _lcap="$ROGUE_LOG_MAX_BYTES"
 while [ "${_lcap#0}" != "$_lcap" ]; do _lcap="${_lcap#0}"; done
 if [ "${#_lcap}" -gt 18 ]; then ROGUE_LOG_MAX_BYTES=10485760; fi
 rotate_log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -58,6 +59,7 @@ rotate_log() {
   return 0
 }
 log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   # 0700 dir / 0600 file. The logged text is not only ours: it carries the
   # server's block reason, which quotes the content that tripped the rule - a
   # secret, a command, a slice of a prompt. Under the default umask the log
@@ -87,6 +89,12 @@ if [ -r "${PLUGIN_ROOT}/scripts/surface.sh" ]; then
   . "${PLUGIN_ROOT}/scripts/surface.sh"
   SURFACE=$(codex_surface_slug 2>/dev/null)
 fi
+
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{}'; exit 0; }
+. "${PLUGIN_ROOT}/scripts/protection.sh"
+rogue_protection_init codex openai "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
+rogue_protection_enter || { printf '%s' '{}'; exit 0; }
+trap 'rogue_protection_leave' EXIT
 
 if [ -z "${ROGUE_API_KEY:-}" ]; then
   log "outcome=unconfigured"
@@ -140,8 +148,11 @@ URL="${ROGUE_API_URL:-${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks
 # Capture body + HTTP status. -w appends a final line "<code>"; on any curl/transport
 # failure curl exits non-zero and the code is 000. We relay the body ONLY on a clean
 # HTTP 200 so an error page (401/404/500) is never handed to Codex as a hook decision.
-RAW=$(curl -sS -X POST "$URL" \
+BODY="$(rogue_protection_read_input)"
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
+RAW=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
   -H "x-rogue-api-key: $ROGUE_API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
   -H "x-rogue-event: $EVENT" \
   -H "x-rogue-agent: $ROGUE_INSTALL_AGENT" \
   -H "x-rogue-host: $ROGUE_INSTALL_HOST" \
@@ -153,6 +164,7 @@ RAW=$(curl -sS -X POST "$URL" \
 RC=$?
 CODE=$(printf '%s' "$RAW" | tail -n1)
 BODY=$(printf '%s' "$RAW" | sed '$d')
+if ! rogue_protection_current; then printf '{}'; exit 0; fi
 
 log "outcome_raw=$(sanitize "$BODY" | head -c 400) http=$CODE rc=$RC"
 

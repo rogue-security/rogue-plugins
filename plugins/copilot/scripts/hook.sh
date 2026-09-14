@@ -74,6 +74,7 @@ if [ "${#_lcap}" -gt 18 ]; then ROGUE_LOG_MAX_BYTES=10485760; fi
 # NOTE: `_lsz` is not function-local (POSIX sh has no `local`) but is used
 # NOWHERE else in this file — unlike `_p`/`_n`, which are shared (see below).
 rotate_log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -90,6 +91,7 @@ rotate_log() {
 SURFACE="github_copilot"
 
 log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   # 0700 dir / 0600 file. The logged text is not only ours: it carries the
   # server's block reason, which quotes the content that tripped the rule - a
   # secret, a command, a slice of a prompt. Under the default umask the log
@@ -357,6 +359,12 @@ reattribute_subagent() {
 
 # Not configured: emit the SessionStart hint (so the user knows to run setup) or a
 # clean allow for every other event. Never POST without a key.
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{}'; exit 0; }
+. "${PLUGIN_ROOT}/scripts/protection.sh"
+rogue_protection_init copilot copilot "${PLUGIN_ROOT}/scripts" "${SURFACE:-default}"
+rogue_protection_enter || { printf '%s' '{}'; exit 0; }
+trap 'rogue_protection_leave' EXIT
+
 if [ -z "${ROGUE_API_KEY:-}" ]; then
   log "outcome=unconfigured"
   if [ "$EVENT" = "sessionStart" ]; then
@@ -380,7 +388,8 @@ fi
 URL="${ROGUE_API_URL:-${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/copilot}"
 
 # Buffer stdin so we can enrich it (agentStop/subagentStop) before POSTing.
-BODY="$(cat)"
+BODY="$(rogue_protection_read_input)"
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 # Re-attribute a subagent's event to its parent session BEFORE any tail
 # augmentation (a subagent agentStop has no transcriptPath, so augment no-ops).
 reattribute_subagent
@@ -434,6 +443,7 @@ fi
 # and neither is "do not send it". EVENT was captured at the top of the file, so
 # `set --` is free to rebuild the positional list here.
 set -- -H "x-rogue-api-key: $ROGUE_API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
        -H "x-rogue-event: $EVENT" \
        -H "x-rogue-agent: $ROGUE_INSTALL_AGENT" \
        -H "x-rogue-host: $ROGUE_INSTALL_HOST" \
@@ -450,6 +460,7 @@ case "$SUBAGENT_ID" in
     ;;
 esac
 
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 RAW=$(printf '%s' "$BODY" | curl -sS -X POST "$URL" \
   "$@" \
   -H 'Content-Type: application/json' \
@@ -458,6 +469,7 @@ RC=$?
 CODE=$(printf '%s' "$RAW" | tail -n1)
 BODY=$(printf '%s' "$RAW" | sed '$d')
 
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 log "http=$CODE rc=$RC raw=$(sanitize "$BODY" | head -c 400)"
 
 # Fail-open on transport error or any non-200: emit a clean allow.

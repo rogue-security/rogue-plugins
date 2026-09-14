@@ -221,6 +221,7 @@ function Rotate-Log {
 
 function Log {
     param([string]$Msg)
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return }
     try {
         if (-not $logFile) { return }
         $dir = Split-Path $logFile
@@ -298,7 +299,8 @@ function Resolve-Actor {
 
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────
 function Read-Payload {
-    $script:payload = [Console]::In.ReadToEnd()
+    $script:payload = Read-RogueProtectionInput
+    if (-not (Test-RogueProtectionCurrent)) { Write-Raw (Get-FailOpenDefault); exit 0 }
     if (-not $script:payload) { $script:payload = '{}' }
     try {
         $raw = [Console]::InputEncoding.GetBytes($script:payload)
@@ -900,7 +902,9 @@ function Invoke-Post {
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
     $resp = ''
     try {
-        $r = Invoke-WebRequest -Uri $url -Method Post `
+        if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { Write-Raw (Get-FailOpenDefault); exit 0 }
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and $null -ne $script:RPRevision) { $headers['x-rogue-activity-revision']=[string]$script:RPRevision }
+    $r = Invoke-WebRequest -Uri $url -Method Post `
             -Headers $headers -ContentType 'application/json' -Body $bodyBytes `
             -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
         if ($r.StatusCode -eq 200) {
@@ -910,7 +914,8 @@ function Invoke-Post {
     } catch { Dbg "POST failed: $($_.Exception.Message)"; $resp = '' }
 
     $respHead = if ($resp.Length -gt 400) { $resp.Substring(0, 400) } else { $resp }
-    Log "raw=$(Sanitize $respHead)"
+    if (-not (Test-RogueProtectionCurrent)) { Write-Raw (Get-FailOpenDefault); exit 0 }
+Log "raw=$(Sanitize $respHead)"
 
     # Fail-open on transport error, any non-200, or an empty body: emit the
     # per-event default rather than relaying garbage as a decision.
@@ -946,6 +951,12 @@ function Invoke-Main {
     Assert-ApiKey          # exits before stdin is read when there is no key
     Resolve-Url
     Resolve-Actor
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { Write-Raw (Get-FailOpenDefault); exit 0 }
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$script:apiKey = Initialize-RogueProtection -Key $script:apiKey -BaseUrl $script:creds['ROGUE_BASE_URL'] -Slug 'antigravity' -Family 'antigravity'
+if (-not (Enter-RogueProtection)) { Write-Raw (Get-FailOpenDefault); exit 0 }
+try {
+
     Read-Payload
     # Immediately after the payload, and BEFORE anything that logs or sends - the
     # same position hook.sh resolves it in. Every log line from here on carries the
@@ -972,6 +983,7 @@ function Invoke-Main {
     # This script MUST always exit 0: a block is carried in the relayed JSON body
     # on stdout, never in the exit code.
     exit 0
+} finally { Leave-RogueProtection }
 }
 
 # Test seam: dot-sourcing with ROGUE_PS_LIB_ONLY=1 loads the functions above

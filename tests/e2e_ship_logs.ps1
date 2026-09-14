@@ -361,6 +361,8 @@ $snippetRoot = Join-Path $sandbox 'plugintree'
 New-Item -ItemType Directory -Path (Join-Path $snippetRoot 'scripts') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'plugins\rogue\scripts\ship-logs.ps1') `
           -Destination (Join-Path $snippetRoot 'scripts\ship-logs.ps1') -Force
+Copy-Item -LiteralPath (Join-Path $repo 'plugins\rogue\scripts\protection.ps1') `
+          -Destination (Join-Path $snippetRoot 'scripts\protection.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'plugins\rogue\scripts\env-file.ps1') `
           -Destination (Join-Path $snippetRoot 'scripts\env-file.ps1') -Force
 # `e2e-key` because that is what the receiver accepts (E2E_API_KEY above); the point

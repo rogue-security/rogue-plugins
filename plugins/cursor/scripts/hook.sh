@@ -133,6 +133,7 @@ _lcap="$ROGUE_LOG_MAX_BYTES"
 while [ "${_lcap#0}" != "$_lcap" ]; do _lcap="${_lcap#0}"; done
 if [ "${#_lcap}" -gt 18 ]; then ROGUE_LOG_MAX_BYTES=10485760; fi
 rotate_log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   [ -f "$ROGUE_LOG_FILE" ] || return 0
   # Arithmetic, not a glob: "00" must mean zero here exactly as [int64]"00"
   # and Number("00") do in the PowerShell and Node dispatchers.
@@ -149,6 +150,7 @@ rotate_log() {
 SURFACE="cursor"
 
 log() {
+  if command -v rogue_protection_current >/dev/null 2>&1 && ! rogue_protection_current; then return 0; fi
   # 0700 dir / 0600 file. The logged text is not only ours: it carries the
   # server's block reason, which quotes the content that tripped the rule - a
   # secret, a command, a slice of a prompt. Under the default umask the log
@@ -171,6 +173,11 @@ log() {
 # can carry anything), and a raw newline or CR would forge extra log lines.
 sanitize() { printf '%s' "$1" | tr -d '\000-\037\177'; }
 
+[ -r "${PLUGIN_ROOT}/scripts/protection.sh" ] || { printf '%s' '{}'; exit 0; }
+. "${PLUGIN_ROOT}/scripts/protection.sh"
+rogue_protection_init cursor cursor "${PLUGIN_ROOT}/scripts"
+rogue_protection_enter || { printf '{}'; exit 0; }
+trap 'rogue_protection_leave' EXIT
 API_KEY="${ROGUE_API_KEY:-}"
 if [ -z "$API_KEY" ]; then
   dbg "no API key after cred resolution -> fail-open"
@@ -238,7 +245,8 @@ else
 fi
 
 # ── payload from stdin ─────────────────────────────────────────────────────
-PAYLOAD="$(cat 2>/dev/null)"
+PAYLOAD="$(rogue_protection_read_input 2>/dev/null)" || { printf '%s' '{}'; exit 0; }
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 [ -n "$PAYLOAD" ] || PAYLOAD='{}'
 # Strip a leading UTF-8 BOM if present. Cursor on Windows prepends one to the
 # hook payload (hook.ps1 handles it on the native path); a BOM-prefixed body is
@@ -678,6 +686,7 @@ dbg "POST $URL actor=$actor_email parent=${PARENT_ID:-none}"
 # together or not at all, and never on a main-agent event.
 set -- -H 'Content-Type: application/json' \
   -H "x-rogue-api-key: $API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
   -H "x-rogue-event: $event" \
   -H "x-rogue-actor-email: $actor_email" \
   -H "x-rogue-actor-name: $actor_name" \
@@ -697,6 +706,7 @@ dbg "curl rc=$_rc resp_len=${#RESP}"
 # Always log the raw response head so a relay/decision bug is diagnosable from
 # the hook log alone, without re-instrumenting the script. `-f` means a non-zero
 # rc is either a transport failure or an HTTP >= 400, and curl printed nothing.
+rogue_protection_current || { printf '%s' '{}'; exit 0; }
 log "rc=$_rc raw=$(sanitize "$RESP" | head -c 400)"
 [ "$_rc" -eq 0 ] || RESP=""
 
@@ -756,6 +766,7 @@ if [ -n "$hb_unthrottled" ]; then
     ( curl -fsS --max-time 10 -X POST \
         -H 'Content-Type: application/json' \
         -H "x-rogue-api-key: $API_KEY" \
+  -H "x-rogue-activity-revision: ${ROGUE_PROTECTION_REVISION:-}" \
         -H 'x-rogue-source: cursor' \
         -d "$HB_BODY" \
         "$BASE_URL/api/v1/hooks/status" \

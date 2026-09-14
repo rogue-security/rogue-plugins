@@ -122,6 +122,7 @@ function Rotate-Log {
 
 function Log {
     param([string]$Msg)
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return }
     try {
         if (-not $logFile) { return }
         $dir = Split-Path $logFile
@@ -326,7 +327,18 @@ function Read-KiroPayload {
     param([System.IO.Stream]$InputStream = [Console]::OpenStandardInput())
     $bytes = New-Object System.IO.MemoryStream
     try {
-        $InputStream.CopyTo($bytes)
+        $buffer=New-Object byte[] 4096
+        while ($true) {
+            $pending=$InputStream.ReadAsync($buffer,0,$buffer.Length)
+            while (-not $pending.IsCompleted) {
+                if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return '{}' }
+                Start-Sleep -Milliseconds 100
+            }
+            $count=$pending.GetAwaiter().GetResult()
+            if ($count -eq 0) { break }
+            if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return '{}' }
+            $bytes.Write($buffer,0,$count)
+        }
         $payload = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($bytes.ToArray())
     } finally { $bytes.Dispose() }
     if (-not $payload) { $payload = '{}' }
@@ -382,7 +394,9 @@ function Send-KiroRequest {
     $script:code = '000'
     $script:requestRc = 1
     try {
-        $r = Invoke-WebRequest -Uri $url -Method Post `
+        if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { exit 0 }
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and $null -ne $script:RPRevision) { $headers['x-rogue-activity-revision']=[string]$script:RPRevision }
+    $r = Invoke-WebRequest -Uri $url -Method Post `
             -Headers $headers -ContentType 'application/json' -Body $bodyBytes `
             -UseBasicParsing -TimeoutSec $timeoutSec -ErrorAction Stop
         $script:requestRc = 0
@@ -409,7 +423,14 @@ function Write-KiroDecision {
 function Invoke-KiroHook {
     Initialize-KiroContext
     Resolve-KiroActor
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { exit 0 }
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$script:apiKey = Initialize-RogueProtection -Key $script:apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'kiro' -Family 'kiro'
+if (-not (Enter-RogueProtection)) { exit 0 }
+try {
+
     $payload = Read-KiroPayload
+    if (-not (Test-RogueProtectionCurrent)) { exit 0 }
     $payload = Add-KiroSessionId $payload $env:KIRO_SESSION_ID
     if (Test-KiroDuplicateAgentHook $triggerArg $payload) {
         Log "outcome=duplicate engine=3.0 trigger=$triggerArg"
@@ -418,7 +439,9 @@ function Invoke-KiroHook {
     Resolve-KiroInstall
     Start-KiroHeartbeat
     Send-KiroRequest
+if (-not (Test-RogueProtectionCurrent)) { exit 0 }
     Write-KiroDecision
+} finally { Leave-RogueProtection -TimeoutSec 1 }
 }
 
 # Dot-sourcing through the test seam defines every function without running it.

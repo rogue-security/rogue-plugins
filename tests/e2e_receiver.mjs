@@ -59,6 +59,7 @@ function recordEnvelope(kind, envelope) {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.url?.includes("/hooks/protection/")) { req.resume(); res.writeHead(404, { "Content-Type": "application/json" }); res.end("{}"); return; }
   const chunks = [];
   req.on("data", (c) => chunks.push(c));
   req.on("end", () => {

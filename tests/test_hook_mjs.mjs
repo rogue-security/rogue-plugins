@@ -26,7 +26,7 @@ function freshHome() {
 
 // Run hook.mjs <event> with `payload` on stdin and `env` overrides; resolve stdout.
 function runHook(event, payload, env) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const home = freshHome();
     const child = spawn(process.execPath, [HOOK, event], {
       env: {
@@ -38,9 +38,12 @@ function runHook(event, payload, env) {
     });
     let out = "";
     child.stdout.on("data", (c) => (out += c));
+    child.on("error", reject);
     child.on("close", () => {
-      fs.rmSync(home, { recursive: true, force: true });
+      try {
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
       resolve(out);
+      } catch (error) { reject(error); }
     });
     child.stdin.end(payload ?? "");
   });
@@ -53,6 +56,7 @@ function startServer(status, body) {
   return new Promise((resolve) => {
     const seen = {};
     const server = http.createServer((req, res) => {
+      if (req.url.includes("/hooks/protection/")) { req.resume(); res.writeHead(404); res.end("{}"); return; }
       // SessionStart and AfterAgent also spawn the DETACHED heartbeat (hook.mjs
       // fireHeartbeat), which POSTs to /api/v1/hooks/status and, riding along
       // inside it, the log shipper, which POSTs to /api/v1/hooks/logs. Both race
@@ -84,20 +88,23 @@ function startServer(status, body) {
 // Same as runHook, but keeps the sandbox long enough to read the hook log back.
 // The log is the whole subject of the surface tests below, and runHook deletes it.
 function runHookReadLog(event, payload, env) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const home = freshHome();
     const child = spawn(process.execPath, [HOOK, event], {
       env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ...env },
     });
     let out = "";
     child.stdout.on("data", (c) => (out += c));
+    child.on("error", reject);
     child.on("close", () => {
+      try {
       const logFile = path.join(home, ".rogue", "logs", "gemini.log");
       const lines = fs.existsSync(logFile)
         ? fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean)
         : [];
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
       resolve({ out, lines });
+      } catch (error) { reject(error); }
     });
     child.stdin.end(payload ?? "");
   });
@@ -246,6 +253,7 @@ function startCollectingServer(status, body) {
   return new Promise((resolve) => {
     const requests = [];
     const server = http.createServer((req, res) => {
+      if (req.url.includes("/hooks/protection/")) { req.resume(); res.writeHead(404); res.end("{}"); return; }
       let b = "";
       req.on("data", (c) => (b += c));
       req.on("end", () => {

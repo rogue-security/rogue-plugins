@@ -203,6 +203,7 @@ function Rotate-Log {
 
 function Log {
     param([string]$Msg)
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return }
     try {
         if (-not $logFile) { return }
         $dir = Split-Path $logFile
@@ -468,7 +469,14 @@ if (-not $installAgent) { $installAgent = 'claude_code' }
 if ($installError.Count) { Log "error=install-id $($installError -join ',')" }
 
 # -- payload from stdin -----------------------------------------------------
-$payload = [Console]::In.ReadToEnd()
+if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { [Console]::Out.Write('{}'); exit 0 }
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+$apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'claude' -Family 'claude' -Version $pluginVersion
+if (-not (Enter-RogueProtection)) { [Console]::Out.Write('{}'); exit 0 }
+try {
+
+$payload = Read-RogueProtectionInput
+if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
 if (-not $payload) { $payload = '{}' }
 # Claude Code sends a UTF-8 payload, but the console often reads stdin under a
 # legacy OEM codepage (e.g. IBM437), which mojibakes it. Round-trip back through
@@ -500,6 +508,8 @@ Dbg "POST $url actor=$actorEmail"
 $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 $resp = ''
 try {
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
+    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and $null -ne $script:RPRevision) { $headers['x-rogue-activity-revision']=[string]$script:RPRevision }
     $r = Invoke-WebRequest -Uri $url -Method Post `
         -Headers $headers -ContentType 'application/json' -Body $bodyBytes `
         -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
@@ -518,6 +528,7 @@ try {
 # Always log the raw response so block-detection bugs are diagnosable from the log
 # alone (mirrors hook.sh).
 $respHead = if ($resp.Length -gt 400) { $resp.Substring(0, 400) } else { $resp }
+if (-not (Test-RogueProtectionCurrent)) { [Console]::Out.Write('{}'); exit 0 }
 Log "raw=$(Sanitize $respHead)"
 
 # -- block detection (mirrors hook.sh's pure-text scan) ---------------------
@@ -601,3 +612,4 @@ if ($fireAlert) {
     } catch { Log "alert_error=$(Sanitize $_.Exception.Message)" }
 }
 exit 0
+} finally { Leave-RogueProtection }
