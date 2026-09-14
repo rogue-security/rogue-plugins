@@ -638,9 +638,19 @@ function Write-ShipState {
     param([string]$Key, [int64]$Offset, [string]$Head, [int64]$Size, [string]$Path)
     $destination = Join-Path $script:stateDir "$Key.state"
     $tempFile = Join-Path $script:stateDir (".state-tmp-" + $PID)
-    [IO.File]::WriteAllText($tempFile, "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`nrevision=$script:RPRevision`n", (New-Object Text.UTF8Encoding($false)))
-    if ([IO.File]::Exists($destination)) { [IO.File]::Replace($tempFile, $destination, [NullString]::Value) }
-    else { [IO.File]::Move($tempFile, $destination) }
+    try {
+        [IO.File]::WriteAllText($tempFile, "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`nrevision=$script:RPRevision`n", (New-Object Text.UTF8Encoding($false)))
+        if ([IO.File]::Exists($destination)) { [IO.File]::Replace($tempFile, $destination, [NullString]::Value) }
+        else { [IO.File]::Move($tempFile, $destination) }
+    } catch {
+        $script:RPPersistenceFailed=$true
+        $state=Get-RogueProtectionState
+        if ($state) {
+            $body=@{protocolVersion=1;revision=$state.revision;status='failed';aidrPaused=[bool]$state.aidr.paused;aispmPaused=[bool]$state.aispm.paused;error='state_persistence_failed'} | ConvertTo-Json -Compress
+            try { $null=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
+        }
+        throw
+    }
 }
 
 # ── stage 8: chunks ────────────────────────────────────────────────────────
@@ -898,7 +908,7 @@ function Ship-LogFile {
             Write-ShipState $script:stateKey 0 $currentHead $fileBytes $normalizedPath
         }
 
-        [void](Invoke-DrainFile $Path $fileBytes 0 $currentHead $currentHead $fileBytes $normalizedPath)
+        if (-not (Invoke-DrainFile $Path $fileBytes 0 $currentHead $currentHead $fileBytes $normalizedPath)) { return }
     } finally {
         # try/finally, so an early return still releases the lock.
         Unlock-StateKey

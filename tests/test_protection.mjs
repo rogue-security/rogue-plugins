@@ -19,11 +19,12 @@ function isolateEnv(directory) {
   }
 }
 isolateEnv(fixturePlugins);
-let revision=1, paused=true, available=true, legacy=false;
+let revision=1, paused=true, available=true, legacy=false, disconnect=false;
 const requests=[];
 const server=http.createServer(async (req,res) => {
   let body=''; for await (const chunk of req) body+=chunk;
   requests.push({path:req.url, body, key:req.headers["x-rogue-api-key"], installationKey:req.headers["x-rogue-installation-key"]});
+  if (disconnect) { req.socket.destroy(); return; }
   if (legacy && req.url.includes('/hooks/protection/')) { res.statusCode=404; res.end('{}'); return; }
   if (!available) { res.statusCode=503; res.end('{}'); return; }
   res.setHeader('content-type','application/json');
@@ -55,7 +56,7 @@ try {
       const event=({cursor:'beforeShellExecution',copilot:'preToolUse',antigravity:'PreInvocation',gemini:'BeforeTool'})[plugin] || 'PreToolUse';
       const result=await run(plugin==='gemini'?process.execPath:'bash',[path.join(root,'scripts',plugin==='gemini'?'hook.mjs':'hook.sh'),event,'kiro_cli'],env);
       assert.equal(result.code,0,`${plugin}: ${result.err}`);
-      assert.deepEqual(JSON.parse(result.out || '{}'),plugin==='antigravity'?{decision:'allow'}:{},plugin);
+      assert.deepEqual(JSON.parse(result.out || '{}'),{},plugin);
       const calls=requests.slice(start);
       assert(calls.some(call=>call.path.endsWith('/state')),`${plugin} did not fetch its pause decision`);
       assert(calls.every(call=>call.path.includes('/hooks/protection/')),`${family} sent an activity payload`);
@@ -233,7 +234,7 @@ try {
       const code=await new Promise(resolve=>child.once('exit',resolve));
       clearTimeout(change);clearTimeout(timeout);
       assert.equal(code,0,plugin);
-      assert.deepEqual(JSON.parse(output || '{}'),plugin==='antigravity'?{decision:'allow'}:{},plugin);
+      assert.deepEqual(JSON.parse(output || '{}'),{},plugin);
       assert(!requests.slice(start).some(call=>!call.path.includes('/hooks/protection/') && call.body.includes('must-not-upload')),plugin);
       assert(!fs.readdirSync(directory).some(name=>name.startsWith('input.')),plugin);
     }
@@ -282,6 +283,40 @@ try {
     fs.writeFileSync(path.join(directory,'attempt'),'0');
     const root=path.join(fixturePlugins,'codex');
     await run('sh',[path.join(root,'scripts/hook.sh'),'PreToolUse'],{ROGUE_API_KEY:'provision_codex',ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:temp,PLUGIN_ROOT:root});
+  });
+  await test('legacy enrollment survives transport failure and retries a future timestamp', async () => {
+    const {Protection}=await import(path.join(fixturePlugins,'gemini/scripts/protection.mjs'));
+    for (const language of ['sh','node', ...(process.env.ROGUE_TEST_PWSH ? ['ps'] : [])]) {
+      const isolated=path.join(temp,`legacy-${language}`); fs.mkdirSync(isolated);
+      const env={ROGUE_API_KEY:'legacy_key',ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:isolated};
+      const invoke=async () => {
+        if (language==='node') { assert.equal(await Protection.connect(env),undefined); return; }
+        const script=language==='sh'
+          ? `. '${path.join(repo,'scripts/shared/protection.sh')}'; rogue_protection_init codex openai '${path.join(repo,'plugins/codex/scripts')}'; [ -z "$ROGUE_PROTECTION_STATE" ]`
+          : `. '${path.join(repo,'scripts/shared/protection.ps1')}'; $null=Initialize-RogueProtection -Key 'legacy_key' -BaseUrl '${base}' -Slug codex -Family openai; if ($script:RPDirectory) { exit 9 }`;
+        const result=await run(language==='sh'?'sh':process.env.ROGUE_TEST_PWSH,language==='sh'?['-c',script]:['-NoProfile','-Command',script],env,'');
+        assert.equal(result.code,0,`${language}: ${result.err}`);
+      };
+      legacy=true; available=true; await invoke();
+      const directory=path.join(isolated,fs.readdirSync(isolated)[0]);
+      fs.writeFileSync(path.join(directory,'enroll-attempt'),String(language==='node'?Date.now()+3600000:Math.floor(Date.now()/1000)+3600));
+      disconnect=true; legacy=false;
+      const start=requests.length; await invoke();
+      assert(requests.slice(start).some(call=>call.path.endsWith('/enroll')),language);
+      assert(fs.existsSync(path.join(directory,'legacy-server')),language);
+      disconnect=false;
+    }
+  });
+  await test('PowerShell checkpoint failure reports failed and suppresses applied ACK', {skip:!process.env.ROGUE_TEST_PWSH}, async () => {
+    const directory=path.join(temp,'ps-checkpoint'); fs.mkdirSync(directory);
+    fs.mkdirSync(path.join(directory,'broken.state'));
+    fs.writeFileSync(path.join(directory,'state.json'),JSON.stringify({decision:{protocolVersion:1,revision:50,serverTime:new Date().toISOString(),aidr:{paused:false,revision:50},aispm:{paused:false,revision:0}},receivedAt:new Date().toISOString()}));
+    const script=`$env:ROGUE_PS_LIB_ONLY='1'; . '${path.join(repo,'scripts/shared/ship-logs.ps1')}'; . '${path.join(repo,'scripts/shared/protection.ps1')}'; $script:stateDir='${directory}'; $script:RPDirectory='${directory}'; $script:RPBase='${base}'; $script:RPKey='installation_test_key'; $script:RPRevision=50; try { Write-ShipState broken 10 head 10 log; exit 9 } catch {}; Send-RogueProtectionAck; if (-not $script:RPPersistenceFailed) { exit 8 }`;
+    const start=requests.length;
+    const result=await run(process.env.ROGUE_TEST_PWSH,['-NoProfile','-Command',script],{},'');
+    assert.equal(result.code,0,result.err);
+    const acks=requests.slice(start).filter(call=>call.path.endsWith('/ack')).map(call=>JSON.parse(call.body));
+    assert(acks.some(ack=>ack.status==='failed')); assert(!acks.some(ack=>ack.status==='applied'));
   });
   await test('an unavailable enrollment never enables unscoped activity on retry', async () => {
     available=false;

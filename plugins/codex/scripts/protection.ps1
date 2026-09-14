@@ -35,7 +35,7 @@ function Test-RogueProtectionCurrent {
     $state = Get-RogueProtectionState
     return ($null -ne $state) -and ((-not $state.aidr.paused) -and ($null -eq $script:RPRevision -or $state.aidr.revision -eq $script:RPRevision))
 }
-function Send-RogueProtectionAck {
+function Send-RogueProtectionAck([int]$TimeoutSec=5) {
     if ($script:RPPersistenceFailed -or (Test-Path -LiteralPath "$script:RPDirectory/persistence-failed")) { return }
     $state = Get-RogueProtectionState
     if (-not $state) { return }
@@ -48,7 +48,7 @@ function Send-RogueProtectionAck {
     if ((Get-Content -LiteralPath "$script:RPDirectory/ack" -Raw -ErrorAction SilentlyContinue) -eq $identity) { return }
     try {
         $body = @{ protocolVersion=1; revision=$state.revision; status='applied'; aidrPaused=[bool]$state.aidr.paused; aispmPaused=[bool]$state.aispm.paused } | ConvertTo-Json -Compress
-        $null = Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5
+        $null = Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec $TimeoutSec
         Write-RogueProtectionFile "$script:RPDirectory/ack" $identity
     } catch { }
 }
@@ -116,7 +116,8 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
     if (-not (Test-Path -LiteralPath $credential)) {
         $enrollAttempt=0L
         $null=[long]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/enroll-attempt" -Raw -ErrorAction SilentlyContinue), [ref]$enrollAttempt)
-        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $enrollAttempt -lt 60) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
+        $enrollElapsed=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $enrollAttempt
+        if ($enrollElapsed -ge 0 -and $enrollElapsed -lt 60) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
         try { $lock=[IO.File]::Open("$script:RPDirectory/enroll.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch { return $Key }
         try {
             if (-not (Test-Path -LiteralPath $credential)) {
@@ -124,13 +125,16 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
                 $nonce=Get-Content -LiteralPath "$script:RPDirectory/enrollment-nonce" -Raw -ErrorAction SilentlyContinue
                 if (-not $nonce) { $nonce=[Guid]::NewGuid().ToString('N'); Write-RogueProtectionFile "$script:RPDirectory/enrollment-nonce" $nonce }
                 $body=@{ enrollmentNonce=$nonce; type='coding_agent'; name=$Slug; family=$Family; host=[Environment]::MachineName; version=$Version } | ConvertTo-Json -Compress
-                Remove-Item -LiteralPath "$script:RPDirectory/legacy-server" -Force -ErrorAction SilentlyContinue
                 $enrolled=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/enroll" -Method Post -Headers @{'x-rogue-api-key'=$Key} -ContentType 'application/json' -Body $body -TimeoutSec 5
+                Remove-Item -LiteralPath "$script:RPDirectory/legacy-server" -Force -ErrorAction SilentlyContinue
                 if ($enrolled.alreadyEnrolled) { $enrolled | Add-Member -NotePropertyName apiKey -NotePropertyValue $Key -Force }
                 if ($enrolled.apiKey) { Write-RogueProtectionFile $credential $enrolled.apiKey }
             }
         } catch {
-            if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { try { Write-RogueProtectionFile "$script:RPDirectory/legacy-server" '1' } catch {} }
+            if ($_.Exception.Response) {
+                if ([int]$_.Exception.Response.StatusCode -eq 404) { try { Write-RogueProtectionFile "$script:RPDirectory/legacy-server" '1' } catch {} }
+                else { Remove-Item -LiteralPath "$script:RPDirectory/legacy-server" -Force -ErrorAction SilentlyContinue }
+            }
         } finally { $lock.Dispose() }
     }
     if (-not (Test-Path -LiteralPath $credential)) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
@@ -179,10 +183,10 @@ function Read-RogueProtectionInput {
     if (Test-RogueProtectionCurrent) { return [Console]::InputEncoding.GetString($bytes) }
     return ''
 }
-function Leave-RogueProtection {
+function Leave-RogueProtection([int]$TimeoutSec=5) {
     if (-not $script:RPDirectory) { return }
     Remove-Item -LiteralPath "$script:RPDirectory/active.$PID" -Force -ErrorAction SilentlyContinue
-    Send-RogueProtectionAck
+    Send-RogueProtectionAck -TimeoutSec $TimeoutSec
 }
 function Enter-RogueProtection {
     if (-not (Test-RogueProtectionCurrent)) { return $false }

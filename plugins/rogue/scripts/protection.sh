@@ -121,7 +121,8 @@ rogue_protection_init() {
   fi
   if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then
     _rp_enroll_attempt=$(cat "$ROGUE_PROTECTION_STATE/enroll-attempt" 2>/dev/null) || _rp_enroll_attempt=0
-    if [ $(( $(rogue_protection_now) - ${_rp_enroll_attempt:-0} )) -lt 60 ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 0; fi
+    _rp_elapsed=$(( $(rogue_protection_now) - ${_rp_enroll_attempt:-0} ))
+    if [ "$_rp_elapsed" -ge 0 ] && [ "$_rp_elapsed" -lt 60 ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 0; fi
     rogue_protection_lock "$ROGUE_PROTECTION_STATE/enroll.lock" || return 0
     rogue_protection_now > "$ROGUE_PROTECTION_STATE/enroll-attempt"
     if [ ! -s "$ROGUE_PROTECTION_STATE/enrollment-nonce" ]; then
@@ -130,7 +131,10 @@ rogue_protection_init() {
     _rp_nonce=$(cat "$ROGUE_PROTECTION_STATE/enrollment-nonce")
     [ "${#_rp_nonce}" -eq 64 ] || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 0; }
     _rp_response=$(curl -sS -w '\n%{http_code}' --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H 'content-type: application/json' --data "{\"enrollmentNonce\":\"$_rp_nonce\",\"type\":\"coding_agent\",\"name\":\"$1\",\"family\":\"$2\",\"host\":\"$(rogue_protection_escape "$(hostname)")\",\"version\":\"$(rogue_protection_escape "${ROGUE_INSTALL_VERSION:-unknown}")\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/enroll" 2>/dev/null) || _rp_response=''
-    if [ "$(printf '%s' "$_rp_response" | tail -n 1)" = 404 ]; then touch "$ROGUE_PROTECTION_STATE/legacy-server"; else rm -f "$ROGUE_PROTECTION_STATE/legacy-server"; fi
+    case "$(printf '%s' "$_rp_response" | tail -n 1)" in
+      404) touch "$ROGUE_PROTECTION_STATE/legacy-server" ;;
+      [1-5]??) rm -f "$ROGUE_PROTECTION_STATE/legacy-server" ;;
+    esac
     _rp_key=$(printf '%s' "$_rp_response" | sed -n 's/.*"apiKey":"\([A-Za-z0-9_-][A-Za-z0-9_-]*\)".*/\1/p')
     case "$_rp_response" in *'"alreadyEnrolled":true'*) _rp_key=$ROGUE_API_KEY ;; esac
     if [ -n "$_rp_key" ]; then (umask 077; printf '%s' "$_rp_key" > "$ROGUE_PROTECTION_STATE/credential.tmp"; mv "$ROGUE_PROTECTION_STATE/credential.tmp" "$ROGUE_PROTECTION_STATE/credential"); fi

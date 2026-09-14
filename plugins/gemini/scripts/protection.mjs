@@ -108,7 +108,8 @@ export class Protection {
         }
       }
       if (!key) {
-        if (Date.now()-Number(read(client.file('enroll-attempt'))) < 60000) return read(client.file('legacy-server')) ? undefined : client;
+        const elapsed=Date.now()-Number(read(client.file('enroll-attempt')));
+        if (elapsed >= 0 && elapsed < 60000) return read(client.file('legacy-server')) ? undefined : client;
         const lock=client.file('enroll.lock');
         try { fs.writeFileSync(lock, String(process.pid), {flag:'wx', mode:0o600}); }
         catch { if (!alive(read(lock))) fs.rmSync(lock, {force:true}); return client; }
@@ -116,8 +117,8 @@ export class Protection {
           write(client.file('enroll-attempt'), String(Date.now()));
           let enrollmentNonce=read(client.file('enrollment-nonce'));
           if (!enrollmentNonce) { enrollmentNonce=randomUUID(); write(client.file('enrollment-nonce'),enrollmentNonce); }
-          fs.rmSync(client.file('legacy-server'),{force:true});
           const enrolled=await client.request('enroll', {enrollmentNonce,type:'coding_agent', name:slug, family, host:os.hostname(), version:env.ROGUE_INSTALL_VERSION || 'unknown'});
+          fs.rmSync(client.file('legacy-server'),{force:true});
           key=enrolled.alreadyEnrolled ? env.ROGUE_API_KEY : enrolled.apiKey;
           if (typeof key !== 'string' || !key) return client;
           write(client.file('credential'), key);
@@ -140,7 +141,8 @@ export class Protection {
       const key=read(client.file('credential'));
       if (!key) {
         if (error.status === 404) { try { write(client.file('legacy-server'),'1'); } catch {} return undefined; }
-        return client;
+        if (error.status) fs.rmSync(client.file('legacy-server'),{force:true});
+        return read(client.file('legacy-server')) ? undefined : client;
       }
       client.key=key; client.revision=client.state()?.aidr.revision; return client;
     }

@@ -201,6 +201,7 @@ mkdir -p "$STAGE/scripts"
 cp "$HOOK" "$STAGE/scripts/hook.sh"
 cp "$ACTOR" "$STAGE/scripts/actor.sh"
 cp "$INSTALL_ID" "$STAGE/scripts/install-id.sh"
+cp "$REPO/plugins/antigravity/scripts/protection.sh" "$STAGE/scripts/protection.sh"
 MARKER="$STAGE/heartbeat-fired"
 # The stub records BOTH arguments: the heartbeat is told which surface fired it
 # (three products share one install and only the hook can tell them apart, from the
@@ -328,6 +329,7 @@ mkdir -p "$STAGE/scripts"
 cp "$HOOK" "$STAGE/scripts/hook.sh"
 cp "$ACTOR" "$STAGE/scripts/actor.sh"
 cp "$INSTALL_ID" "$STAGE/scripts/install-id.sh"
+cp "$REPO/plugins/antigravity/scripts/protection.sh" "$STAGE/scripts/protection.sh"
 MARKER="$STAGE/heartbeat-fired"
 cat > "$STAGE/scripts/heartbeat.sh" <<EOF
 #!/bin/sh

@@ -855,7 +855,7 @@ ship_log_file() { # <path>
   _target_file_bytes=$(file_size "$_target_file")
   _target_head=$(first_line_fingerprint "$_target_file")
   if [ -n "${ROGUE_PROTECTION_STATE:-}" ] && [ "${ROGUE_PROTECTION_REVISION:-0}" -gt 0 ] && [ "$STATE_REVISION" != "$ROGUE_PROTECTION_REVISION" ]; then
-    write_state "$STATE_KEY" "$_target_file_bytes" "$_target_head" "$_target_file_bytes" "$_target_abs_path"
+    write_state "$STATE_KEY" "$_target_file_bytes" "$_target_head" "$_target_file_bytes" "$_target_abs_path" || { rogue_protection_fail; release_lock; return 0; }
     release_lock
     return 0
   fi
