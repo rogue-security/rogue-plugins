@@ -5,13 +5,14 @@ description: Check Rogue Security AIDR connection, active rulesets, and configur
 
 # Rogue Security Status
 
-Verify the current Rogue Security integration. Reads one env file: the first of `/etc/rogue/env` (MDM) and `~/.rogue-env` (per-user) that holds `ROGUE_API_KEY`.
+Verify the current Rogue Security integration. Reads one env file: the first of `/etc/rogue/env` (MDM), the plugin's bundled `env` (managed installs) and `~/.rogue-env` (per-user) that holds `ROGUE_API_KEY`.
 
 ## Step 1: Source credentials and report what was found
 
 ```bash
-# The first env file holding ROGUE_API_KEY is used alone.
-for f in /etc/rogue/env "$HOME/.rogue-env"; do
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+ROGUE_PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-$HOME/.cursor/plugins/local/rogue}"
+for f in /etc/rogue/env "$ROGUE_PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
   [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; echo "  in use: $f"; break; }
   [ -r "$f" ] && echo "  $f  (no ROGUE_API_KEY, not read)"
 done
@@ -23,7 +24,8 @@ If `ROGUE_API_KEY` is empty, stop and tell the user to run `/rogue:setup`.
 ## Step 2: Ping the API
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
+ROGUE_PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-$HOME/.cursor/plugins/local/rogue}"
+for f in /etc/rogue/env "$ROGUE_PLUGIN_ROOT/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 curl -s -w "\n%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
 ```
@@ -31,7 +33,8 @@ curl -s -w "\n%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" \
 ## Step 3: Fetch active config
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
+ROGUE_PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-$HOME/.cursor/plugins/local/rogue}"
+for f in /etc/rogue/env "$ROGUE_PLUGIN_ROOT/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 curl -s -H "x-rogue-api-key: $ROGUE_API_KEY" \
   "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/config"
 ```
@@ -41,7 +44,8 @@ Parse the JSON and show: mode (enforce/monitor), fail-open setting, active rules
 ## Step 4: Show identity + recent hook activity
 
 ```bash
-for f in /etc/rogue/env "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
+ROGUE_PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-$HOME/.cursor/plugins/local/rogue}"
+for f in /etc/rogue/env "$ROGUE_PLUGIN_ROOT/env" "$HOME/.rogue-env"; do [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; break; }; done
 echo "Actor email: ${ROGUE_ACTOR_EMAIL:-(unset)}"
 echo "Actor name:  ${ROGUE_ACTOR_NAME:-(unset)}"
 echo "--- recent hook activity ---"
@@ -52,7 +56,8 @@ echo "--- recent hook activity ---"
 # machines that relocate their logs by policy, which are the ones support is
 # called about.
 ROGUE_ENV_IN_USE=""
-for f in /etc/rogue/env "$HOME/.rogue-env"; do
+ROGUE_PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-$HOME/.cursor/plugins/local/rogue}"
+for f in /etc/rogue/env "$ROGUE_PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
   [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
 done
 rogue_log_var() {
@@ -75,21 +80,23 @@ On Windows, resolve the same precedence before reading:
 
 ```powershell
 $logCfg = @{}
-# Mirror the dispatcher's rule: the first of C:\ProgramData\rogue\env (MDM) and
-# %USERPROFILE%\.rogue-env that holds ROGUE_API_KEY is read, with the process
-# environment for anything it does not set. Parsed with a regex, never executed -
-# a status command must not run an env file. Reading only $env: would report "no
-# activity" on exactly the machines that relocate their logs by policy, which are
-# the ones support is called about.
-foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
+# Mirror the dispatcher's rule: the first of C:\ProgramData\rogue\env (MDM), the
+# plugin's bundled env and %USERPROFILE%\.rogue-env that holds ROGUE_API_KEY is
+# read, with the process environment for anything it does not set. Parsed with a
+# regex, never executed - a status command must not run an env file. Reading only
+# $env: would report "no activity" on exactly the machines that relocate their logs
+# by policy, which are the ones support is called about.
+$root = $env:CURSOR_PLUGIN_ROOT
+if (-not $root) { $root = Join-Path $env:USERPROFILE '.cursor\plugins\local\rogue' }
+foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $root 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
   if (-not (Test-Path -LiteralPath $f)) { continue }
   $fileVals = @{}
   foreach ($line in (Get-Content -LiteralPath $f)) {
-    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
       $fileVals[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
     }
   }
-  if (-not $fileVals['ROGUE_API_KEY']) { continue }
+  if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
   $logCfg = $fileVals
   break
 }

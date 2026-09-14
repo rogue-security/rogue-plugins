@@ -193,11 +193,11 @@ foreach ($f in @('C:\ProgramData\rogue\env', "$env:USERPROFILE\.gemini\extension
   if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
   $fileVals = @{}
   foreach ($line in (Get-Content -LiteralPath $f)) {
-    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
       $fileVals[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
     }
   }
-  if (-not $fileVals['ROGUE_API_KEY']) { continue }
+  if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
   Write-Host "  in use: $f"
   $creds = $fileVals
   break

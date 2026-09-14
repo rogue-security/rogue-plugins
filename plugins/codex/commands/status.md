@@ -116,21 +116,23 @@ On Windows, resolve the same precedence before reading:
 
 ```powershell
 $logCfg = @{}
-# Mirror the dispatcher's rule: the first of C:\ProgramData\rogue\env (MDM) and
-# %USERPROFILE%\.rogue-env that holds ROGUE_API_KEY is read, with the process
-# environment for anything it does not set. Parsed with a regex, never executed -
-# a status command must not run an env file. Reading only $env: would report "no
-# activity" on exactly the machines that relocate their logs by policy, which are
-# the ones support is called about.
-foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
+# Mirror the dispatcher's rule: the first of C:\ProgramData\rogue\env (MDM), the
+# plugin's bundled env and %USERPROFILE%\.rogue-env that holds ROGUE_API_KEY is
+# read, with the process environment for anything it does not set. Parsed with a
+# regex, never executed - a status command must not run an env file. Reading only
+# $env: would report "no activity" on exactly the machines that relocate their logs
+# by policy, which are the ones support is called about.
+$pluginEnv = Get-ChildItem "$env:USERPROFILE\.codex\plugins" -Recurse -Filter env -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.FullName -like '*rogue*' } | Select-Object -First 1
+foreach ($f in @('C:\ProgramData\rogue\env', $pluginEnv.FullName, (Join-Path $env:USERPROFILE '.rogue-env'))) {
   if (-not (Test-Path -LiteralPath $f)) { continue }
   $fileVals = @{}
   foreach ($line in (Get-Content -LiteralPath $f)) {
-    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
       $fileVals[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
     }
   }
-  if (-not $fileVals['ROGUE_API_KEY']) { continue }
+  if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
   $logCfg = $fileVals
   break
 }
