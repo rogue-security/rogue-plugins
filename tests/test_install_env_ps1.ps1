@@ -58,20 +58,29 @@ $ErrorActionPreference = 'Stop'
 $Email = 'tester@example.com'; $Name = 'Tester'
 
 # Machine file fixtures: trusted = owned by root/Administrators, writable by no
-# one else; untrusted = the same file with a write grant for everyone.
+# one else; untrusted = the same file with a write grant for the CURRENT USER,
+# which the installer must refuse - a standard user who can rewrite the file can
+# replace the key the MDM pushed. The Windows ACL is protected and rebuilt from
+# nothing, so the trusted case cannot inherit a write grant from the temp
+# directory and pass for the wrong reason. Recreate rather than overwrite: the
+# previous call leaves an ACL this process may not be able to write through.
 function Set-MachineFile {
     param([string]$Content, [switch]$Untrusted)
+    Remove-Item -LiteralPath $MachineEnvFile -Force -ErrorAction SilentlyContinue
     [System.IO.File]::WriteAllText($MachineEnvFile, $Content)
     if ($unix) {
         & chmod ($(if ($Untrusted) { '666' } else { '644' })) $MachineEnvFile
         return
     }
+    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $rights = 'Read'
+    if ($Untrusted) { $rights = 'Read, Write' }
     $acl = Get-Acl -LiteralPath $MachineEnvFile
-    $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')))
-    if ($Untrusted) {
-        $everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($everyone, 'Write', 'Allow')))
-    }
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner($admins)
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins, 'FullControl', 'Allow')))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, $rights, 'Allow')))
     Set-Acl -LiteralPath $MachineEnvFile -AclObject $acl
 }
 
@@ -194,7 +203,7 @@ $out = Run-Configure ''
 Assert-Eq $script:prompts 1 'keyless machine file, interactive: prompts once'
 Assert-Eq (Get-WrittenKey) 'typed-key' 'keyless machine file, interactive: typed key written'
 
-# -- 4. Keyed machine env file writable by others: a warning names it, then as in 2 --
+# -- 4. Keyed machine env file the current user can write: warned, then as in 2 -----
 Set-MachineFile "export ROGUE_API_KEY='machine-key'`n" -Untrusted
 $NonInteractive = $true
 $out = Run-Configure 'passed-key'
@@ -216,6 +225,23 @@ if ($unix) {
     Assert-Eq (Count-Matches $out "$MachineEnvFile holds ROGUE_API_KEY") 1 'user-owned machine file: warning names the file'
     Assert-Eq (Get-WrittenKey) 'passed-key' 'user-owned machine file: passed key written'
 }
+
+# -- 5. User env file with no key: its base URL and identity still apply ----------
+Remove-Item -LiteralPath $MachineEnvFile -Force -ErrorAction SilentlyContinue
+[System.IO.File]::WriteAllText($EnvFile,
+    "export ROGUE_BASE_URL='https://api.example.invalid'`nexport ROGUE_ACTOR_EMAIL='stored@example.com'`nexport ROGUE_ACTOR_NAME='Stored Name'`n")
+$Email = ''; $Name = ''
+$BaseUrl = $ROGUE_BASE_URL_DEFAULT; $BaseUrlExplicit = $false
+$script:ApiKey = 'passed-key'
+$script:CredentialSource = $null
+$script:prompts = 0
+$NonInteractive = $true
+$out = Configure-Credentials 6>&1 | Out-String -Width 4096
+Assert-Eq $script:prompts 0 'keyless user file: no credential prompt'
+Assert-Eq (Get-WrittenKey) 'passed-key' 'keyless user file: the passed key wins'
+Assert-Eq $script:Email 'stored@example.com' 'keyless user file: stored actor email kept'
+Assert-Eq $script:Name 'Stored Name' 'keyless user file: stored actor name kept'
+Assert-Eq $script:BaseUrl 'https://api.example.invalid' 'keyless user file: stored base URL adopted'
 
 $env:ROGUE_API_KEY = $prevKey
 $env:USERPROFILE = $prevProfile

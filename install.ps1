@@ -374,9 +374,10 @@ function Read-EnvFileValues {
     return $vals
 }
 
-# Same rule as Test-RogueEnvFile -System (scripts/shared/env-file.ps1), inlined
-# because this installer is one downloaded file: owned by SYSTEM or Administrators
-# (root off Windows), writable by nobody else.
+# The machine file is policy: only SYSTEM or Administrators (root off Windows) may
+# own it, and nobody else may write it - the current user included, or a standard
+# user with a write ACE could replace the key the MDM pushed. Inlined rather than
+# taken from scripts/shared/env-file.ps1 because this installer is one downloaded file.
 function Test-MachineEnvTrusted {
     param([string]$Path)
     try {
@@ -391,21 +392,22 @@ function Test-MachineEnvTrusted {
         }
         $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
         $admins = @('S-1-5-18', 'S-1-5-32-544')
-        $trusted = @($admins) + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $admins) { return $false }
         $write = [System.Security.AccessControl.FileSystemRights]'Write, Delete, ChangePermissions, TakeOwnership, DeleteSubdirectoriesAndFiles'
         foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and
-                $rule.IdentityReference.Value -notin $trusted) { return $false }
+                $rule.IdentityReference.Value -notin $admins) { return $false }
         }
         return $true
     } catch { return $false }
 }
 
-# Load existing creds from the user env file when it holds ROGUE_API_KEY, as the
-# dispatcher reads it.
+# Load existing settings from the user env file, as the dispatcher reads it. Not
+# only a keyed file: a user file with no ROGUE_API_KEY can still carry the
+# ROGUE_BASE_URL validation must use and the ROGUE_ACTOR_* identity
+# Write-UserEnvFile would otherwise replace from the cascade.
 function Load-ExistingCreds {
-    if (-not (Test-EnvFileHasKey $script:EnvFile)) { return }
+    if (-not (Test-Path -LiteralPath $script:EnvFile -PathType Leaf)) { return }
     $vals = Read-EnvFileValues $script:EnvFile
     if (-not $script:ApiKey) { $script:ApiKey = $vals['ROGUE_API_KEY'] }
     if (-not $script:Email -and $vals['ROGUE_ACTOR_EMAIL']) { $script:Email = $vals['ROGUE_ACTOR_EMAIL'] }
