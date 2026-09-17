@@ -6,10 +6,8 @@
 # duplicated six times (the repo has no shared library) and a copy/paste drift in
 # any one of them is invisible until someone reads a customer's log.
 #
-# Everything here runs on the UNCONFIGURED path (ROGUE_API_KEY empty), so no mock
-# server and no network are needed: a dispatcher with no key still logs
-# `outcome=unconfigured` and fails open. HOME is redirected per case so the
-# developer's real ~/.rogue is never touched.
+# Most cases use an empty API key; the env-file case uses the local test receiver.
+# HOME is redirected per case so the developer's real ~/.rogue is never touched.
 #
 # Run under dash as well as bash: `sh tests/test_hook_logs.sh`.
 # Set SH=dash to force a specific shell for the dispatchers under test.
@@ -22,9 +20,14 @@ TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/rogue-logtest.XXXXXX")"
 # Split, not one trap for all three: a bare `trap 'rm -rf …' INT` runs the handler
 # and then CONTINUES with the next statement, so a Ctrl-C would delete the fixtures
 # and let every remaining case run against them.
-trap 'rm -rf "$TMPROOT"' EXIT
-trap 'rm -rf "$TMPROOT"; exit 130' INT
-trap 'rm -rf "$TMPROOT"; exit 143' TERM
+RECEIVER_PID=""
+cleanup() {
+  if [ -n "$RECEIVER_PID" ]; then kill "$RECEIVER_PID" 2>/dev/null; wait "$RECEIVER_PID" 2>/dev/null; fi
+  rm -rf "$TMPROOT"
+}
+trap 'cleanup' EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 pass() { echo "  ok: $1"; }
 fail() { echo "FAIL: $1"; FAILS=$((FAILS + 1)); }
@@ -267,22 +270,30 @@ done
 
 echo
 echo "== ~/.rogue-env can relocate the log (env FILE, not just process env)"
-# Only the env file holding ROGUE_API_KEY is read, so the case stages one (with a
-# dead local base URL, so the configured dispatcher POSTs nowhere real), and every
-# dispatcher resolves its log destination AFTER reading that file. The
-# process-env cases above cannot catch a dispatcher that reads its own environment
-# too early: `plugins/gemini/scripts/hook.mjs` did exactly that (module-level
-# consts, while loadEnvFiles() runs later and returns a merged object WITHOUT
-# mutating process.env), so ~/.rogue-env was silently ignored there.
-for slug in $SLUGS; do
-  home="$TMPROOT/envfile-$slug"; mkdir -p "$home/custom"
-  printf 'export ROGUE_API_KEY=k\nexport ROGUE_BASE_URL=http://127.0.0.1:1\nexport ROGUE_LOG_DIR=%s\n' \
-    "$home/custom" > "$home/.rogue-env"
-  chmod 600 "$home/.rogue-env"
-  fire "$slug" "$home"
-  got=$(find "$home" -name '*.log' 2>/dev/null | sed "s|^$home||" | sort | tr '\n' ' ')
-  check "$slug honors ROGUE_LOG_DIR from ~/.rogue-env" "/custom/$slug.log " "$got"
-done
+# A legacy-server response permits logging without weakening enrollment failure handling.
+if command -v node >/dev/null 2>&1; then
+  recv="$TMPROOT/receiver"
+  node "$REPO/tests/e2e_receiver.mjs" "$recv" >"$TMPROOT/receiver.out" 2>&1 &
+  RECEIVER_PID=$!
+  waited=0
+  while [ ! -s "$recv/port" ]; do
+    waited=$((waited + 1))
+    [ "$waited" -gt 100 ] && { fail "the receiver never started"; exit 1; }
+    sleep 0.1
+  done
+  base="http://127.0.0.1:$(cat "$recv/port")"
+  for slug in $SLUGS; do
+    home="$TMPROOT/envfile-$slug"; mkdir -p "$home/custom"
+    printf 'export ROGUE_API_KEY=e2e-key\nexport ROGUE_BASE_URL=%s\nexport ROGUE_LOG_DIR=%s\n' \
+      "$base" "$home/custom" > "$home/.rogue-env"
+    chmod 600 "$home/.rogue-env"
+    fire "$slug" "$home"
+    got=$(find "$home" -name '*.log' 2>/dev/null | sed "s|^$home||" | sort | tr '\n' ' ')
+    check "$slug honors ROGUE_LOG_DIR from ~/.rogue-env" "/custom/$slug.log " "$got"
+  done
+else
+  echo "NOTE: node not found — skipping the env-file log-location case"
+fi
 
 echo
 echo "== a zero-padded zero cap (00) disables rotation, like 0"
