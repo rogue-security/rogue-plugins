@@ -49,10 +49,13 @@ POSTs `/api/v1/hooks/status` with `host` (`hostname`), `actor_email`, `actor_nam
 and `agent_family`. A shipped log chunk carrying those same fields is attributable
 with no `machine_id` at all — provided the shipper uses the *same* values, which is a
 contract and not a coincidence: it **inherits** them from the caller rather than
-running its own cascade. Cursor and Gemini keep their actor resolution inline
-(shell locals / module locals) and their fallbacks differ from `actor.sh`'s, so an
-independently-resolving shipper would produce a second identity for the same machine
-and orphan the logs. See **The actor is passed IN** in
+running its own cascade. Gemini keeps its actor resolution inline (module locals)
+and the Claude bridge's `actor.sh` screens sandbox identities the others do not, so
+an independently-resolving shipper could produce a second identity for the same
+machine and orphan the logs. Every level of the cascade is set by the local user (env
+file, `~/.gitconfig`, login), so `actor_email` is a self-reported label and never an
+authenticated principal; the API key and the enrolled endpoint are what attribute a
+row to an organization. See **The actor is passed IN** in
 [plugin-log-shipper.md](plugin-log-shipper.md).
 
 **Correction to an earlier version of this section**, which claimed the roster
@@ -135,10 +138,10 @@ which is literally "a task that runs on a single computer in a fleet".
 **Which files.** Resolve the log directory the same way the dispatchers do, or the
 agent reads a path nothing writes to:
 
-1. `ROGUE_LOG_DIR` / `ROGUE_LOG_FILE` from the shared env-file chain
-   (`/etc/rogue/env` or `C:\ProgramData\rogue\env`, then `~/.rogue-env`) — the
-   MDM files are the ones that matter here, and phase 1 made all eleven
-   dispatchers honor them.
+1. `ROGUE_LOG_DIR` / `ROGUE_LOG_FILE` from the env file in use (the first of
+   `/etc/rogue/env` or `C:\ProgramData\rogue\env`, the bundled `env`, and
+   `~/.rogue-env` that holds `ROGUE_API_KEY`) — the MDM file is the one that
+   matters here, and phase 1 made all eleven dispatchers honor it.
 2. Otherwise `~/.rogue/logs/` (`%USERPROFILE%\.rogue\logs\`).
 
 **`ROGUE_LOG_FILE` is an exact path and takes precedence over the glob** — when it

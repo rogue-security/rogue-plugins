@@ -150,10 +150,12 @@ if ($chmod) {
     Write-Host '  skip: chmod not available (failed-write case)'
 }
 
-$saveEnvFile = $env:ROGUE_ENV_FILE
+# The writers take the file from %USERPROFILE%, the only place the readers look.
+$saveSetupProfile = $env:USERPROFILE
 foreach ($plugin in @('rogue', 'cursor')) {
-    $path = New-SeededFile "$plugin.env"
-    $env:ROGUE_ENV_FILE = $path
+    New-Item -ItemType Directory -Path (Join-Path $sandbox "$plugin-home") -Force | Out-Null
+    $path = New-SeededFile "$plugin-home/.rogue-env"
+    $env:USERPROFILE = Join-Path $sandbox "$plugin-home"
     & (Join-Path $repo "plugins/$plugin/scripts/setup.ps1") 'new-key' 'new@example.com' 'New Name' `
         -WarningAction SilentlyContinue | Out-Null
     Check "${plugin}: api key replaced" 'new-key'               (Get-EnvValue $path 'ROGUE_API_KEY')
@@ -161,7 +163,7 @@ foreach ($plugin in @('rogue', 'cursor')) {
     Check "${plugin}: log dir kept"     '/var/log/rogue'        (Get-EnvValue $path 'ROGUE_LOG_DIR')
     Check "${plugin}: one header line"  1 (Count-Matching $path 'Read by hook subprocesses')
 }
-$env:ROGUE_ENV_FILE = $saveEnvFile
+$env:USERPROFILE = $saveSetupProfile
 
 foreach ($plugin in @('rogue', 'codex', 'cursor', 'copilot', 'antigravity')) {
     $text = Get-Content -Raw -LiteralPath (Join-Path $repo "plugins/$plugin/scripts/setup.ps1")
@@ -187,8 +189,10 @@ $installer = Get-Content -Raw -LiteralPath (Join-Path $repo 'install.ps1')
 Check 'install.ps1: merges existing lines' $true ($installer -match 'foreach \(\$line in \(Get-Content -LiteralPath \$EnvFile')
 Check 'install.ps1: reads the merge source as UTF-8' $true `
     ($installer -match 'Get-Content -LiteralPath \$EnvFile -Encoding UTF8')
+$readValuesFn = [regex]::Match($installer, '(?ms)^function Read-EnvFileValues \{.*?^\}').Value
+Check 'install.ps1: Read-EnvFileValues located' $true ($readValuesFn.Length -gt 0)
 Check 'install.ps1: reads existing creds as UTF-8' $true `
-    ($installer -match 'Get-Content -LiteralPath \$f -Encoding UTF8')
+    ($readValuesFn -match 'Get-Content -LiteralPath \$Path -Encoding UTF8')
 
 $dispatcher = Get-Content -Raw -LiteralPath (Join-Path $repo 'plugins/rogue/scripts/hook.ps1')
 function Get-NormalizedFunction {
@@ -210,12 +214,17 @@ $loadFn = [regex]::Match($installer, '(?ms)^function Load-ExistingCreds \{.*?^\}
 Check 'install.ps1: Load-ExistingCreds located' $true ($loadFn.Length -gt 0)
 $unquoteFn = [regex]::Match($installer, '(?ms)^function ConvertFrom-ShellQuoted \{.*?^\}').Value
 Check 'install.ps1: ConvertFrom-ShellQuoted located' $true ($unquoteFn.Length -gt 0)
+$hasKeyFn = [regex]::Match($installer, '(?ms)^function Test-EnvFileHasKey \{.*?^\}').Value
+Check 'install.ps1: Test-EnvFileHasKey located' $true ($hasKeyFn.Length -gt 0)
 . ([scriptblock]::Create($unquoteFn))
+. ([scriptblock]::Create($hasKeyFn))
+. ([scriptblock]::Create($readValuesFn))
 . ([scriptblock]::Create($loadFn))
 
 $ROGUE_BASE_URL_DEFAULT = 'https://api.rogue.security'
 $saveProfile = $env:USERPROFILE
 $env:USERPROFILE = $sandbox
+$EnvFile = Join-Path $env:USERPROFILE '.rogue-env'
 [System.IO.File]::WriteAllText((Join-Path $sandbox '.rogue-env'), $seed + "`n",
     (New-Object System.Text.UTF8Encoding($false)))
 
@@ -269,11 +278,13 @@ $env:USERPROFILE = $saveProfile
 
 $bash = Get-Command bash -ErrorAction SilentlyContinue
 if ($bash) {
-    $shFile = New-SeededFile 'cmp-sh.env'
+    New-Item -ItemType Directory -Path (Join-Path $sandbox 'cmp-sh') -Force | Out-Null
+    $shFile = New-SeededFile 'cmp-sh/.rogue-env'
     $psFile = New-SeededFile 'cmp-ps.env'
-    $env:ROGUE_ENV_FILE = $shFile
+    $saveShHome = $env:HOME
+    $env:HOME = Join-Path $sandbox 'cmp-sh'
     & $bash.Source (Join-Path $repo 'plugins/rogue/scripts/setup.sh') 'new-key' 'new@example.com' 'New Name' | Out-Null
-    $env:ROGUE_ENV_FILE = $saveEnvFile
+    $env:HOME = $saveShHome
     Write-RogueEnvFile -Path $psFile -Values ([ordered]@{
         ROGUE_API_KEY     = 'new-key'
         ROGUE_ACTOR_EMAIL = 'new@example.com'
@@ -348,6 +359,149 @@ Check 'install.ps1: merge read fails loudly' $true `
 Check 'library: merge read fails loudly' $true `
     ((Get-Content -Raw -LiteralPath (Join-Path $repo 'scripts/shared/env-file.ps1')) -match `
         'Get-Content -LiteralPath \$Path -Encoding UTF8 -ErrorAction Stop')
+
+# -- The machine env file (FIRE-2135) -----------------------------------------
+# A trusted machine env file holding ROGUE_API_KEY is read ALONE by every
+# dispatcher, so setup writes no user env file, names that file and exits 0.
+# Each plugin's setup.ps1 runs from a COPY whose machine path literal points into
+# the sandbox, beside the real env-file.ps1 it loads. Off Windows a `stat` shim on
+# PATH reports the file as root-owned; on Windows its owner is set to
+# Administrators - the only way to stage the machine candidate without root.
+$machineRoot = Join-Path $sandbox 'machine'
+New-Item -ItemType Directory -Path $machineRoot -Force | Out-Null
+$MachineEnvFile = Join-Path $machineRoot 'machine-env'
+$unix = $PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows
+$prevPath = $env:PATH
+if ($unix) {
+    $mbin = Join-Path $machineRoot 'bin'
+    New-Item -ItemType Directory -Path $mbin -Force | Out-Null
+    $realStat = (Get-Command stat -CommandType Application | Select-Object -First 1).Source
+    [System.IO.File]::WriteAllText((Join-Path $mbin 'stat'), @"
+#!/usr/bin/env bash
+for a in "`$@"; do
+  if [ "`$a" = "$MachineEnvFile" ]; then
+    if "$realStat" --version >/dev/null 2>&1; then mode="`$("$realStat" -c %a "`$a")"; else mode="`$("$realStat" -f %Lp "`$a")"; fi
+    printf '%s %s\n' "`${ROGUE_TEST_MACHINE_OWNER:-0}" "`$mode"; exit 0
+  fi
+done
+exec "$realStat" "`$@"
+"@)
+    & chmod +x (Join-Path $mbin 'stat')
+    $env:PATH = "$mbin$([System.IO.Path]::PathSeparator)$env:PATH"
+}
+
+# Trusted = owned by root/Administrators and writable by no one else; untrusted =
+# the same file a standard user could rewrite, which would let them replace the
+# key the MDM pushed. Recreated rather than overwritten: the previous call leaves
+# an ACL this process may not be able to write through.
+function Set-SetupMachineFile {
+    param([string]$Content, [switch]$Untrusted)
+    Remove-Item -LiteralPath $MachineEnvFile -Force -ErrorAction SilentlyContinue
+    [System.IO.File]::WriteAllText($MachineEnvFile, $Content)
+    if ($unix) {
+        if ($Untrusted) { & chmod 666 $MachineEnvFile } else { & chmod 644 $MachineEnvFile }
+        return
+    }
+    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $rights = 'Read'
+    if ($Untrusted) { $rights = 'Read, Write' }
+    $acl = Get-Acl -LiteralPath $MachineEnvFile
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner($admins)
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins, 'FullControl', 'Allow')))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, $rights, 'Allow')))
+    Set-Acl -LiteralPath $MachineEnvFile -AclObject $acl
+}
+
+function New-RedirectedSetup {
+    param([string]$Plugin)
+    $dir = Join-Path $machineRoot (Join-Path $Plugin 'scripts')
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo "plugins/$Plugin/scripts/env-file.ps1") -Destination $dir
+    $src = [System.IO.File]::ReadAllText((Join-Path $repo "plugins/$Plugin/scripts/setup.ps1"))
+    $out = $src.Replace("`$MachineEnvFile = 'C:\ProgramData\rogue\env'", "`$MachineEnvFile = '$MachineEnvFile'")
+    Check "${Plugin}: machine path redirected for the test" $true ($out -ne $src)
+    $path = Join-Path $dir 'setup.ps1'
+    [System.IO.File]::WriteAllText($path, $out)
+    return $path
+}
+
+# Invoke-Setup <script> <home> [args] -> the script's output as one string, with
+# the exit code in $script:setupRc and a freshly emptied %USERPROFILE%.
+function Invoke-Setup {
+    param([string]$Script, [string]$Home2, [string[]]$Arguments)
+    Remove-Item -Recurse -Force -LiteralPath $Home2 -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $Home2 -Force | Out-Null
+    $env:USERPROFILE = $Home2
+    $global:LASTEXITCODE = 0
+    $text = & $Script @Arguments -WarningAction SilentlyContinue 3>&1 | Out-String -Width 4096
+    $script:setupRc = $LASTEXITCODE
+    return $text
+}
+
+# codex/copilot/antigravity refuse to replace the user env file unless the ACL is
+# applied, which needs Set-Acl - Windows only. Their unchanged-path cases run in
+# the Windows job; the machine-file skip happens before any write, so it runs
+# everywhere.
+$canProtect = [bool](Get-Command Set-Acl -ErrorAction SilentlyContinue)
+$saveMachineProfile = $env:USERPROFILE
+foreach ($plugin in @('rogue', 'codex', 'cursor', 'copilot', 'antigravity')) {
+    $setup = New-RedirectedSetup $plugin
+    $home2 = Join-Path $machineRoot (Join-Path $plugin 'home')
+    $userFile = Join-Path $home2 '.rogue-env'
+
+    # 1. Trusted machine file with a key: no write, exit 0, the file is named.
+    Set-SetupMachineFile "export ROGUE_API_KEY='machine-key'`n"
+    $out = Invoke-Setup $setup $home2 @('new-key', 'e@x.io', 'N')
+    Check "${plugin}: keyed machine file exits 0" 0 $script:setupRc
+    Check "${plugin}: keyed machine file writes no user file" $false (Test-Path -LiteralPath $userFile)
+    Check "${plugin}: keyed machine file is named once" 1 `
+        ([regex]::Matches($out, [regex]::Escape("machine env file $MachineEnvFile")).Count)
+    Check "${plugin}: keyed machine file reported as the env file" $true `
+        ($out -match ([regex]::Escape("ENV_FILE=$MachineEnvFile")))
+
+    # An MDM machine has no key to pass, and setup must still succeed.
+    $out = Invoke-Setup $setup $home2 @()
+    Check "${plugin}: keyed machine file needs no api key argument" 0 $script:setupRc
+    Check "${plugin}: keyed machine file, no argument, no user file" $false (Test-Path -LiteralPath $userFile)
+
+    if (-not $canProtect -and $plugin -in @('codex', 'copilot', 'antigravity')) {
+        Write-Host "  skip: ${plugin}: Set-Acl unavailable (unchanged-path cases)"
+    } else {
+        # 2. No machine file: unchanged.
+        Remove-Item -LiteralPath $MachineEnvFile -Force -ErrorAction SilentlyContinue
+        $out = Invoke-Setup $setup $home2 @('new-key', 'e@x.io', 'N')
+        Check "${plugin}: no machine file exits 0" 0 $script:setupRc
+        Check "${plugin}: no machine file writes the user file" 'new-key' (Get-EnvValue $userFile 'ROGUE_API_KEY')
+        Check "${plugin}: no machine file names none" $false ($out -match 'machine env file')
+
+        # 3. Machine file without a key: unchanged.
+        Set-SetupMachineFile "export ROGUE_ACTOR_EMAIL='mdm@example.com'`n# ROGUE_API_KEY='commented-out'`nexport ROGUE_API_KEY=`n"
+        $out = Invoke-Setup $setup $home2 @('new-key', 'e@x.io', 'N')
+        Check "${plugin}: keyless machine file writes the user file" 'new-key' (Get-EnvValue $userFile 'ROGUE_API_KEY')
+        Check "${plugin}: keyless machine file names none" $false ($out -match 'machine env file')
+
+        # 4. Keyed but writable by a standard user: untrusted, so unchanged.
+        Set-SetupMachineFile "export ROGUE_API_KEY='machine-key'`n" -Untrusted
+        $out = Invoke-Setup $setup $home2 @('new-key', 'e@x.io', 'N')
+        Check "${plugin}: untrusted machine file writes the user file" 'new-key' (Get-EnvValue $userFile 'ROGUE_API_KEY')
+        Check "${plugin}: untrusted machine file names none" $false ($out -match 'machine env file')
+
+        # 5. Keyed and mode-clean, but not owned by root: untrusted too (POSIX only -
+        # on Windows the owner is part of the ACL the case above already rebuilds).
+        if ($unix) {
+            Set-SetupMachineFile "export ROGUE_API_KEY='machine-key'`n"
+            $env:ROGUE_TEST_MACHINE_OWNER = '1000'
+            $out = Invoke-Setup $setup $home2 @('new-key', 'e@x.io', 'N')
+            $env:ROGUE_TEST_MACHINE_OWNER = $null
+            Check "${plugin}: non-root machine file writes the user file" 'new-key' (Get-EnvValue $userFile 'ROGUE_API_KEY')
+        }
+    }
+    Remove-Item -LiteralPath $MachineEnvFile -Force -ErrorAction SilentlyContinue
+}
+$env:USERPROFILE = $saveMachineProfile
+$env:PATH = $prevPath
 
 Remove-Item -Recurse -Force $sandbox -ErrorAction SilentlyContinue
 if ($script:fails -gt 0) { Write-Host "$($script:fails) check(s) failed"; exit 1 }

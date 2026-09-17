@@ -21,15 +21,30 @@ function Test-RogueEnvFile {
         $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $admins = @('S-1-5-18', 'S-1-5-32-544')
         $trusted = @($admins) + $user
+        # The machine file accepts only SYSTEM and Administrators as writers; the user file also accepts its owner.
+        $writers = if ($System) { $admins } else { $trusted }
         $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
         if ($owner -notin $trusted -or ($System -and $owner -notin $admins)) { return $false }
         $write = [System.Security.AccessControl.FileSystemRights]'Write, Delete, ChangePermissions, TakeOwnership, DeleteSubdirectoriesAndFiles'
         foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and
-                $rule.IdentityReference.Value -notin $trusted) { return $false }
+                $rule.IdentityReference.Value -notin $writers) { return $false }
         }
         return $true
     } catch { return $false }
+}
+
+# A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty
+# value - the same test every reader makes before selecting it.
+function Test-RogueEnvFileHasKey {
+    param([string]$Path)
+    # Guard the read: -Encoding is a FileSystem-provider dynamic parameter, and a
+    # Windows machine path evaluated off Windows resolves to no provider at all.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        if ($line -match '^\s*(?:export\s+)?ROGUE_API_KEY=["'']?[^"''\s]') { return $true }
+    }
+    return $false
 }
 
 function Read-RogueEnvFile {

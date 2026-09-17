@@ -29,6 +29,14 @@ mkdir -p "$PLUGIN/.claude-plugin" "$PLUGIN/scripts" "$STAGE/bin"
 printf '{\n  "name": "rogue",\n  "version": "9.9.9"\n}\n' > "$PLUGIN/.claude-plugin/plugin.json"
 cp "$ACTOR" "$PLUGIN/scripts/actor.sh"
 cp "$SURFACE" "$PLUGIN/scripts/surface.sh"
+cp "$REPO/plugins/rogue/scripts/git-identity.sh" "$PLUGIN/scripts/git-identity.sh"
+
+# `env -i` clears USER, so the login level of the cascade ends at whoami; pin it.
+cat > "$STAGE/bin/whoami" <<'EOF'
+#!/bin/sh
+echo jane
+EOF
+chmod +x "$STAGE/bin/whoami"
 
 # The credential file a compiled bundle leaves behind, carrying the pre-seed that
 # poisons ROGUE_ACTOR_* with the sandbox's git identity.
@@ -121,11 +129,19 @@ assert_lacks 'Actor email: noreply@anthropic.com' "$out" "Step 4 never shows the
 assert_lacks 'Actor name:  Claude'                "$out" "Step 4 never shows the rejected env-file name"
 assert_has  'note: env file holds'            "$out" "Step 4 flags that the env file was superseded"
 
-# With nothing resolvable, the marker is reported — not "(unset)", which used to
-# be followed by advice claiming events POST with blank actor headers.
+# With no identity anywhere, the login stands in — not "(unset)", which used to be
+# followed by advice claiming events POST with blank actor headers.
 out=$(run4)
-assert_has  'Actor email: unknown@' "$out" "Step 4 reports the unknown marker when nothing resolves"
-assert_lacks '(unset)'              "$out" "Step 4 never reports an unset actor"
+assert_has  'Actor email: jane@' "$out" "Step 4 reports login@host when nothing else resolves"
+assert_has  'Actor name:  jane'  "$out" "Step 4 reports the login as the name"
+assert_lacks '(unset)'           "$out" "Step 4 never reports an unset actor"
+
+# The git identity comes from ~/.gitconfig as a file, the same as the hooks read it.
+printf '[user]\n\temail = jane@corp.com\n\tname = Jane Dev\n' > "$FAKE_HOME/.gitconfig"
+out=$(run4)
+assert_has  'Actor email: jane@corp.com' "$out" "Step 4 reports the ~/.gitconfig identity"
+assert_has  'Actor name:  Jane Dev'      "$out" "Step 4 reports the ~/.gitconfig name"
+rm -f "$FAKE_HOME/.gitconfig"
 
 [ "$fails" -eq 0 ] || { echo "$fails failure(s)"; exit 1; }
 echo "all status skill tests passed"

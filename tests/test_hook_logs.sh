@@ -267,15 +267,17 @@ done
 
 echo
 echo "== ~/.rogue-env can relocate the log (env FILE, not just process env)"
-# The documented precedence is bundled env -> MDM -> ~/.rogue-env -> process env,
-# and every dispatcher resolves its log destination AFTER reading those files. The
+# Only the env file holding ROGUE_API_KEY is read, so the case stages one (with a
+# dead local base URL, so the configured dispatcher POSTs nowhere real), and every
+# dispatcher resolves its log destination AFTER reading that file. The
 # process-env cases above cannot catch a dispatcher that reads its own environment
 # too early: `plugins/gemini/scripts/hook.mjs` did exactly that (module-level
 # consts, while loadEnvFiles() runs later and returns a merged object WITHOUT
 # mutating process.env), so ~/.rogue-env was silently ignored there.
 for slug in $SLUGS; do
   home="$TMPROOT/envfile-$slug"; mkdir -p "$home/custom"
-  printf 'export ROGUE_LOG_DIR=%s\n' "$home/custom" > "$home/.rogue-env"
+  printf 'export ROGUE_API_KEY=k\nexport ROGUE_BASE_URL=http://127.0.0.1:1\nexport ROGUE_LOG_DIR=%s\n' \
+    "$home/custom" > "$home/.rogue-env"
   chmod 600 "$home/.rogue-env"
   fire "$slug" "$home"
   got=$(find "$home" -name '*.log' 2>/dev/null | sed "s|^$home||" | sort | tr '\n' ' ')

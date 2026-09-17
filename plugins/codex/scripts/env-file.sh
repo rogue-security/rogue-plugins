@@ -12,6 +12,12 @@ rogue_env_is_trusted() (
   [ "$((0$mode & 022))" = 0 ]
 )
 
+# A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty
+# value - the same test every reader makes before selecting it.
+rogue_env_has_key() { # rogue_env_has_key <file>
+  [ -r "$1" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$1"
+}
+
 rogue_source_env() {
   if rogue_env_is_trusted "$1" "${2:-0}"; then
     . "$1"

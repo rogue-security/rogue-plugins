@@ -3,8 +3,8 @@
 #
 # The resulting zip can be dragged into Claude Code without the customer
 # running /rogue:setup — the API key is baked into an `env` file at the
-# plugin root, sourced by every hook before the standard locations
-# (/etc/rogue/env and ~/.rogue-env, which still override if present).
+# plugin root, which every hook sources when no /etc/rogue/env holds a key
+# (~/.rogue-env is then not read at all).
 #
 # Actor identity (email/name) is intentionally NOT compiled in. It is
 # derived per-user at hook-fire time from git config / $USER on the

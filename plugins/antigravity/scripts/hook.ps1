@@ -25,9 +25,10 @@
 # file), $PSCommandPath is empty — hooks.json passes the plugin root
 # ((Get-Location).Path) as the 2nd argument instead.
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. <PluginRoot>\env            (baked into a compiled customer plugin)
-#   2. C:\ProgramData\rogue\env    (MDM-provisioned; mirrors /etc/rogue/env)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. C:\ProgramData\rogue\env    (machine, MDM-provisioned; mirrors /etc/rogue/env)
+#   2. <PluginRoot>\env            (bundled into a compiled customer plugin)
 #   3. %USERPROFILE%\.rogue-env    (user / installer-written)
 
 param([string]$EventName = '', [string]$PluginRoot = '')
@@ -149,8 +150,8 @@ function Resolve-PluginRoot {
 # for a fleet that relocates logs by policy AND would make the log shipper and the
 # dispatcher disagree on the path.
 function Initialize-Logging {
-    # $Creds is the merged credential map (bundled env → MDM → per-user file, then
-    # process env last), so precedence is already correct by the time we read it.
+    # $Creds is the resolved credential map (process env, then the chosen env file
+    # over it), so precedence is already correct by the time we read it.
     # $HOME backs up USERPROFILE so this also works dot-sourced on macOS/Linux
     # through the ROGUE_PS_LIB_ONLY seam (tests) — without it $logFile resolves to
     # $null there and every line is silently dropped.
@@ -243,22 +244,29 @@ function Log {
     } catch {}
 }
 
-# ── credential resolution (later file wins; process env wins over all) ─────
+# ── credential resolution ──────────────────────────────────────────────────
 function Import-Credentials {
     $script:creds = @{}
-    foreach ($f in @((Join-Path $PluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-        foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $script:creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            }
-        }
-    }
-    # ROGUE_LOG_* ride the same list so a process-env value still beats the files,
-    # which is what makes the resolved precedence identical to hook.sh's load_env.
+    # Fail open: with no readable helper, leave a no-op reader behind so the env
+    # files are skipped instead of the whole credential block dying on the load.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+    catch { function Read-RogueEnvFile { param([string]$Path) } }
     foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL','ROGUE_API_URL',
                    'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
         $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $script:creds[$k] = $val }
+    }
+    # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+    foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $PluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+        $fileVals = @{}
+        foreach ($line in (Read-RogueEnvFile $f)) {
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+                $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+            }
+        }
+        if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+        foreach ($k in $fileVals.Keys) { $script:creds[$k] = $fileVals[$k] }
+        break
     }
     $script:apiKey = $script:creds['ROGUE_API_KEY']
 }
@@ -282,18 +290,22 @@ function Resolve-Url {
     }
 }
 
-# ── actor resolution (mirrors actor.sh) ────────────────────────────────────
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values, or the marker, never a blank.
 function Resolve-Actor {
-    $script:actorName = $creds['ROGUE_ACTOR_NAME']
-    if (-not $script:actorName) { try { $script:actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-    if (-not $script:actorName) { $script:actorName = $env:USERNAME }
-
-    $script:actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-    if (-not $script:actorEmail) { try { $script:actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-    if (-not $script:actorEmail) {
-        if ($env:USERNAME -and $env:COMPUTERNAME) { $script:actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-        elseif ($env:USERNAME) { $script:actorEmail = $env:USERNAME } else { $script:actorEmail = $env:COMPUTERNAME }
-    }
+    $actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+    try {
+        $actorLib = Join-Path $script:pluginRoot 'scripts\actor.ps1'
+        if (Test-Path -LiteralPath $actorLib) {
+            . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+            $actor = Resolve-RogueSharedActor $creds $script:pluginRoot
+        }
+    } catch {}
+    $script:actorName  = [string]$actor.Name
+    $script:actorEmail = [string]$actor.Email
+    if (-not $script:actorName)  { $script:actorName  = 'unknown' }
+    if (-not $script:actorEmail) { $script:actorEmail = 'unknown' }
 }
 
 # ── payload from stdin (recover UTF-8, strip BOM) ──────────────────────────

@@ -41,9 +41,9 @@ check "posix: base url kept"  "http://localhost:8007" "$(sourced "$posix_env" RO
 
 for plugin in rogue codex cursor copilot antigravity; do
   script="$REPO/plugins/$plugin/scripts/setup.sh"
-  env_file="$SANDBOX/$plugin.env"
+  env_file="$SANDBOX/$plugin/.rogue-env"; mkdir -p "${env_file%/*}"
   seed "$env_file"
-  ROGUE_ENV_FILE="$env_file" bash "$script" "new-key" "new@example.com" "New Name" >/dev/null
+  HOME="${env_file%/*}" bash "$script" "new-key" "new@example.com" "New Name" >/dev/null
 
   check "$plugin: api key replaced"       "new-key"                 "$(sourced "$env_file" ROGUE_API_KEY)"
   check "$plugin: actor email replaced"   "new@example.com"         "$(sourced "$env_file" ROGUE_ACTOR_EMAIL)"
@@ -57,27 +57,27 @@ for plugin in rogue codex cursor copilot antigravity; do
   check "$plugin: mode 600"               "600"                     "$(perl -e 'printf "%o", (stat($ARGV[0]))[2] & 07777' "$env_file")"
 done
 
-codex_env="$SANDBOX/codex-surface.env"
+codex_env="$SANDBOX/codex-surface/.rogue-env"; mkdir -p "${codex_env%/*}"
 seed "$codex_env"
 printf "export ROGUE_CODEX_SURFACE='codex_cli'\n" >> "$codex_env"
-ROGUE_ENV_FILE="$codex_env" bash "$REPO/plugins/codex/scripts/setup.sh" \
+HOME="${codex_env%/*}" bash "$REPO/plugins/codex/scripts/setup.sh" \
   "k" "e@x.io" "N" "codex_app" >/dev/null
 check "codex: surface replaced"     "codex_app" "$(sourced "$codex_env" ROGUE_CODEX_SURFACE)"
 check "codex: one surface line"     "1"         "$(count_lines "$codex_env" '^export ROGUE_CODEX_SURFACE=')"
 check "codex: base url kept"        "http://localhost:8007" "$(sourced "$codex_env" ROGUE_BASE_URL)"
 
 if command -v node >/dev/null 2>&1; then
-  gem_env="$SANDBOX/gemini.env"
+  gem_env="$SANDBOX/gemini/.rogue-env"; mkdir -p "${gem_env%/*}"
   seed "$gem_env"
-  ROGUE_ENV_FILE="$gem_env" node "$REPO/plugins/gemini/scripts/setup.mjs" \
+  HOME="${gem_env%/*}" node "$REPO/plugins/gemini/scripts/setup.mjs" \
     "new-key" "new@example.com" "New Name" >/dev/null
   check "gemini: api key replaced"  "new-key"               "$(sourced "$gem_env" ROGUE_API_KEY)"
   check "gemini: base url kept"     "http://localhost:8007" "$(sourced "$gem_env" ROGUE_BASE_URL)"
   check "gemini: one header line"   "1"                     "$(count_lines "$gem_env" 'Read by hook subprocesses')"
 
-  sh_env="$SANDBOX/rogue-compare.env"
+  sh_env="$SANDBOX/rogue-compare/.rogue-env"; mkdir -p "${sh_env%/*}"
   seed "$sh_env"
-  ROGUE_ENV_FILE="$sh_env" bash "$REPO/plugins/rogue/scripts/setup.sh" \
+  HOME="${sh_env%/*}" bash "$REPO/plugins/rogue/scripts/setup.sh" \
     "new-key" "new@example.com" "New Name" >/dev/null
   if cmp -s "$sh_env" "$gem_env"; then echo "  ok: sh and node writers agree byte for byte"
   else echo "FAIL: sh and node writers disagree"; diff "$sh_env" "$gem_env" || :; fails=$((fails + 1)); fi
@@ -85,16 +85,16 @@ else
   echo "  skip: node not installed (gemini writer)"
 fi
 
-odd_env="$SANDBOX/odd.env"
+odd_env="$SANDBOX/odd/.rogue-env"; mkdir -p "${odd_env%/*}"
 seed "$odd_env"
-ROGUE_ENV_FILE="$odd_env" bash "$REPO/plugins/rogue/scripts/setup.sh" \
+HOME="${odd_env%/*}" bash "$REPO/plugins/rogue/scripts/setup.sh" \
   "key'with'quotes" "o'brien@example.com" "O'Brien" >/dev/null
 check "quoted key round-trips"   "key'with'quotes"     "$(sourced "$odd_env" ROGUE_API_KEY)"
 check "quoted name round-trips"  "O'Brien"             "$(sourced "$odd_env" ROGUE_ACTOR_NAME)"
 check "quoted seed still kept"   "http://localhost:8007" "$(sourced "$odd_env" ROGUE_BASE_URL)"
 
-fresh_env="$SANDBOX/fresh/nested.env"
-ROGUE_ENV_FILE="$fresh_env" bash "$REPO/plugins/rogue/scripts/setup.sh" \
+fresh_env="$SANDBOX/fresh/nested/.rogue-env"
+HOME="${fresh_env%/*}" bash "$REPO/plugins/rogue/scripts/setup.sh" \
   "k" "e@x.io" "N" >/dev/null
 check "fresh file written"   "k"   "$(sourced "$fresh_env" ROGUE_API_KEY)"
 check "fresh file mode 600"  "600" "$(perl -e 'printf "%o", (stat($ARGV[0]))[2] & 07777' "$fresh_env")"
@@ -259,7 +259,7 @@ else
   impls="shared install"
   command -v node >/dev/null 2>&1 && impls="$impls node"
   for impl in $impls; do
-    unread_env="$SANDBOX/unreadable-$impl.env"
+    unread_env="$SANDBOX/unreadable-$impl/.rogue-env"; mkdir -p "${unread_env%/*}"
     seed "$unread_env"
     before="$(cat "$unread_env")"
     chmod 000 "$unread_env"
@@ -275,7 +275,7 @@ else
         write_env_file
       ' _ "$REPO/install.sh" "$unread_env" >/dev/null 2>&1
     else
-      ROGUE_ENV_FILE="$unread_env" node "$REPO/plugins/gemini/scripts/setup.mjs" \
+      HOME="${unread_env%/*}" node "$REPO/plugins/gemini/scripts/setup.mjs" \
         "should-not-land" "x@y.z" "X" >/dev/null 2>&1
     fi
     unread_rc=$?
@@ -283,7 +283,7 @@ else
     chmod 600 "$unread_env"
     check "$impl: unreadable file fails the write"  "1"       "$([ "$unread_rc" = 0 ] && echo 0 || echo 1)"
     check "$impl: unreadable file left intact"      "$before" "$(cat "$unread_env")"
-    check "$impl: unreadable file leaves no temp"   "0"       "$(find "$SANDBOX" -name "*unreadable-$impl*.rogue-tmp.*" | wc -l | tr -d ' ')"
+    check "$impl: unreadable file leaves no temp"   "0"       "$(find "$SANDBOX/unreadable-$impl" -name '*.rogue-tmp.*' | wc -l | tr -d ' ')"
   done
 fi
 chmod 600 "$unread_probe"
@@ -319,11 +319,11 @@ set -e
 check "shared: carriage return in a value is refused" "1" "$([ "$cr_rc" = 0 ] && echo 0 || echo 1)"
 
 for plugin in rogue codex cursor copilot antigravity; do
-  pnl_env="$SANDBOX/linebreak-$plugin.env"
+  pnl_env="$SANDBOX/linebreak-$plugin/.rogue-env"; mkdir -p "${pnl_env%/*}"
   seed "$pnl_env"
   pnl_before="$(cat "$pnl_env")"
   set +e
-  ROGUE_ENV_FILE="$pnl_env" bash "$REPO/plugins/$plugin/scripts/setup.sh" "k" "e@x.io" "$NL_NAME" >/dev/null 2>&1
+  HOME="${pnl_env%/*}" bash "$REPO/plugins/$plugin/scripts/setup.sh" "k" "e@x.io" "$NL_NAME" >/dev/null 2>&1
   pnl_rc=$?
   set -e
   check "$plugin: line break refused"            "1"            "$([ "$pnl_rc" = 0 ] && echo 0 || echo 1)"
@@ -331,11 +331,11 @@ for plugin in rogue codex cursor copilot antigravity; do
 done
 
 if command -v node >/dev/null 2>&1; then
-  gnl_env="$SANDBOX/linebreak-gemini.env"
+  gnl_env="$SANDBOX/linebreak-gemini/.rogue-env"; mkdir -p "${gnl_env%/*}"
   seed "$gnl_env"
   gnl_before="$(cat "$gnl_env")"
   set +e
-  ROGUE_ENV_FILE="$gnl_env" node "$REPO/plugins/gemini/scripts/setup.mjs" "k" "e@x.io" "$NL_NAME" >/dev/null 2>&1
+  HOME="${gnl_env%/*}" node "$REPO/plugins/gemini/scripts/setup.mjs" "k" "e@x.io" "$NL_NAME" >/dev/null 2>&1
   gnl_rc=$?
   set -e
   check "gemini: line break refused"            "1"           "$([ "$gnl_rc" = 0 ] && echo 0 || echo 1)"
@@ -384,6 +384,171 @@ check "no actor identity anywhere still completes"     "0"                "$mdm_
 check "mdm base url not copied into the per-user file" "0"                "$(count_lines "$mdm_env" '^export ROGUE_BASE_URL=')"
 check "mdm run still keeps other settings"             "/var/log/rogue"   "$(sourced "$mdm_env" ROGUE_LOG_DIR)"
 check "mdm run still rotated the key"                  "onbox"            "$(sourced "$mdm_env" ROGUE_API_KEY)"
+
+# ── The machine env file (FIRE-2135) ─────────────────────────────────────────
+# A trusted machine env file holding ROGUE_API_KEY is read ALONE by every hook,
+# so setup writes no user env file, names that file and exits 0. Each plugin's
+# setup.sh runs from a COPY whose /etc/rogue/env literal points into the sandbox,
+# with a `stat` shim on PATH reporting it root-owned — the only way to stage the
+# machine candidate without root. Absent, keyless or world-writable, setup is
+# exactly as it was.
+MACHINE="$SANDBOX/machine-env"
+MBIN="$SANDBOX/machine-bin"; mkdir -p "$MBIN"
+REAL_STAT="$(command -v stat)"
+cat > "$MBIN/stat" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = "$MACHINE" ]; then
+    if "$REAL_STAT" --version >/dev/null 2>&1; then mode="\$("$REAL_STAT" -c %a "\$a")"; else mode="\$("$REAL_STAT" -f %Lp "\$a")"; fi
+    printf '%s %s\n' "\${ROGUE_TEST_MACHINE_OWNER:-0}" "\$mode"; exit 0
+  fi
+done
+exec "$REAL_STAT" "\$@"
+STUB
+chmod +x "$MBIN/stat"
+
+# A per-plugin setup.sh whose machine path points at $MACHINE, beside the real
+# env-file.sh it sources.
+redirected_setup() { # redirected_setup <plugin>
+  _dir="$SANDBOX/machine-$1/scripts"
+  mkdir -p "$_dir"
+  cp "$REPO/plugins/$1/scripts/env-file.sh" "$_dir/env-file.sh"
+  sed "s#/etc/rogue/env#$MACHINE#g" "$REPO/plugins/$1/scripts/setup.sh" > "$_dir/setup.sh"
+  grep -q "MACHINE_ENV_FILE=\"$MACHINE\"" "$_dir/setup.sh" || {
+    echo "FAIL: $1: the machine path was not redirected"; exit 1; }
+  printf '%s' "$_dir/setup.sh"
+}
+
+# run_setup <label> <script> <home> [args...] → RUN_OUT, RUN_RC
+run_setup() {
+  _label="$1"; _script="$2"; _home="$3"; shift 3
+  rm -rf "$_home"; mkdir -p "$_home"
+  set +e
+  RUN_OUT="$(PATH="$MBIN:$PATH" HOME="$_home" bash "$_script" "$@" 2>&1)"
+  RUN_RC=$?
+  set -e
+}
+
+for plugin in rogue codex cursor copilot antigravity; do
+  script="$(redirected_setup "$plugin")"
+  home="$SANDBOX/machine-$plugin/home"
+
+  # 1. Trusted machine file with a key: no write, exit 0, the file is named.
+  printf "export ROGUE_API_KEY='machine-key'\n" > "$MACHINE"
+  chmod 644 "$MACHINE"
+  run_setup "$plugin" "$script" "$home" "new-key" "e@x.io" "N"
+  check "$plugin: keyed machine file exits 0"        "0" "$RUN_RC"
+  check "$plugin: keyed machine file writes no user file" "0" \
+    "$([ -f "$home/.rogue-env" ] && echo 1 || echo 0)"
+  check "$plugin: keyed machine file is named once"  "1" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c "machine env file $MACHINE")"
+  check "$plugin: keyed machine file reported as the env file" "1" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c "^ENV_FILE=$MACHINE$")"
+
+  # An MDM machine has no key to pass, and setup must still succeed.
+  run_setup "$plugin" "$script" "$home"
+  check "$plugin: keyed machine file needs no api key argument" "0" "$RUN_RC"
+  check "$plugin: keyed machine file, no argument, no user file" "0" \
+    "$([ -f "$home/.rogue-env" ] && echo 1 || echo 0)"
+
+  # 2. No machine file: unchanged.
+  rm -f "$MACHINE"
+  run_setup "$plugin" "$script" "$home" "new-key" "e@x.io" "N"
+  check "$plugin: no machine file exits 0"      "0"         "$RUN_RC"
+  check "$plugin: no machine file writes the user file" "new-key" \
+    "$(sourced "$home/.rogue-env" ROGUE_API_KEY)"
+  check "$plugin: no machine file names none"   "0" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c 'machine env file')"
+
+  # 3. Machine file without a key: unchanged.
+  printf "export ROGUE_ACTOR_EMAIL='mdm@example.com'\n# ROGUE_API_KEY='commented-out'\nexport ROGUE_API_KEY=\n" > "$MACHINE"
+  chmod 644 "$MACHINE"
+  run_setup "$plugin" "$script" "$home" "new-key" "e@x.io" "N"
+  check "$plugin: keyless machine file writes the user file" "new-key" \
+    "$(sourced "$home/.rogue-env" ROGUE_API_KEY)"
+  check "$plugin: keyless machine file names none" "0" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c 'machine env file')"
+
+  # 4. Keyed but world-writable: untrusted, so unchanged.
+  printf "export ROGUE_API_KEY='machine-key'\n" > "$MACHINE"
+  chmod 666 "$MACHINE"
+  run_setup "$plugin" "$script" "$home" "new-key" "e@x.io" "N"
+  check "$plugin: untrusted machine file writes the user file" "new-key" \
+    "$(sourced "$home/.rogue-env" ROGUE_API_KEY)"
+  check "$plugin: untrusted machine file names none" "0" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c 'machine env file')"
+
+  # 5. Keyed, mode-clean, but not root-owned: untrusted too.
+  chmod 644 "$MACHINE"
+  ROGUE_TEST_MACHINE_OWNER=1000 run_setup "$plugin" "$script" "$home" "new-key" "e@x.io" "N"
+  check "$plugin: non-root machine file writes the user file" "new-key" \
+    "$(sourced "$home/.rogue-env" ROGUE_API_KEY)"
+  rm -f "$MACHINE"
+done
+
+if command -v node >/dev/null 2>&1; then
+  # setup.mjs takes the machine path from shared.mjs, so the whole scripts dir is
+  # copied with that one expression redirected. Node has no ACL reader, so its
+  # trust gate is owner + mode: the sandbox file is the current user's, and the
+  # untrusted case is the same file made world-writable.
+  gdir="$SANDBOX/machine-gemini/scripts"; mkdir -p "$gdir"
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const [src, dst, machine] = process.argv.slice(1);
+    const EXPR = `IS_WIN ? "C:\\\\ProgramData\\\\rogue\\\\env" : "/etc/rogue/env"`;
+    let n = 0;
+    for (const f of fs.readdirSync(src)) {
+      if (!f.endsWith(".mjs")) continue;
+      let t = fs.readFileSync(path.join(src, f), "utf8");
+      if (t.includes(EXPR)) { t = t.split(EXPR).join(JSON.stringify(machine)); n++; }
+      fs.writeFileSync(path.join(dst, f), t);
+    }
+    if (!n) { console.error("the gemini machine path was not redirected"); process.exit(1); }
+  ' "$REPO/plugins/gemini/scripts" "$gdir" "$MACHINE"
+
+  ghome="$SANDBOX/machine-gemini/home"
+  run_gemini() { # run_gemini <home> [args...]
+    _home="$1"; shift
+    rm -rf "$_home"; mkdir -p "$_home"
+    set +e
+    RUN_OUT="$(HOME="$_home" node "$gdir/setup.mjs" "$@" 2>&1)"
+    RUN_RC=$?
+    set -e
+  }
+
+  printf "export ROGUE_API_KEY='machine-key'\n" > "$MACHINE"
+  chmod 600 "$MACHINE"
+  run_gemini "$ghome" "new-key" "e@x.io" "N"
+  check "gemini: keyed machine file exits 0" "0" "$RUN_RC"
+  check "gemini: keyed machine file writes no user file" "0" \
+    "$([ -f "$ghome/.rogue-env" ] && echo 1 || echo 0)"
+  check "gemini: keyed machine file is named once" "1" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c "machine env file $MACHINE")"
+  run_gemini "$ghome"
+  check "gemini: keyed machine file needs no api key argument" "0" "$RUN_RC"
+
+  rm -f "$MACHINE"
+  run_gemini "$ghome" "new-key" "e@x.io" "N"
+  check "gemini: no machine file writes the user file" "new-key" \
+    "$(sourced "$ghome/.rogue-env" ROGUE_API_KEY)"
+  check "gemini: no machine file names none" "0" \
+    "$(printf '%s\n' "$RUN_OUT" | grep -c 'machine env file')"
+
+  printf "export ROGUE_API_KEY=\n" > "$MACHINE"
+  chmod 600 "$MACHINE"
+  run_gemini "$ghome" "new-key" "e@x.io" "N"
+  check "gemini: keyless machine file writes the user file" "new-key" \
+    "$(sourced "$ghome/.rogue-env" ROGUE_API_KEY)"
+
+  printf "export ROGUE_API_KEY='machine-key'\n" > "$MACHINE"
+  chmod 666 "$MACHINE"
+  run_gemini "$ghome" "new-key" "e@x.io" "N"
+  check "gemini: untrusted machine file writes the user file" "new-key" \
+    "$(sourced "$ghome/.rogue-env" ROGUE_API_KEY)"
+  rm -f "$MACHINE"
+else
+  echo "  skip: node not installed (gemini machine env file)"
+fi
 
 [ "$fails" = 0 ] || { echo "$fails check(s) failed"; exit 1; }
 echo "all env-file writer checks passed"

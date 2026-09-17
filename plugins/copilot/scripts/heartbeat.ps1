@@ -90,19 +90,26 @@ if (-not (Get-Command Request-RogueBeaconSlot -ErrorAction SilentlyContinue)) {
 
 # ── credential resolution ──────────────────────────────────────────────────
 $creds = @{}
-foreach ($f in @((Join-Path $pluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-    foreach ($line in (Get-Content -LiteralPath $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-            $creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-        }
-    }
-}
-# ROGUE_HEARTBEAT_MIN_INTERVAL rides this list so a process-env value still beats the
-# files, which is what makes the resolved precedence identical to heartbeat.sh's.
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                'ROGUE_HEARTBEAT_MIN_INTERVAL') {
     $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $creds[$k] = $val }
+}
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+    $fileVals = @{}
+    foreach ($line in (Read-RogueEnvFile $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+            $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+        }
+    }
+    if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+    foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
+    break
 }
 
 # Resolved HERE - after the env files are parsed so they can set the interval, and
@@ -118,17 +125,21 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# ── actor resolution (mirrors actor.sh) ────────────────────────────────────
-$actorName = $creds['ROGUE_ACTOR_NAME']
-if (-not $actorName) { try { $actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorName) { $actorName = $env:USERNAME }
-
-$actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorEmail) { try { $actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorEmail) {
-    if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-    elseif ($env:USERNAME) { $actorEmail = $env:USERNAME } else { $actorEmail = $env:COMPUTERNAME }
-}
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values, or the marker, never a blank.
+$actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+try {
+    $actorLib = Join-Path $pluginRoot 'scripts\actor.ps1'
+    if (Test-Path -LiteralPath $actorLib) {
+        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+        $actor = Resolve-RogueSharedActor $creds $pluginRoot
+    }
+} catch {}
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
+if (-not $actorName)  { $actorName  = 'unknown' }
+if (-not $actorEmail) { $actorEmail = 'unknown' }
 
 # ── plugin version (regex from manifest, no python) ────────────────────────
 $ver = 'unknown'

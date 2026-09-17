@@ -45,8 +45,8 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 
 # Scrub every knob the shipper reads from the environment. NOT optional hygiene: a
 # developer running this may well have ROGUE_API_KEY set for their own install, and
-# PROCESS ENV WINS over the env file by design - so without this the sandbox would
-# authenticate to the local receiver with real credentials. The sh suite learned this
+# the process env supplies every knob the env file in use does not set - so without
+# this the sandbox could run with the developer's own values. The sh suite learned this
 # the hard way; same reasoning, same fix.
 $shipperKnobs = @('ROGUE_API_KEY', 'ROGUE_BASE_URL', 'ROGUE_ACTOR_EMAIL', 'ROGUE_ACTOR_NAME',
                   'ROGUE_LOG_FILE', 'ROGUE_LOG_DIR', 'ROGUE_LOG_MAX_BYTES',

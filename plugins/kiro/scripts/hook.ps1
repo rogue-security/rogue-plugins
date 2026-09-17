@@ -19,9 +19,10 @@
 # timeout, non-200, empty body, an exception anywhere) this exits 0 with an
 # empty stdout. $ErrorActionPreference is SilentlyContinue for that reason.
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. <root>\env                (baked into a compiled customer plugin)
-#   2. C:\ProgramData\rogue\env  (MDM-provisioned; mirrors /etc/rogue/env)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. C:\ProgramData\rogue\env  (machine, MDM-provisioned; mirrors /etc/rogue/env)
+#   2. <root>\env                (bundled into a compiled customer plugin)
 #   3. %USERPROFILE%\.rogue-env  (user / installer-written)
 
 # $SurfaceArg, not $Surface: PowerShell variable names are case-insensitive, so
@@ -265,22 +266,28 @@ function Initialize-KiroContext {
     if (-not $PluginRoot) { $script:PluginRoot = $env:KIRO_PLUGIN_ROOT }
     if (-not $PluginRoot) { try { $script:PluginRoot = (Get-Location).Path } catch { $script:PluginRoot = '.' } }
 
-    # -- credential resolution (later file wins; process env wins over all) -----
+    # -- credential resolution ---------------------------------------------------
     $script:creds = @{}
-    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/env-file.ps1'))))
-    foreach ($f in @((Join-Path $PluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-        foreach ($line in (Read-RogueEnvFile $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            }
-        }
-    }
-    # ROGUE_LOG_* ride the same list so a process-env value still beats the files,
-    # which is what makes the resolved precedence identical to hook.sh's.
+    # Fail open: with no readable helper, leave a no-op reader behind so the env
+    # files are skipped instead of the whole credential block dying on the load.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+    catch { function Read-RogueEnvFile { param([string]$Path) } }
     foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL','ROGUE_API_URL',
                    'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES','ROGUE_HOOK_TIMEOUT') {
         $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $creds[$k] = $val }
+    }
+    # The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+    foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $PluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+        if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+        $fileVals = @{}
+        foreach ($line in (Read-RogueEnvFile $f)) {
+            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+                $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+            }
+        }
+        if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+        foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
+        break
     }
 
     # After the credential files (so they can relocate the log), before the API-key
@@ -308,18 +315,22 @@ function Initialize-KiroContext {
     if ($t -match '^[0-9]{1,9}$' -and [int]$t -gt 0) { $script:timeoutSec = [int]$t }
 }
 
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values, or the marker, never a blank.
 function Resolve-KiroActor {
-    # -- actor resolution (mirrors actor.sh) -------------------------------------
-    $script:actorName = $creds['ROGUE_ACTOR_NAME']
-    if (-not $actorName) { try { $script:actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-    if (-not $actorName) { $script:actorName = $env:USERNAME }
-
-    $script:actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-    if (-not $actorEmail) { try { $script:actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-    if (-not $actorEmail) {
-        if ($env:USERNAME -and $env:COMPUTERNAME) { $script:actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-        elseif ($env:USERNAME) { $script:actorEmail = $env:USERNAME } else { $script:actorEmail = $env:COMPUTERNAME }
-    }
+    $actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+    try {
+        $actorLib = Join-Path $script:pluginRoot 'scripts\actor.ps1'
+        if (Test-Path -LiteralPath $actorLib) {
+            . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+            $actor = Resolve-RogueSharedActor $creds $script:pluginRoot
+        }
+    } catch {}
+    $script:actorName  = [string]$actor.Name
+    $script:actorEmail = [string]$actor.Email
+    if (-not $script:actorName)  { $script:actorName  = 'unknown' }
+    if (-not $script:actorEmail) { $script:actorEmail = 'unknown' }
 }
 
 function Read-KiroPayload {

@@ -11,6 +11,15 @@ Help the user set up their Rogue Security AIDR integration for Claude Code. Foll
 
 ## Step 1: Check existing configuration
 
+Check the machine env file first:
+
+- macOS / Linux: `grep -q ROGUE_API_KEY /etc/rogue/env 2>/dev/null && echo machine || echo none`
+- Windows: `if (Test-Path "$env:ProgramData\rogue\env") { Select-String -Path "$env:ProgramData\rogue\env" -Pattern ROGUE_API_KEY -Quiet } else { $false }`
+
+A machine env file that holds `ROGUE_API_KEY` and is owned by root (SYSTEM/Administrators on Windows) is the file the hooks read, alone, so credentials are already configured: say so and stop, without writing the user env file.
+
+Otherwise check the user env file:
+
 - macOS / Linux: `test -f ~/.rogue-env && echo "exists" || echo "not found"`
 - Windows: `if (Test-Path "$env:USERPROFILE\.rogue-env") { 'exists' } else { 'not found' }`
 

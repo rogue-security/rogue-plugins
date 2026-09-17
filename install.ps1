@@ -7,6 +7,8 @@
 
     With credentials via environment variables (non-interactive):
     $env:ROGUE_API_KEY='rsk_xxx'; $env:ROGUE_ACTOR_EMAIL='you@co.com'; iwr -useb https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/install.ps1 | iex
+    A key passed this way is ignored when C:\ProgramData\rogue\env already holds
+    one: that file is read alone.
 
     Direct invocation with flags:
     .\install.ps1 -ApiKey rsk_xxx -Email you@co.com -Name 'Your Name'
@@ -69,7 +71,8 @@ $ROGUE_BASE_URL_DEFAULT = 'https://api.rogue.security'
 $MarketplaceName = 'rogue-marketplace'
 $CopilotMarketplaceName = 'rogue-copilot'
 $PluginName      = 'rogue'
-$EnvFile = if ($env:ROGUE_ENV_FILE) { $env:ROGUE_ENV_FILE } else { Join-Path $env:USERPROFILE '.rogue-env' }
+$EnvFile = Join-Path $env:USERPROFILE '.rogue-env'
+$MachineEnvFile = 'C:\ProgramData\rogue\env'
 
 # Merge env vars -> params (explicit params win).
 if (-not $ApiKey)     { $ApiKey     = $env:ROGUE_API_KEY }
@@ -320,7 +323,251 @@ function Test-KiroInstalled {
     return [bool](Test-Path (Join-Path $env:USERPROFILE '.kiro'))
 }
 
-# Test seam: load only the functions above (tests/test_install_kiro_ps1.ps1).
+# -- Credentials ---------------------------------------------------------------
+function ConvertFrom-ShellQuoted {
+    param([string]$Val)
+    if ($null -eq $Val) { return $Val }
+    $sb = [System.Text.StringBuilder]::new()
+    $i = 0; $n = $Val.Length
+    $state = 'normal'   # normal | single | double
+    while ($i -lt $n) {
+        $c = $Val[$i]
+        switch ($state) {
+            'single' {
+                if ($c -eq "'") { $state = 'normal' } else { [void]$sb.Append($c) }
+            }
+            'double' {
+                if ($c -eq '"') { $state = 'normal' }
+                elseif ($c -eq '\' -and ($i + 1) -lt $n -and ('"\$`'.IndexOf($Val[$i+1]) -ge 0)) {
+                    [void]$sb.Append($Val[$i+1]); $i++
+                } else { [void]$sb.Append($c) }
+            }
+            default {
+                if ($c -eq "'") { $state = 'single' }
+                elseif ($c -eq '"') { $state = 'double' }
+                elseif ($c -eq '\' -and ($i + 1) -lt $n) { [void]$sb.Append($Val[$i+1]); $i++ }
+                else { [void]$sb.Append($c) }
+            }
+        }
+        $i++
+    }
+    return $sb.ToString()
+}
+
+function Test-EnvFileHasKey {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        if ($line -match '^\s*(?:export\s+)?ROGUE_API_KEY=["'']?[^"''\s]') { return $true }
+    }
+    return $false
+}
+
+function Read-EnvFileValues {
+    param([string]$Path)
+    $vals = @{}
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
+            $vals[$Matches[1]] = ConvertFrom-ShellQuoted $Matches[2].Trim()
+        }
+    }
+    return $vals
+}
+
+# The machine file is policy: only SYSTEM or Administrators (root off Windows) may
+# own it, and nobody else may write it - the current user included, or a standard
+# user with a write ACE could replace the key the MDM pushed. Inlined rather than
+# taken from scripts/shared/env-file.ps1 because this installer is one downloaded file.
+function Test-MachineEnvTrusted {
+    param([string]$Path)
+    try {
+        if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+            $info = & stat -Lc '%u %a' $Path 2>$null
+            if ($LASTEXITCODE -ne 0) { $info = & stat -Lf '%u %Lp' $Path 2>$null }
+            if ($LASTEXITCODE -ne 0 -or $info -notmatch '^(\d+) ([0-7]+)$') { return $false }
+            return ($Matches[1] -eq '0' -and ([Convert]::ToInt32($Matches[2], 8) -band 18) -eq 0)
+        }
+        if ($PSVersionTable.PSVersion.Major -eq 5) {
+            Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+        }
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $admins = @('S-1-5-18', 'S-1-5-32-544')
+        if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $admins) { return $false }
+        $write = [System.Security.AccessControl.FileSystemRights]'Write, Delete, ChangePermissions, TakeOwnership, DeleteSubdirectoriesAndFiles'
+        foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+            if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and
+                $rule.IdentityReference.Value -notin $admins) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+# Load existing settings from the user env file, as the dispatcher reads it. Not
+# only a keyed file: a user file with no ROGUE_API_KEY can still carry the
+# ROGUE_BASE_URL validation must use and the ROGUE_ACTOR_* identity
+# Write-UserEnvFile would otherwise replace from the cascade.
+function Load-ExistingCreds {
+    if (-not (Test-Path -LiteralPath $script:EnvFile -PathType Leaf)) { return }
+    $vals = Read-EnvFileValues $script:EnvFile
+    if (-not $script:ApiKey) { $script:ApiKey = $vals['ROGUE_API_KEY'] }
+    if (-not $script:Email -and $vals['ROGUE_ACTOR_EMAIL']) { $script:Email = $vals['ROGUE_ACTOR_EMAIL'] }
+    if (-not $script:Name -and $vals['ROGUE_ACTOR_NAME']) { $script:Name = $vals['ROGUE_ACTOR_NAME'] }
+    if (-not $script:BaseUrlExplicit -and $vals['ROGUE_BASE_URL']) { $script:BaseUrl = $vals['ROGUE_BASE_URL'] }
+}
+
+function Read-ApiKey {
+    if ($NonInteractive) {
+        Warn2 'No API key set and running non-interactively - skipping key setup.'
+        Warn2 'Run /rogue:setup inside Claude Code to connect your key later.'
+        return
+    }
+    $secure = Read-Host 'Rogue API key (rsk_...)' -AsSecureString
+    $bstr   = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    # BSTR is UTF-16 everywhere; PtrToStringAuto decodes it as UTF-8 off Windows.
+    $script:ApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    if (-not $script:ApiKey) { Die 'API key cannot be empty.' }
+}
+
+# Actor identity: git config -> env fallbacks (mirrors actor.sh).
+function Resolve-Actor {
+    if (-not $script:Email) { try { $script:Email = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
+    if (-not $script:Name)  { try { $script:Name  = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
+    if (-not $script:Email -and $env:CLAUDE_CODE_USER_EMAIL) { $script:Email = $env:CLAUDE_CODE_USER_EMAIL }
+    if (-not $script:Email) { $script:Email = "$env:USERNAME@$env:COMPUTERNAME" }
+    if (-not $script:Name)  { $script:Name  = $env:USERNAME }
+    Log "Actor: $script:Name <$script:Email>"
+}
+
+# Validate the key AND register this install via /api/v1/hooks/status (the same
+# heartbeat the SessionStart hook calls), so the dashboard roster row is deduped.
+function Register-ApiKey {
+    param([string]$Key, [string]$Url, [string]$ActorEmail, [string]$MachineFile)
+    Log 'Validating API key...'
+    try {
+        $hostName = $env:COMPUTERNAME; if (-not $hostName) { $hostName = 'unknown' }
+        # /api/v1/hooks/status has side effects (it registers/updates the roster
+        # row), so register under an agent actually being installed — a Copilot-
+        # only or Codex-only install must NOT create a bogus Claude roster row.
+        # Prefer claude when it's a target (its heartbeat backs the row,
+        # preserving prior behavior); otherwise use the first selected agent.
+        # Values mirror each heartbeat.
+        $scFamily = 'claude'; $scAgent = 'claude_code'
+        if ($hasClaude)      { $scFamily = 'claude';  $scAgent = 'claude_code' }
+        elseif ($hasCodex)   { $scFamily = 'openai';  $scAgent = 'codex_cli' }
+        elseif ($hasCursor)  { $scFamily = 'cursor';  $scAgent = 'cursor' }
+        elseif ($hasGemini)  { $scFamily = 'gemini';  $scAgent = 'gemini_cli' }
+        elseif ($hasCopilot) { $scFamily = 'copilot'; $scAgent = 'github_copilot' }
+        elseif ($hasKiro)    { $scFamily = 'kiro';    $scAgent = 'kiro_cli' }
+        $body = @{ agent_family = $scFamily; agent = $scAgent; host = $hostName; actor_email = $ActorEmail } | ConvertTo-Json -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+        $resp = Invoke-WebRequest -Uri "$($Url.TrimEnd('/'))/api/v1/hooks/status" -Method Post `
+            -Headers @{ 'x-rogue-api-key' = $Key } -ContentType 'application/json' `
+            -Body $bytes -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        if ($resp.StatusCode -eq 200) { Ok 'Key validated.'; return }
+        if ($MachineFile) { Warn2 "Unexpected response (HTTP $($resp.StatusCode)) validating the key in $MachineFile" }
+        else { Warn2 "Unexpected response (HTTP $($resp.StatusCode)) - saving without verification." }
+    } catch {
+        $code = $null
+        if ($_.Exception.Response) { try { $code = [int]$_.Exception.Response.StatusCode } catch {} }
+        if ($code -eq 401 -or $code -eq 403) {
+            # Nothing is saved on the machine path, so a bad key can only be reported.
+            if ($MachineFile) { Warn2 "The key in $MachineFile is invalid (HTTP $code) - every hook fails open until the MDM script pushes a valid one"; return }
+            if ($NonInteractive) { Die "Invalid API key (HTTP $code)." }
+            Warn2 "Invalid key (HTTP $code) - saving anyway. Verify it at https://app.rogue.security/settings/api-keys"
+        } elseif ($MachineFile) {
+            Warn2 "Could not reach $Url to validate the key in $MachineFile"
+        } else {
+            Warn2 "Could not reach $Url to validate - saving without verification."
+        }
+    }
+}
+
+function Format-EnvVal { param([string]$Val) return "'" + $Val.Replace("'", "'\''") + "'" }
+
+function Write-UserEnvFile {
+    $managed = @('ROGUE_API_KEY', 'ROGUE_ACTOR_EMAIL', 'ROGUE_ACTOR_NAME')
+    if ($BaseUrlExplicit) { $managed += 'ROGUE_BASE_URL' }
+    foreach ($pair in @(@('ROGUE_API_KEY', $ApiKey), @('ROGUE_ACTOR_EMAIL', $Email),
+                        @('ROGUE_ACTOR_NAME', $Name), @('ROGUE_BASE_URL', $BaseUrl))) {
+        if ([string]$pair[1] -match "[`r`n]") {
+            Die "Refusing to write ${EnvFile}: the value for $($pair[0]) contains a line break"
+        }
+    }
+    $envLines = @(
+        '# Managed by the Rogue plugins. Read by hook subprocesses at runtime.',
+        '# Delete this file to revoke credentials.',
+        "export ROGUE_API_KEY=$(Format-EnvVal $ApiKey)",
+        "export ROGUE_ACTOR_EMAIL=$(Format-EnvVal $Email)",
+        "export ROGUE_ACTOR_NAME=$(Format-EnvVal $Name)"
+    )
+    if ($BaseUrlExplicit -and $BaseUrl -ne $ROGUE_BASE_URL_DEFAULT) {
+        $envLines += "export ROGUE_BASE_URL=$(Format-EnvVal $BaseUrl)"
+    }
+    if (Test-Path -LiteralPath $EnvFile) {
+        $owned = '^\s*(?:export\s+)?(?:' + ($managed -join '|') + ')\s*='
+        $header = '^\s*# (Managed by the [Rr]ogue|Delete this file to revoke credentials)'
+        foreach ($line in (Get-Content -LiteralPath $EnvFile -Encoding UTF8 -ErrorAction Stop)) {
+            if ($line -match $owned -or $line -match $header) { continue }
+            $envLines += $line
+        }
+    }
+    $envDir = Split-Path $EnvFile
+    if ($envDir -and -not (Test-Path $envDir)) { New-Item -ItemType Directory -Path $envDir -Force | Out-Null }
+    $envTmp = "$EnvFile.rogue-tmp.$PID"
+    try {
+        [System.IO.File]::WriteAllText($envTmp, (($envLines -join "`n") + "`n"),
+            (New-Object System.Text.UTF8Encoding($false)))
+        try {
+            $acl = Get-Acl $envTmp
+            $acl.SetAccessRuleProtection($true, $false)
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                [System.Security.Principal.WindowsIdentity]::GetCurrent().Name, 'FullControl', 'Allow')
+            $acl.SetAccessRule($rule); Set-Acl $envTmp $acl
+        } catch { Warn2 "Could not restrict permissions on $EnvFile (non-fatal)." }
+        Move-Item -LiteralPath $envTmp -Destination $EnvFile -Force
+    } catch {
+        Remove-Item -LiteralPath $envTmp -Force -ErrorAction SilentlyContinue
+        Die "Could not write $EnvFile"
+    }
+    Ok "Credentials written to $EnvFile"
+}
+
+# The dispatchers read a keyed machine env file alone, so on such a machine the
+# user env file is never consulted: no prompt, no write, and a key passed to the
+# installer goes nowhere. The key is still validated the way the hooks will use it.
+function Use-MachineEnvFile {
+    $script:CredentialSource = $script:MachineEnvFile
+    Ok "Credentials come from the machine env file $script:MachineEnvFile - no API key prompt, $script:EnvFile not written."
+    if ($script:ApiKey -or $script:BaseUrlExplicit) {
+        Warn2 "The passed API key / base URL is ignored: $script:MachineEnvFile is read alone. Rotate it through the MDM script (docs/deployment.md, Rotating the API key)."
+    }
+    $vals = Read-EnvFileValues $script:MachineEnvFile
+    $url = if ($vals['ROGUE_BASE_URL']) { $vals['ROGUE_BASE_URL'] } else { $ROGUE_BASE_URL_DEFAULT }
+    if ($vals['ROGUE_ACTOR_EMAIL']) { $script:Email = $vals['ROGUE_ACTOR_EMAIL'] }
+    Resolve-Actor
+    Register-ApiKey -Key $vals['ROGUE_API_KEY'] -Url $url -ActorEmail $script:Email -MachineFile $script:MachineEnvFile
+}
+
+function Configure-Credentials {
+    if (Test-EnvFileHasKey $script:MachineEnvFile) {
+        if (Test-MachineEnvTrusted $script:MachineEnvFile) { Use-MachineEnvFile; return }
+        # Kiro and the log shipper skip an untrusted machine file, so the user file
+        # must still be written for them.
+        Warn2 "$script:MachineEnvFile holds ROGUE_API_KEY but is not owned by SYSTEM/Administrators or is writable by others - Kiro and log shipping ignore it; configuring $script:EnvFile instead."
+    }
+    $script:CredentialSource = $script:EnvFile
+    Load-ExistingCreds
+    if (-not $script:ApiKey) { Read-ApiKey }
+    Resolve-Actor
+    if (-not $script:ApiKey) { return }
+    Register-ApiKey -Key $script:ApiKey -Url $script:BaseUrl -ActorEmail $script:Email
+    Write-UserEnvFile
+}
+
+
+# Test seam: load only the functions above (tests/test_install_kiro_ps1.ps1,
+# tests/test_install_env_ps1.ps1).
 if ($env:ROGUE_INSTALL_LIB_ONLY) { return }
 
 try {
@@ -381,160 +628,7 @@ if ($hasClaude -and -not (Get-Command git -ErrorAction SilentlyContinue)) {
     Die "git not found. Install Git for Windows (https://git-scm.com/download/win) first."
 }
 
-function ConvertFrom-ShellQuoted {
-    param([string]$Val)
-    if ($null -eq $Val) { return $Val }
-    $sb = [System.Text.StringBuilder]::new()
-    $i = 0; $n = $Val.Length
-    $state = 'normal'   # normal | single | double
-    while ($i -lt $n) {
-        $c = $Val[$i]
-        switch ($state) {
-            'single' {
-                if ($c -eq "'") { $state = 'normal' } else { [void]$sb.Append($c) }
-            }
-            'double' {
-                if ($c -eq '"') { $state = 'normal' }
-                elseif ($c -eq '\' -and ($i + 1) -lt $n -and ('"\$`'.IndexOf($Val[$i+1]) -ge 0)) {
-                    [void]$sb.Append($Val[$i+1]); $i++
-                } else { [void]$sb.Append($c) }
-            }
-            default {
-                if ($c -eq "'") { $state = 'single' }
-                elseif ($c -eq '"') { $state = 'double' }
-                elseif ($c -eq '\' -and ($i + 1) -lt $n) { [void]$sb.Append($Val[$i+1]); $i++ }
-                else { [void]$sb.Append($c) }
-            }
-        }
-        $i++
-    }
-    return $sb.ToString()
-}
-
-# Load existing creds from disk (same priority as the dispatcher: later wins).
-function Load-ExistingCreds {
-    foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-        if (-not (Test-Path -LiteralPath $f)) { continue }
-        foreach ($line in (Get-Content -LiteralPath $f -Encoding UTF8 -ErrorAction SilentlyContinue)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-                $k = $Matches[1]
-                $v = ConvertFrom-ShellQuoted $Matches[2].Trim()
-                switch ($k) {
-                    'ROGUE_API_KEY'     { if (-not $script:ApiKey)  { $script:ApiKey  = $v } }
-                    'ROGUE_ACTOR_EMAIL' { if (-not $script:Email)   { $script:Email   = $v } }
-                    'ROGUE_ACTOR_NAME'  { if (-not $script:Name)    { $script:Name    = $v } }
-                    'ROGUE_BASE_URL'    { if (-not $script:BaseUrlExplicit) { $script:BaseUrl = $v } }
-                }
-            }
-        }
-    }
-}
-Load-ExistingCreds
-
-if (-not $ApiKey) {
-    if ($NonInteractive) {
-        Warn2 'No API key set and running non-interactively - skipping key setup.'
-        Warn2 'Run /rogue:setup inside Claude Code to connect your key later.'
-    } else {
-        $secure = Read-Host 'Rogue API key (rsk_...)' -AsSecureString
-        $bstr   = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-        $ApiKey = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-        if (-not $ApiKey) { Die 'API key cannot be empty.' }
-    }
-}
-
-# Actor identity: git config -> env fallbacks (mirrors actor.sh).
-if (-not $Email) { try { $Email = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-if (-not $Name)  { try { $Name  = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-if (-not $Email -and $env:CLAUDE_CODE_USER_EMAIL) { $Email = $env:CLAUDE_CODE_USER_EMAIL }
-if (-not $Email) { $Email = "$env:USERNAME@$env:COMPUTERNAME" }
-if (-not $Name)  { $Name  = $env:USERNAME }
-Log "Actor: $Name <$Email>"
-
-# Validate the key AND register this install via /api/v1/hooks/status (the same
-# heartbeat the SessionStart hook calls), so the dashboard roster row is deduped.
-if ($ApiKey) {
-    Log 'Validating API key...'
-    try {
-        $hostName = $env:COMPUTERNAME; if (-not $hostName) { $hostName = 'unknown' }
-        # /api/v1/hooks/status has side effects (it registers/updates the roster
-        # row), so register under an agent actually being installed — a Copilot-
-        # only or Codex-only install must NOT create a bogus Claude roster row.
-        # Prefer claude when it's a target (its heartbeat backs the row,
-        # preserving prior behavior); otherwise use the first selected agent.
-        # Values mirror each heartbeat.
-        $scFamily = 'claude'; $scAgent = 'claude_code'
-        if ($hasClaude)      { $scFamily = 'claude';  $scAgent = 'claude_code' }
-        elseif ($hasCodex)   { $scFamily = 'openai';  $scAgent = 'codex_cli' }
-        elseif ($hasCursor)  { $scFamily = 'cursor';  $scAgent = 'cursor' }
-        elseif ($hasGemini)  { $scFamily = 'gemini';  $scAgent = 'gemini_cli' }
-        elseif ($hasCopilot) { $scFamily = 'copilot'; $scAgent = 'github_copilot' }
-        elseif ($hasKiro)    { $scFamily = 'kiro';    $scAgent = 'kiro_cli' }
-        $body = @{ agent_family = $scFamily; agent = $scAgent; host = $hostName; actor_email = [string]$Email } | ConvertTo-Json -Compress
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-        $resp = Invoke-WebRequest -Uri "$($BaseUrl.TrimEnd('/'))/api/v1/hooks/status" -Method Post `
-            -Headers @{ 'x-rogue-api-key' = $ApiKey } -ContentType 'application/json' `
-            -Body $bytes -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-        if ($resp.StatusCode -eq 200) { Ok 'Key validated.' } else { Warn2 "Unexpected response (HTTP $($resp.StatusCode)) - saving without verification." }
-    } catch {
-        $code = $null
-        if ($_.Exception.Response) { try { $code = [int]$_.Exception.Response.StatusCode } catch {} }
-        if ($code -eq 401 -or $code -eq 403) {
-            if ($NonInteractive) { Die "Invalid API key (HTTP $code)." }
-            Warn2 "Invalid key (HTTP $code) - saving anyway. Verify it at https://app.rogue.security/settings/api-keys"
-        } else {
-            Warn2 "Could not reach $BaseUrl to validate - saving without verification."
-        }
-    }
-
-    function Format-EnvVal { param([string]$Val) return "'" + $Val.Replace("'", "'\''") + "'" }
-    $managed = @('ROGUE_API_KEY', 'ROGUE_ACTOR_EMAIL', 'ROGUE_ACTOR_NAME')
-    if ($BaseUrlExplicit) { $managed += 'ROGUE_BASE_URL' }
-    foreach ($pair in @(@('ROGUE_API_KEY', $ApiKey), @('ROGUE_ACTOR_EMAIL', $Email),
-                        @('ROGUE_ACTOR_NAME', $Name), @('ROGUE_BASE_URL', $BaseUrl))) {
-        if ([string]$pair[1] -match "[`r`n]") {
-            Die "Refusing to write ${EnvFile}: the value for $($pair[0]) contains a line break"
-        }
-    }
-    $envLines = @(
-        '# Managed by the Rogue plugins. Read by hook subprocesses at runtime.',
-        '# Delete this file to revoke credentials.',
-        "export ROGUE_API_KEY=$(Format-EnvVal $ApiKey)",
-        "export ROGUE_ACTOR_EMAIL=$(Format-EnvVal $Email)",
-        "export ROGUE_ACTOR_NAME=$(Format-EnvVal $Name)"
-    )
-    if ($BaseUrlExplicit -and $BaseUrl -ne $ROGUE_BASE_URL_DEFAULT) {
-        $envLines += "export ROGUE_BASE_URL=$(Format-EnvVal $BaseUrl)"
-    }
-    if (Test-Path -LiteralPath $EnvFile) {
-        $owned = '^\s*(?:export\s+)?(?:' + ($managed -join '|') + ')\s*='
-        $header = '^\s*# (Managed by the [Rr]ogue|Delete this file to revoke credentials)'
-        foreach ($line in (Get-Content -LiteralPath $EnvFile -Encoding UTF8 -ErrorAction Stop)) {
-            if ($line -match $owned -or $line -match $header) { continue }
-            $envLines += $line
-        }
-    }
-    $envDir = Split-Path $EnvFile
-    if ($envDir -and -not (Test-Path $envDir)) { New-Item -ItemType Directory -Path $envDir -Force | Out-Null }
-    $envTmp = "$EnvFile.rogue-tmp.$PID"
-    try {
-        [System.IO.File]::WriteAllText($envTmp, (($envLines -join "`n") + "`n"),
-            (New-Object System.Text.UTF8Encoding($false)))
-        try {
-            $acl = Get-Acl $envTmp
-            $acl.SetAccessRuleProtection($true, $false)
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                [System.Security.Principal.WindowsIdentity]::GetCurrent().Name, 'FullControl', 'Allow')
-            $acl.SetAccessRule($rule); Set-Acl $envTmp $acl
-        } catch { Warn2 "Could not restrict permissions on $EnvFile (non-fatal)." }
-        Move-Item -LiteralPath $envTmp -Destination $EnvFile -Force
-    } catch {
-        Remove-Item -LiteralPath $envTmp -Force -ErrorAction SilentlyContinue
-        Die "Could not write $EnvFile"
-    }
-    Ok "Credentials written to $EnvFile"
-}
+Configure-Credentials
 
 # Install through each agent's CLI marketplace (cross-platform; same monorepo for
 # both — Claude reads .claude-plugin/marketplace.json, Codex reads
@@ -829,7 +923,7 @@ Write-Host @"
 
 v Rogue Security installed.
 
-  Credentials:  $EnvFile
+  Credentials:  $CredentialSource
 
 Next steps:
   1. Fully quit and reopen each agent (hooks load credentials at session start).

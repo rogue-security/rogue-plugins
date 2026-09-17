@@ -7,21 +7,34 @@
 //
 // Usage: node setup.mjs <api-key> <email> <name>
 //
-// Hooks read credentials from (later wins): <ext>/env → /etc/rogue/env
-// (C:\ProgramData\rogue\env on Windows) → ~/.rogue-env (written here).
+// Hooks read the first of these that holds ROGUE_API_KEY, alone: /etc/rogue/env
+// (C:\ProgramData\rogue\env on Windows) → <ext>/env → ~/.rogue-env (written here).
+// A trusted machine file holding a key therefore makes this script a no-op.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MACHINE_ENV_FILE, envFileHasKey, isTrustedEnvFile } from "./shared.mjs";
+
+const HOME = os.homedir() || process.env.HOME || process.env.USERPROFILE || ".";
+const ENV_FILE = path.join(HOME, ".rogue-env");
+
+// A trusted machine env file holding a key is read ALONE by the hooks, so
+// ENV_FILE written here would never be consulted. Nothing to do.
+if (envFileHasKey(MACHINE_ENV_FILE) && isTrustedEnvFile(MACHINE_ENV_FILE)) {
+  process.stdout.write("OK\n");
+  process.stdout.write(`ENV_FILE=${MACHINE_ENV_FILE}\n`);
+  process.stdout.write(
+    `Credentials come from the machine env file ${MACHINE_ENV_FILE} - ${ENV_FILE} not written\n`,
+  );
+  process.exit(0);
+}
 
 const [apiKey, actorEmail = "", actorName = ""] = process.argv.slice(2);
 if (!apiKey) {
   process.stderr.write("Usage: setup.mjs <api-key> <email> <name>\n");
   process.exit(1);
 }
-
-const HOME = os.homedir() || process.env.HOME || process.env.USERPROFILE || ".";
-const ENV_FILE = process.env.ROGUE_ENV_FILE || path.join(HOME, ".rogue-env");
 
 const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 

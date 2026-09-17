@@ -34,10 +34,10 @@
 # yield `{}` on stdout, exit 0. Claude Code must never block because Rogue
 # infrastructure is unavailable.
 #
-# Credential resolution (later file wins; process env wins over all), the Windows
-# analogue of hook.sh's search:
-#   1. ${CLAUDE_PLUGIN_ROOT}\env   (baked into a compiled customer plugin)
-#   2. C:\ProgramData\rogue\env    (MDM-provisioned; mirrors /etc/rogue/env)
+# Credential resolution, the Windows analogue of hook.sh's search: the first env
+# file holding ROGUE_API_KEY is used alone, and its values override the process env:
+#   1. C:\ProgramData\rogue\env    (machine, MDM-provisioned; mirrors /etc/rogue/env)
+#   2. ${CLAUDE_PLUGIN_ROOT}\env   (bundled into a compiled customer plugin)
 #   3. %USERPROFILE%\.rogue-env    (user / installer-written)
 
 param([string]$EventName = '')
@@ -146,8 +146,8 @@ $script:logFile = $null
 $script:logMaxBytes = 10485760
 
 function Initialize-Logging {
-    # $Creds is the merged credential map (bundled env → MDM → per-user file, then
-    # process env last), so precedence is already correct by the time we read it.
+    # $Creds is the resolved credential map (process env, then the chosen env file
+    # over it), so precedence is already correct by the time we read it.
     # $HOME backs up USERPROFILE so this also works dot-sourced on macOS/Linux.
     param([hashtable]$Creds = @{})
     $f = $Creds['ROGUE_LOG_FILE']
@@ -242,12 +242,69 @@ function Test-SyntheticActor {
 
 function Select-ActorValue {
     # First non-synthetic candidate, or '' when every one is rejected. Callers
-    # invoke it in stages so an expensive candidate (git config) is only computed
-    # when the cheap ones have already been rejected.
+    # invoke it in stages so the git config files are only read when the cheap
+    # candidates have already been rejected.
     param([string[]]$Candidates)
     if ($null -eq $Candidates) { return '' }
     foreach ($c in $Candidates) { if (-not (Test-SyntheticActor $c)) { return $c } }
     return ''
+}
+
+function Read-RogueGitIdentity {
+    # user.email / user.name from the git config FILES through scripts/git-identity.ps1,
+    # never git.exe (one rule with actor.sh). Empty fields when the library or the
+    # files are missing.
+    param([string]$PluginRoot)
+    $id = $null
+    try {
+        $lib = Join-Path $PluginRoot 'scripts\git-identity.ps1'
+        if (Test-Path -LiteralPath $lib) { $id = & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $lib))) }
+    } catch {}
+    if (-not $id) { $id = @{ Email = ''; Name = '' } }
+    return $id
+}
+
+function Resolve-RogueActor {
+    # Mirrors actor.sh: first NON-SYNTHETIC candidate wins.
+    #   EMAIL: ROGUE_ACTOR_EMAIL -> CLAUDE_CODE_USER_EMAIL -> git config file user.email
+    #          -> <login>@<COMPUTERNAME> (marker "unknown" for a missing part)
+    #   NAME:  ROGUE_ACTOR_NAME -> local-part of CLAUDE_CODE_USER_EMAIL
+    #          -> git config file user.name -> USERNAME / [Environment]::UserName
+    #          -> marker unknown
+    # The explicit ROGUE_ACTOR_* values are screened too - compiled bundles already
+    # in the field bake a git-config pre-seed into ${CLAUDE_PLUGIN_ROOT}\env, so a
+    # plugin update can only fix them if we distrust a poisoned value. See actor.sh.
+    param([hashtable]$Creds, [string]$PluginRoot)
+    # Screen the WHOLE address before splitting it. Taking the local-part first
+    # smuggles the sandbox identity past the screen: noreply@anthropic.com is
+    # rejected as an email, but its local-part "noreply" is not on the list.
+    $hostMail = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
+    $name  = Select-ActorValue @($Creds['ROGUE_ACTOR_NAME'], (($hostMail -split '@')[0]))
+    $email = Select-ActorValue @($Creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
+    if (-not $name -or -not $email) {
+        $git = Read-RogueGitIdentity $PluginRoot
+        $name  = Select-ActorValue @($name, [string]$git.Name)
+        $email = Select-ActorValue @($email, [string]$git.Email)
+    }
+    # POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
+    # to whoami.exe: its output is DOMAIN\user, a different identity string that
+    # would re-fingerprint every existing roster row, and it costs a process per
+    # hook. [Environment]::UserName is the true twin - it reads the process token,
+    # so it still answers in the service contexts where USERNAME is unset.
+    $login = Select-ActorValue @($env:USERNAME, [Environment]::UserName)
+    if (-not $name) { $name = $login }
+    if (-not $name) { $name = 'unknown' }
+    if (-not $email) {
+        # Same fallback the roster host uses: COMPUTERNAME can be unset in service
+        # contexts, where the sh twin's `hostname` still answers.
+        $dnsHost = ''
+        try { $dnsHost = [System.Net.Dns]::GetHostName() } catch {}
+        $hostForActor = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
+        $who = $login
+        if (-not $who) { $who = 'unknown' }
+        if ($hostForActor) { $email = "$who@$hostForActor" } else { $email = $who }
+    }
+    return @{ Email = $email; Name = $name }
 }
 
 function Test-WantAlert {
@@ -329,31 +386,38 @@ try {
 } catch { $script:surface = '' }
 Dbg "surface=$($script:surface)"
 
-# -- credential resolution (later file wins; process env wins over all) -----
+# -- credential resolution ---------------------------------------------------
 $creds = @{}
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
+foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
+               'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
+    $val = [Environment]::GetEnvironmentVariable($k)
+    if ($val) { $creds[$k] = $val }
+}
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
 $credFiles = @(
-    (Join-Path $pluginRoot 'env'),
     'C:\ProgramData\rogue\env',
+    (Join-Path $pluginRoot 'env'),
     (Join-Path $env:USERPROFILE '.rogue-env')
 )
 foreach ($f in $credFiles) {
     if (-not $f) { continue }
     if (-not (Test-Path -LiteralPath $f)) { Dbg "cred file absent: $f"; continue }
-    Dbg "cred file found: $f"
-    foreach ($line in (Get-Content -LiteralPath $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-            $k = $Matches[1]
-            $v = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            $creds[$k] = $v
+    $fileVals = @{}
+    foreach ($line in (Read-RogueEnvFile $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+            # Decode shell quoting/escaping so the value round-trips with the
+            # `source`-based parse in hook.sh (mirrors shlex.split).
+            $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
         }
     }
-}
-# ROGUE_LOG_* ride the same list so a process-env value still beats the files,
-# which is what makes the resolved precedence identical to hook.sh's.
-foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
-               'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
-    $val = [Environment]::GetEnvironmentVariable($k)
-    if ($val) { $creds[$k] = $val }
+    if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { Dbg "cred file skipped: $f"; continue }
+    Dbg "cred file in use: $f"
+    foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
+    break
 }
 
 # Logging is initialised HERE - after the credential files are parsed, so they can
@@ -381,49 +445,10 @@ $baseUrl = $creds['ROGUE_BASE_URL']
 if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# -- actor resolution (mirrors actor.sh, first NON-SYNTHETIC candidate wins) --
-#   EMAIL: ROGUE_ACTOR_EMAIL -> CLAUDE_CODE_USER_EMAIL -> git config user.email
-#          -> marker unknown@<COMPUTERNAME>
-#   NAME:  ROGUE_ACTOR_NAME -> local-part of CLAUDE_CODE_USER_EMAIL
-#          -> git config user.name -> USERNAME / [Environment]::UserName
-#          -> marker unknown
-# The explicit ROGUE_ACTOR_* values are screened too - compiled bundles already
-# in the field bake a git-config pre-seed into ${CLAUDE_PLUGIN_ROOT}\env, so a
-# plugin update can only fix them if we distrust a poisoned value. See actor.sh.
-# Screen the WHOLE address before splitting it. Taking the local-part first
-# smuggles the sandbox identity past the screen: noreply@anthropic.com is
-# rejected as an email, but its local-part "noreply" is not on the list.
-$hostMail = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
-$actorName = Select-ActorValue @(
-    $creds['ROGUE_ACTOR_NAME'],
-    (($hostMail -split '@')[0])
-)
-if (-not $actorName) {
-    $gitName = ''
-    try { $gitName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {}
-    # POSIX ends this cascade at `whoami`. Windows deliberately does NOT shell out
-    # to whoami.exe: its output is DOMAIN\user, a different identity string that
-    # would re-fingerprint every existing roster row, and it costs a process per
-    # hook. [Environment]::UserName is the true twin — it reads the process token,
-    # so it still answers in the service contexts where USERNAME is unset.
-    $actorName = Select-ActorValue @($gitName, $env:USERNAME, [Environment]::UserName)
-}
-if (-not $actorName) { $actorName = 'unknown' }
-
-$actorEmail = Select-ActorValue @($creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
-if (-not $actorEmail) {
-    $gitEmail = ''
-    try { $gitEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {}
-    $actorEmail = Select-ActorValue @($gitEmail)
-}
-if (-not $actorEmail) {
-    # Same fallback the roster host below already uses: COMPUTERNAME can be unset
-    # in service contexts, where the sh twin's `hostname` still answers.
-    $dnsHost = ''
-    try { $dnsHost = [System.Net.Dns]::GetHostName() } catch {}
-    $hostForActor = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
-    if ($hostForActor) { $actorEmail = "unknown@$hostForActor" } else { $actorEmail = 'unknown' }
-}
+# -- actor resolution (Resolve-RogueActor, above the seam so tests can drive it) --
+$actor = Resolve-RogueActor $creds $pluginRoot
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
 
 # -- install identity: host + version + surface label ------------------------
 # The fleet roster keys an install on host + actor + family + agent, and until

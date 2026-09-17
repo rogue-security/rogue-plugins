@@ -25,9 +25,11 @@ function freshHome() {
 }
 
 // Run hook.mjs <event> with `payload` on stdin and `env` overrides; resolve stdout.
-function runHook(event, payload, env) {
+// `prepareHome(home)` may seed the throwaway HOME (env file, git config) first.
+function runHook(event, payload, env, prepareHome) {
   return new Promise((resolve) => {
     const home = freshHome();
+    if (prepareHome) prepareHome(home);
     const child = spawn(process.execPath, [HOOK, event], {
       env: {
         PATH: process.env.PATH,
@@ -188,6 +190,157 @@ test("relays server body verbatim and sends the right headers", async () => {
     assert.equal(seen.body, '{"tool_name":"run_shell_command"}');
   } finally {
     server.close();
+  }
+});
+
+// ── Actor fallback: env file → git config files → login@hostname ───────────
+// The git identity must come from the config FILES: on a Mac without the Command
+// Line Tools `git` is a stub that opens the installer dialog, so a stub `git`
+// ahead of PATH records any invocation and the tests assert it never fired.
+function gitTripwire() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rogue-gem-git-"));
+  const marker = path.join(dir, "invoked");
+  fs.writeFileSync(
+    path.join(dir, "git"),
+    `#!/bin/sh\necho "git $@" >> "${marker}"\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  return {
+    marker,
+    PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+  };
+}
+function seedHome(home, { actor, gitconfig }) {
+  const lines = ["export ROGUE_API_KEY=rsk_test", `export ROGUE_BASE_URL=${seedHome.base}`];
+  if (actor) lines.push(`export ROGUE_ACTOR_EMAIL=${actor.email}`, `export ROGUE_ACTOR_NAME='${actor.name}'`);
+  fs.writeFileSync(path.join(home, ".rogue-env"), lines.join("\n") + "\n");
+  if (gitconfig) fs.writeFileSync(path.join(home, ".gitconfig"), gitconfig);
+}
+const GITCONFIG = "[user]\n\temail = jane@corp.com\n\tname = Jane Dev\n";
+
+test("actor from the env file wins over the git identity", async () => {
+  const { server, seen, port } = await startServer(200, "{}");
+  const git = gitTripwire();
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", { PATH: git.PATH }, (home) =>
+      seedHome(home, { actor: { email: "mdm@corp.com", name: "MDM Provisioned" }, gitconfig: GITCONFIG }),
+    );
+    assert.equal(seen.headers["x-rogue-actor-email"], "mdm@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], "MDM Provisioned");
+    assert.equal(fs.existsSync(git.marker), false, "git must never be invoked");
+  } finally {
+    server.close();
+    git.cleanup();
+  }
+});
+
+test("no actor in the env file → git identity from the config files, git never run", async () => {
+  const { server, seen, port } = await startServer(200, "{}");
+  const git = gitTripwire();
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    // The name lives in an [include] path file, so the include level is covered too.
+    await runHook("BeforeTool", "{}", { PATH: git.PATH }, (home) => {
+      seedHome(home, {
+        gitconfig: "[user]\n\temail = jane@corp.com\n[include]\n\tpath = ~/.gitconfig-work\n",
+      });
+      fs.writeFileSync(path.join(home, ".gitconfig-work"), '[user]\n\tname = "Jane Dev"\n');
+    });
+    assert.equal(seen.headers["x-rogue-actor-email"], "jane@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], "Jane Dev");
+    assert.equal(fs.existsSync(git.marker), false, "git must never be invoked");
+  } finally {
+    server.close();
+    git.cleanup();
+  }
+});
+
+test("BOM-prefixed config and git's escaped quotes read as git does (one rule with sh/ps1)", async () => {
+  const { server, seen, port } = await startServer(200, "{}");
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", {}, (home) =>
+      seedHome(home, {
+        gitconfig: '\uFEFF[user]\n\temail = jane@corp.com # work\n\tname = "Jane \\"JJ\\" Dev" ; nick\n',
+      }),
+    );
+    assert.equal(seen.headers["x-rogue-actor-email"], "jane@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], 'Jane "JJ" Dev');
+  } finally {
+    server.close();
+  }
+});
+
+test("git's control escapes decode to a space, not to the letters n/t/b", async () => {
+  // A real newline or backspace cannot travel in a header value, so all three of
+  // git's control escapes collapse to a space - one rule with sh/ps1.
+  const { server, seen, port } = await startServer(200, "{}");
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", {}, (home) =>
+      seedHome(home, { gitconfig: '[user]\n\temail = "a\\nb@corp.com"\n\tname = "Jane\\nQ\\tDev\\bX"\n' }),
+    );
+    assert.equal(seen.headers["x-rogue-actor-email"], "a b@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], "Jane Q Dev X");
+  } finally {
+    server.close();
+  }
+});
+
+test("a whitespace-only ROGUE_ACTOR_* is absent, so the git identity is used", async () => {
+  // Untrimmed it would ship a blank identity AND skip the cascade, while the log
+  // shipper (which trims) sends a different identity for the same install.
+  const { server, seen, port } = await startServer(200, "{}");
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", {}, (home) => {
+      seedHome(home, { gitconfig: GITCONFIG });
+      fs.appendFileSync(
+        path.join(home, ".rogue-env"),
+        "export ROGUE_ACTOR_EMAIL='   '\nexport ROGUE_ACTOR_NAME='  '\n",
+      );
+    });
+    assert.equal(seen.headers["x-rogue-actor-email"], "jane@corp.com");
+    assert.equal(seen.headers["x-rogue-actor-name"], "Jane Dev");
+  } finally {
+    server.close();
+  }
+});
+
+test("a non-Latin-1 git user.name still reaches the server, as the UTF-8 bytes curl would send", async () => {
+  // fetch() throws on any header code unit above 0xFF; before headerBytes that
+  // TypeError landed in the fail-open catch and every hook of such a user emitted {}.
+  const denyBody = JSON.stringify({ decision: "deny", reason: "blocked by test" });
+  const { server, seen, port } = await startServer(200, denyBody);
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    const out = await runHook("BeforeTool", "{}", {}, (home) =>
+      seedHome(home, { gitconfig: "[user]\n\temail = yuval@corp.com\n\tname = יובל\n" }),
+    );
+    assert.equal(out, denyBody, "the decision must reach Gemini, not a fail-open {}");
+    // Node's server decodes header bytes as Latin-1; the bytes are the UTF-8 encoding.
+    assert.equal(Buffer.from(seen.headers["x-rogue-actor-name"], "latin1").toString("utf8"), "יובל");
+    assert.equal(seen.headers["x-rogue-actor-email"], "yuval@corp.com");
+  } finally {
+    server.close();
+  }
+});
+
+test("no git identity → login@hostname, never a blank actor", async () => {
+  const { server, seen, port } = await startServer(200, "{}");
+  const git = gitTripwire();
+  seedHome.base = `http://127.0.0.1:${port}`;
+  try {
+    await runHook("BeforeTool", "{}", { PATH: git.PATH }, (home) => seedHome(home, {}));
+    const login = os.userInfo().username;
+    assert.equal(seen.headers["x-rogue-actor-email"], `${login}@${os.hostname()}`);
+    assert.equal(seen.headers["x-rogue-actor-name"], login);
+    assert.equal(fs.existsSync(git.marker), false, "git must never be invoked");
+  } finally {
+    server.close();
+    git.cleanup();
   }
 });
 

@@ -3,13 +3,17 @@
 # ROGUE_ACTOR_{EMAIL,NAME} from a cascade.
 #
 # Cascade (first NON-SYNTHETIC candidate wins):
-#   EMAIL: $ROGUE_ACTOR_EMAIL → $CLAUDE_CODE_USER_EMAIL → git --global user.email
-#          → marker "unknown@<hostname>" (plain "unknown" with no hostname)
+#   EMAIL: $ROGUE_ACTOR_EMAIL → $CLAUDE_CODE_USER_EMAIL → git config file user.email
+#          → "<login>@<hostname>" (marker "unknown" for a missing/synthetic part)
 #   NAME:  $ROGUE_ACTOR_NAME → local-part of $CLAUDE_CODE_USER_EMAIL
-#          → git --global user.name → whoami → marker "unknown"
+#          → git config file user.name → login → marker "unknown"
 #
-# CLAUDE_CODE_USER_EMAIL (the authenticated user, set by the Claude host) now
-# ranks ABOVE `git config`. In Claude Cowork the agent runs as unix user `claude`
+# The git identity comes from the config FILES (scripts/git-identity.sh), never
+# from the git binary: on a Mac without the Command Line Tools `git` is a stub
+# that opens the installer dialog.
+#
+# CLAUDE_CODE_USER_EMAIL (the authenticated user, set by the Claude host) ranks
+# ABOVE the git identity. In Claude Cowork the agent runs as unix user `claude`
 # in a sandbox whose git identity is Anthropic's synthetic one
 # (user.name=Claude / user.email=noreply@anthropic.com), so a git-first cascade
 # reported every Cowork user as "Claude". On a normal dev machine there is no
@@ -41,6 +45,20 @@ _rogue_is_synthetic() {
   return 1
 }
 
+# -- git identity (both fields at once; the files are read only when needed) --
+_rogue_git_loaded=0
+_rogue_load_git() {
+  [ "$_rogue_git_loaded" = 1 ] && return 0
+  _rogue_git_loaded=1
+  ROGUE_GIT_EMAIL=""; ROGUE_GIT_NAME=""
+  _rogue_root="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"
+  if [ -r "$_rogue_root/scripts/git-identity.sh" ]; then
+    . "$_rogue_root/scripts/git-identity.sh"
+    rogue_git_identity
+  fi
+  unset _rogue_root
+}
+
 # -- email ------------------------------------------------------------------
 _rogue_email="${ROGUE_ACTOR_EMAIL:-}"
 _rogue_is_synthetic "$_rogue_email" && _rogue_email=""
@@ -50,16 +68,19 @@ if [ -z "$_rogue_email" ]; then
   _rogue_is_synthetic "$_rogue_email" && _rogue_email=""
 fi
 if [ -z "$_rogue_email" ]; then
-  _rogue_email=$(git config --global user.email 2>/dev/null)
+  _rogue_load_git
+  _rogue_email="$ROGUE_GIT_EMAIL"
   _rogue_is_synthetic "$_rogue_email" && _rogue_email=""
 fi
 if [ -z "$_rogue_email" ]; then
+  _rogue_login="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
+  _rogue_is_synthetic "$_rogue_login" && _rogue_login="unknown"
   _rogue_host=$(hostname 2>/dev/null)
   _rogue_is_synthetic "$_rogue_host" && _rogue_host=""
   if [ -n "$_rogue_host" ]; then
-    _rogue_email="unknown@$_rogue_host"
+    _rogue_email="$_rogue_login@$_rogue_host"
   else
-    _rogue_email="unknown"
+    _rogue_email="$_rogue_login"
   fi
 fi
 
@@ -80,11 +101,12 @@ if [ -z "$_rogue_name" ]; then
   _rogue_is_synthetic "$_rogue_name" && _rogue_name=""
 fi
 if [ -z "$_rogue_name" ]; then
-  _rogue_name=$(git config --global user.name 2>/dev/null)
+  _rogue_load_git
+  _rogue_name="$ROGUE_GIT_NAME"
   _rogue_is_synthetic "$_rogue_name" && _rogue_name=""
 fi
 if [ -z "$_rogue_name" ]; then
-  _rogue_name=$(whoami 2>/dev/null)
+  _rogue_name="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
   _rogue_is_synthetic "$_rogue_name" && _rogue_name=""
 fi
 [ -n "$_rogue_name" ] || _rogue_name="unknown"
@@ -93,4 +115,4 @@ ROGUE_ACTOR_EMAIL="$_rogue_email"
 ROGUE_ACTOR_NAME="$_rogue_name"
 export ROGUE_ACTOR_EMAIL ROGUE_ACTOR_NAME
 
-unset _rogue_v _rogue_email _rogue_name _rogue_host _rogue_hostmail
+unset _rogue_v _rogue_email _rogue_name _rogue_host _rogue_hostmail _rogue_login _rogue_git_loaded

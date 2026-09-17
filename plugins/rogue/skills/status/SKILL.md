@@ -5,10 +5,10 @@ description: Check Rogue Security AIDR connection status, active rulesets, and c
 # Rogue Security Status
 
 Check the current status of the Rogue Security AIDR integration. The plugin hooks
-source credentials from three locations in order (later wins): the plugin's bundled
-`env` (managed installs), `/etc/rogue/env` (MDM-provisioned), and `~/.rogue-env`
-(per-user setup). This command checks all three so it works for managed, MDM, and
-individual deployments.
+read exactly one env file: the first of `/etc/rogue/env` (MDM-provisioned), the
+plugin's bundled `env` (managed installs), and `~/.rogue-env` (per-user setup) that
+holds `ROGUE_API_KEY`. This command applies the same rule and reports which file is
+in use.
 
 **Pick the command variant for the user's OS.** The steps below use **macOS / Linux (bash)** commands. On **native Windows (no WSL)**, use the PowerShell equivalents in the "Windows (PowerShell)" block at the end of this command instead — the credential files there are `C:\ProgramData\rogue\env` (MDM) and `%USERPROFILE%\.rogue-env` (per-user), and the plugin bundle `env` lives under `$env:USERPROFILE\.claude\plugins`.
 
@@ -20,13 +20,15 @@ helper written to `/tmp/`:
 ```bash
 cat > /tmp/rogue-source-env.sh <<'EOF'
 PLUGIN_ENV=$(find "$HOME/.claude/plugins" -name env -type f -path '*rogue*' 2>/dev/null | head -1)
-[ -n "$PLUGIN_ENV" ] && [ -r "$PLUGIN_ENV" ] && . "$PLUGIN_ENV"
-[ -r /etc/rogue/env ]              && . /etc/rogue/env
-[ -r "$HOME/.rogue-env" ]          && . "$HOME/.rogue-env"
+ROGUE_ENV_IN_USE=""
+# The first env file holding ROGUE_API_KEY is used alone.
+for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { . "$f"; ROGUE_ENV_IN_USE=$f; break; }
+done
 EOF
 chmod +x /tmp/rogue-source-env.sh
 
-# Report which sources contributed
+# Report which sources exist and which one is in use
 . /tmp/rogue-source-env.sh
 echo "Credential sources detected:"
 PLUGIN_ENV=$(find "$HOME/.claude/plugins" -name env -type f -path '*rogue*' 2>/dev/null | head -1)
@@ -34,6 +36,10 @@ PLUGIN_ENV=$(find "$HOME/.claude/plugins" -name env -type f -path '*rogue*' 2>/d
 [ -r /etc/rogue/env ]     && echo "  /etc/rogue/env  (MDM)"
 [ -r "$HOME/.rogue-env" ] && echo "  $HOME/.rogue-env  (per-user)"
 [ -z "$PLUGIN_ENV" ] && [ ! -r /etc/rogue/env ] && [ ! -r "$HOME/.rogue-env" ] && echo "  (none)"
+for f in /etc/rogue/env "$PLUGIN_ENV" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && echo "  $f  (no ROGUE_API_KEY, not read)"
+done
+echo "In use: ${ROGUE_ENV_IN_USE:-(none holds ROGUE_API_KEY)}"
 
 # Sanity check the resolved key
 [ -n "$ROGUE_API_KEY" ] && echo "API key resolved: ...${ROGUE_API_KEY: -4}" || echo "API key: not resolved"
@@ -114,8 +120,8 @@ Report from the JSON response (HTTP 200 = connected):
 On failure suggest:
 
 - HTTP 401 → key invalid. Compare the resolved key tail (Step 1) against the
-  [API keys dashboard](https://app.rogue.security/settings/api-keys); the
-  precedence chain may be picking up a stale source — check Step 1's list.
+  [API keys dashboard](https://app.rogue.security/settings/api-keys); the file
+  in use may be stale — check Step 1's `In use:` line.
 - HTTP 400 → the JSON body was malformed or `agent_family` was missing; print the
   body the command sent and compare it with `scripts/heartbeat.sh`.
 - HTTP 404 → the URL is wrong (a stale `ROGUE_BASE_URL`, or a path other than
@@ -163,16 +169,20 @@ echo "Actor name:  ${ROGUE_ACTOR_NAME:-(unresolved)}"
 [ "$RAW_NAME" = "${ROGUE_ACTOR_NAME:-}" ] || \
   echo "  note: env file holds \"${RAW_NAME:-(unset)}\", replaced by the cascade"
 echo "--- recent hook activity ---"
-# Same precedence as the dispatcher: the env files first (system, then per-user),
-# with the process environment winning over both. Read with sed, never by
-# sourcing - a status command must not execute an env file. Reading only
-# $ROGUE_LOG_* would report "no activity" on exactly the machines that relocate
-# their logs by policy, which are the ones support is called about.
+# Same rule as the dispatcher: only the env file in use (the first holding
+# ROGUE_API_KEY) is read, with the process environment for anything it does not
+# set. Read with sed, never by sourcing - a status command must not execute an env
+# file. Reading only $ROGUE_LOG_* would report "no activity" on exactly the
+# machines that relocate their logs by policy, which are the ones support is
+# called about.
+ROGUE_ENV_IN_USE=""
+for f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
+  [ -n "$f" ] && [ -r "$f" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$f" && { ROGUE_ENV_IN_USE=$f; break; }
+done
 rogue_log_var() {
   v=$(sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1=//p" \
-        /etc/rogue/env "$HOME/.rogue-env" 2>/dev/null | tail -1 | sed "s/^['\"]//;s/['\"]$//")
-  eval "p=\${$1:-}"
-  [ -n "$p" ] && v=$p
+        "${ROGUE_ENV_IN_USE:-/dev/null}" 2>/dev/null | tail -1 | sed "s/^['\"]//;s/['\"]$//")
+  [ -n "$v" ] || eval "v=\${$1:-}"
   printf '%s' "$v"
 }
 log=$(rogue_log_var ROGUE_LOG_FILE)
@@ -193,12 +203,13 @@ missing file with a healthy connection just means no events have fired yet.
 If either is unset:
 
 - **A real address and name** — nothing to do.
-- **`unknown@<host>` / `unknown`** — no usable identity was found anywhere: the
-  cascade tried `ROGUE_ACTOR_*`, `CLAUDE_CODE_USER_EMAIL`, `git config --global`
-  and `whoami`, and either found them empty or rejected them as the sandbox's
-  synthetic `Claude <noreply@anthropic.com>`. Events still POST and are still
-  enforced; they are just attributed to a marker instead of a person. Fix by
-  setting a real git identity, or by provisioning `ROGUE_ACTOR_*` explicitly:
+- **`<login>@<host>` / `<login>`** — no identity was found in the env file,
+  `CLAUDE_CODE_USER_EMAIL` or the git config files (`~/.gitconfig`, read as a
+  file), so the login name stands in. **`unknown@<host>` / `unknown`** means even
+  the login was rejected as the sandbox's synthetic `Claude <noreply@anthropic.com>`.
+  Events still POST and are still enforced; they are just attributed to a marker
+  instead of a person. Fix by setting a real git identity, or by provisioning
+  `ROGUE_ACTOR_*` explicitly:
   - **Managed deployment**: the MDM script (`mdm-provision-actor.sh`) hasn't run
     yet or ran with empty placeholders. Force an enforcement run on your MDM
     (Kandji "Run library item now", `sudo jamf policy`).
@@ -288,7 +299,7 @@ else {
   $env:ROGUE_SHIP_MIN_INTERVAL = '0'; $env:ROGUE_DEBUG = '1'
   $env:ROGUE_SHIPPER_SCRIPT = $ship
   # PASS THE ROOT. On a no-argument run the shipper self-locates its plugin root to
-  # read <root>\env, the FIRST file in the credential chain - and $PSCommandPath is
+  # read <root>\env, a candidate in the credential chain - and $PSCommandPath is
   # EMPTY under [scriptblock]::Create, so it falls back to the current directory,
   # which is the operator's cwd and has no env file. The bundled ROGUE_BASE_URL is
   # then missed and identity can be absent entirely (outcome=skip reason=no-actor),
@@ -318,13 +329,10 @@ installed), then the newest **non-orphaned** copy under
 
 **Which copy runs matters, so report the path it prints.** On a no-argument run
 the shipper self-locates its plugin root from its own script path and reads
-`<plugin-root>/env` as the *first* file in the credential chain, so a stale tree
-supplies credentials — and while a later `~/.rogue-env` overrides the API key,
-`setup.sh` writes no `ROGUE_BASE_URL` of its own, so a stale base URL in an
-orphaned tree's bundled `env` would win and the upload would go to the wrong
-host. (One added to `~/.rogue-env` by hand does now survive: every writer
-merges rather than truncating, so setup and auto-update keep it.) Hence all
-three layers prefer the installed tree and skip anything carrying Claude Code's
+`<plugin-root>/env` as a credential candidate (after `/etc/rogue/env`), so a stale
+tree whose bundled `env` holds a key supplies the credentials alone — `~/.rogue-env`
+is not read at all then, and a stale base URL in that tree would send the upload to
+the wrong host. Hence all three layers prefer the installed tree and skip anything carrying Claude Code's
 `.orphaned_at` marker, and the command echoes the path it chose. This is also why
 "any copy will do" is wrong even though `ship-logs.sh` is byte-identical across
 the five sh plugins (`scripts/sync-shared-scripts.sh --check` enforces that): the
@@ -379,21 +387,26 @@ After the summary, tell the user:
 ## Windows (PowerShell)
 
 On native Windows (no WSL), run this single block instead of Steps 1–4. It
-resolves credentials (later source wins), reports what was found, registers the
-heartbeat, and prints the resolved identity:
+resolves credentials (the first file holding `ROGUE_API_KEY`), reports the file in
+use, registers the heartbeat, and prints the resolved identity:
 
 ```powershell
-$creds = @{}
 $pluginEnv = Get-ChildItem "$env:USERPROFILE\.claude\plugins" -Recurse -Filter env -File -ErrorAction SilentlyContinue |
   Where-Object { $_.FullName -like '*rogue*' } | Select-Object -First 1
-foreach ($f in @($pluginEnv.FullName, 'C:\ProgramData\rogue\env', "$env:USERPROFILE\.rogue-env")) {
+$creds = @{}
+# The first env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+foreach ($f in @('C:\ProgramData\rogue\env', $pluginEnv.FullName, "$env:USERPROFILE\.rogue-env")) {
   if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-  Write-Host "  $f"
+  $fileVals = @{}
   foreach ($line in (Get-Content -LiteralPath $f)) {
-    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-      $creds[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
+    if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+      $fileVals[$Matches[1]] = $Matches[2].Trim() -replace "^'(.*)'$",'$1' -replace '^"(.*)"$','$1'
     }
   }
+  if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+  Write-Host "  in use: $f"
+  $creds = $fileVals
+  break
 }
 $key = $creds['ROGUE_API_KEY']
 if (-not $key) { 'API key: not resolved — run /rogue:setup'; return }
@@ -430,24 +443,15 @@ $hookPs1 = Get-ChildItem "$env:USERPROFILE\.claude\plugins" -Recurse -Filter hoo
   Where-Object { $_.FullName -like '*rogue*' } | Select-Object -First 1
 $actorEmail = [string]$creds['ROGUE_ACTOR_EMAIL']; $actorName = [string]$creds['ROGUE_ACTOR_NAME']
 if ($hookPs1) {
-  $env:ROGUE_PS_LIB_ONLY = '1'; . $hookPs1.FullName; $env:ROGUE_PS_LIB_ONLY = $null
-  # Mirrors the cascade in hook.ps1 / heartbeat.ps1 — keep all three in step.
-  $hostMail  = Select-ActorValue @($env:CLAUDE_CODE_USER_EMAIL)
-  $actorName = Select-ActorValue @($creds['ROGUE_ACTOR_NAME'], (($hostMail -split '@')[0]))
-  if (-not $actorName) {
-    $gn = ''; try { $gn = (& git config --global user.name 2>$null | Out-String).Trim() } catch {}
-    $actorName = Select-ActorValue @($gn, $env:USERNAME, [Environment]::UserName)
-  }
-  if (-not $actorName) { $actorName = 'unknown' }
-  $actorEmail = Select-ActorValue @($creds['ROGUE_ACTOR_EMAIL'], $env:CLAUDE_CODE_USER_EMAIL)
-  if (-not $actorEmail) {
-    $ge = ''; try { $ge = (& git config --global user.email 2>$null | Out-String).Trim() } catch {}
-    $actorEmail = Select-ActorValue @($ge)
-  }
-  if (-not $actorEmail) {
-    $h = Select-ActorValue @($env:COMPUTERNAME, $dnsHost)
-    if ($h) { $actorEmail = "unknown@$h" } else { $actorEmail = 'unknown' }
-  }
+  # Loaded as a scriptblock, not dot-sourced by path: running a .ps1 by path is
+  # subject to ExecutionPolicy, which is enforced on a managed machine.
+  $env:ROGUE_PS_LIB_ONLY = '1'
+  try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $hookPs1.FullName))) }
+  finally { $env:ROGUE_PS_LIB_ONLY = $null }
+  # The very cascade hook.ps1 runs (env file -> CLAUDE_CODE_USER_EMAIL -> git config
+  # files -> login@host), so this can never report a different actor than the hooks.
+  $a = Resolve-RogueActor $creds (Split-Path (Split-Path $hookPs1.FullName -Parent) -Parent)
+  $actorEmail = [string]$a.Email; $actorName = [string]$a.Name
 } else {
   'WARNING: hook.ps1 not found - reporting raw env values, which may be a sandbox identity'
 }
@@ -459,12 +463,11 @@ try {
 "Actor email: $actorEmail"
 "Actor name:  $actorName"
 '--- recent hook activity ---'
-# The process environment wins over every file, exactly as it does in the
-# dispatcher - overlay it before deriving the path, or an operator who exported
-# ROGUE_LOG_DIR for this session is told there is no activity.
+# The process environment supplies only what the file in use does not set, exactly
+# as in the dispatcher - so an operator who exported ROGUE_LOG_DIR for this session
+# is still told where the log is.
 foreach ($v in 'ROGUE_LOG_FILE','ROGUE_LOG_DIR') {
-  $pv = [Environment]::GetEnvironmentVariable($v)
-  if ($pv) { $creds[$v] = $pv }
+  if (-not $creds[$v]) { $pv = [Environment]::GetEnvironmentVariable($v); if ($pv) { $creds[$v] = $pv } }
 }
 $logPath = $creds['ROGUE_LOG_FILE']
 if (-not $logPath) {

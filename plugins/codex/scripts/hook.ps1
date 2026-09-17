@@ -10,9 +10,10 @@
 # yield `{}` on stdout, exit 0. A Codex session must never break because Rogue
 # infrastructure is unavailable.
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. ${PLUGIN_ROOT}\env          (baked into a compiled customer plugin)
-#   2. C:\ProgramData\rogue\env    (MDM-provisioned; mirrors /etc/rogue/env)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. C:\ProgramData\rogue\env    (machine, MDM-provisioned; mirrors /etc/rogue/env)
+#   2. ${PLUGIN_ROOT}\env          (bundled into a compiled customer plugin)
 #   3. %USERPROFILE%\.rogue-env    (user / installer-written)
 
 param([string]$EventName = '')
@@ -79,8 +80,8 @@ $script:logFile = $null
 $script:logMaxBytes = 10485760
 
 function Initialize-Logging {
-    # $Creds is the merged credential map (bundled env → MDM → per-user file, then
-    # process env last), so precedence is already correct by the time we read it.
+    # $Creds is the resolved credential map (process env, then the chosen env file
+    # over it), so precedence is already correct by the time we read it.
     # $HOME backs up USERPROFILE so this also works dot-sourced on macOS/Linux.
     param([hashtable]$Creds = @{})
     $f = $Creds['ROGUE_LOG_FILE']
@@ -178,21 +179,28 @@ Dbg "event=$EventName"
 $pluginRoot = $env:PLUGIN_ROOT
 if (-not $pluginRoot) { try { $pluginRoot = (Get-Location).Path } catch { $pluginRoot = '.' } }
 
-# ── credential resolution (later file wins; process env wins over all) ─────
+# ── credential resolution ──────────────────────────────────────────────────
 $creds = @{}
-foreach ($f in @((Join-Path $pluginRoot 'env'), 'C:\ProgramData\rogue\env', (Join-Path $env:USERPROFILE '.rogue-env'))) {
-    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
-    foreach ($line in (Get-Content -LiteralPath $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-            $creds[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-        }
-    }
-}
-# ROGUE_LOG_* ride the same list so a process-env value still beats the files,
-# which is what makes the resolved precedence identical to hook.sh's.
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL','ROGUE_API_URL','ROGUE_CODEX_SURFACE',
                'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES') {
     $val = [Environment]::GetEnvironmentVariable($k); if ($val) { $creds[$k] = $val }
+}
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Join-Path $env:USERPROFILE '.rogue-env'))) {
+    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+    $fileVals = @{}
+    foreach ($line in (Read-RogueEnvFile $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+            $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+        }
+    }
+    if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
+    foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
+    break
 }
 
 # Logging is initialised HERE - after the credential files are parsed, so they can
@@ -236,17 +244,21 @@ if (-not $url) {
     $url = "$($baseUrl.TrimEnd('/'))/api/v1/hooks/openai"
 }
 
-# ── actor resolution (mirrors actor.sh) ────────────────────────────────────
-$actorName = $creds['ROGUE_ACTOR_NAME']
-if (-not $actorName) { try { $actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorName) { $actorName = $env:USERNAME }
-
-$actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorEmail) { try { $actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorEmail) {
-    if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-    elseif ($env:USERNAME) { $actorEmail = $env:USERNAME } else { $actorEmail = $env:COMPUTERNAME }
-}
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values, or the marker, never a blank.
+$actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+try {
+    $actorLib = Join-Path $pluginRoot 'scripts\actor.ps1'
+    if (Test-Path -LiteralPath $actorLib) {
+        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+        $actor = Resolve-RogueSharedActor $creds $pluginRoot
+    }
+} catch {}
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
+if (-not $actorName)  { $actorName  = 'unknown' }
+if (-not $actorEmail) { $actorEmail = 'unknown' }
 
 # ── per-turn presence heartbeat + log ship (Stop only) ─────────────────────
 # The PowerShell twin of hook.sh's Stop block. SessionStart's heartbeat is spawned by

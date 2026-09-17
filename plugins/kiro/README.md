@@ -143,17 +143,12 @@ family `kiro` to when it decides whether a roster row is outdated.
 
 ## Credentials
 
-Later file wins:
+One env file is read: the first of these that holds `ROGUE_API_KEY`. Its values
+override the process environment on both bridges.
 
-1. `<root>/env` — baked into a compiled customer plugin
-2. `/etc/rogue/env` (`C:\ProgramData\rogue\env`) — MDM-provisioned
+1. `/etc/rogue/env` (`C:\ProgramData\rogue\env`) — MDM-provisioned
+2. `<root>/env` — baked into a compiled customer plugin
 3. `~/.rogue-env` — per-user, written by the installer
-
-The two bridges differ on the process environment, as the sibling plugins do:
-`hook.sh` sources the files (`export X=…`), so a value in a later file overwrites
-one the hook inherited; `hook.ps1` reads the files into a map and then lets a
-non-empty process-env value beat every file. Set the value in `~/.rogue-env` to
-be sure it applies on both.
 
 ## Tests
 

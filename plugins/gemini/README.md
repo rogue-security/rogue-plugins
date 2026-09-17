@@ -38,8 +38,9 @@ response from `AfterAgent`.
   missing key / network error / bad response returns `{}` (allow) and exits 0.
 - **Shared credentials.** Reads `~/.rogue-env` (mode 600) from disk each
   invocation — the SAME file the Claude Code, Codex, and Cursor Rogue plugins
-  use. Env precedence (later wins): `<ext>/env` → `/etc/rogue/env`
-  (`C:\ProgramData\rogue\env` on Windows) → `~/.rogue-env`.
+  use. One env file is read: the first of `/etc/rogue/env`
+  (`C:\ProgramData\rogue\env` on Windows), `<ext>/env`, and `~/.rogue-env` that
+  holds `ROGUE_API_KEY`.
 
 ## Install
 
@@ -69,8 +70,7 @@ endpoint, your active rulesets, and a tail of recent hook activity
 (`~/.rogue/logs/gemini.log` — each Rogue plugin logs to its own file, capped at
 10 MiB with one `.1` rotation kept). `ROGUE_LOG_MAX_BYTES` overrides that cap and
 `0` turns rotation off; `ROGUE_LOG_FILE` / `ROGUE_LOG_DIR` relocate the log. All
-three are read from `~/.rogue-env` (or `/etc/rogue/env`), with the process
-environment winning.
+three are read from the env file in use, which overrides the process environment.
 
 ## Uninstall
 

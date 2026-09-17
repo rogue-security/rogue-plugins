@@ -32,10 +32,10 @@
 # Logs every invocation to $env:ROGUE_LOG_FILE (default
 # %USERPROFILE%\.rogue\logs\cursor.log), mirroring hook.sh.
 #
-# Credential resolution (later file wins; process env wins over all), the
-# Windows analogue of hook.sh's search:
-#   1. ${CURSOR_PLUGIN_ROOT}\env        (baked into a compiled customer plugin)
-#   2. C:\ProgramData\rogue\env         (MDM-provisioned; mirrors /etc/rogue/env)
+# Credential resolution, the Windows analogue of hook.sh's search: the first env
+# file holding ROGUE_API_KEY is used alone, and its values override the process env:
+#   1. C:\ProgramData\rogue\env         (machine, MDM-provisioned; mirrors /etc/rogue/env)
+#   2. ${CURSOR_PLUGIN_ROOT}\env        (bundled into a compiled customer plugin)
 #   3. %USERPROFILE%\.rogue-env         (user / installer-written)
 
 param([string]$EventName = '')
@@ -158,8 +158,8 @@ $script:logFile = $null
 $script:logMaxBytes = 10485760
 
 function Initialize-Logging {
-    # $Creds is the merged credential map (bundled env → MDM → per-user file, then
-    # process env last), so precedence is already correct by the time we read it.
+    # $Creds is the resolved credential map (process env, then the chosen env file
+    # over it), so precedence is already correct by the time we read it.
     # $HOME backs up USERPROFILE so this also works dot-sourced on macOS/Linux.
     param([hashtable]$Creds = @{})
     $f = $Creds['ROGUE_LOG_FILE']
@@ -754,38 +754,43 @@ if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { Write-Raw '{}'
 if (-not $EventName) { Dbg "no event name -> {}"; Write-Raw '{}'; exit 0 }
 Dbg "event=$EventName"
 
-# ── credential resolution (later file wins; process env wins over all) ─────
+# ── credential resolution ──────────────────────────────────────────────────
 $creds = @{}
 $pluginRoot = $env:CURSOR_PLUGIN_ROOT
 if (-not $pluginRoot) { try { $pluginRoot = (Get-Location).Path } catch { $pluginRoot = '.' } }
 Dbg "pluginRoot=$pluginRoot"
+# Fail open: with no readable helper, leave a no-op reader behind so the env
+# files are skipped instead of the whole credential block dying on the load.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/env-file.ps1') -ErrorAction Stop))) }
+catch { function Read-RogueEnvFile { param([string]$Path) } }
 
-$credFiles = @(
-    (Join-Path $pluginRoot 'env'),
-    'C:\ProgramData\rogue\env',
-    (Join-Path $env:USERPROFILE '.rogue-env')
-)
-foreach ($f in $credFiles) {
-    if (-not $f) { continue }
-    if (-not (Test-Path -LiteralPath $f)) { Dbg "cred file absent: $f"; continue }
-    Dbg "cred file found: $f"
-    foreach ($line in (Get-Content -LiteralPath $f)) {
-        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.+)$') {
-            $k = $Matches[1]
-            # Decode shell quoting/escaping so the value round-trips with the
-            # `source`-based parse in hook.sh (mirrors shlex.split).
-            $v = ConvertFrom-ShellQuoted ($Matches[2].Trim())
-            $creds[$k] = $v
-        }
-    }
-}
-# ROGUE_LOG_* ride the same list so a process-env value still beats the files,
-# which is what makes the resolved precedence identical to hook.sh's.
 foreach ($k in 'ROGUE_API_KEY','ROGUE_ACTOR_EMAIL','ROGUE_ACTOR_NAME','ROGUE_BASE_URL',
                'ROGUE_LOG_FILE','ROGUE_LOG_DIR','ROGUE_LOG_MAX_BYTES',
                'ROGUE_HEARTBEAT_MIN_INTERVAL') {
     $val = [Environment]::GetEnvironmentVariable($k)
     if ($val) { $creds[$k] = $val }
+}
+# The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+$credFiles = @(
+    'C:\ProgramData\rogue\env',
+    (Join-Path $pluginRoot 'env'),
+    (Join-Path $env:USERPROFILE '.rogue-env')
+)
+foreach ($f in $credFiles) {
+    if (-not $f) { continue }
+    if (-not (Test-Path -LiteralPath $f)) { Dbg "cred file absent: $f"; continue }
+    $fileVals = @{}
+    foreach ($line in (Read-RogueEnvFile $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$') {
+            # Decode shell quoting/escaping so the value round-trips with the
+            # `source`-based parse in hook.sh (mirrors shlex.split).
+            $fileVals[$Matches[1]] = ConvertFrom-ShellQuoted ($Matches[2].Trim())
+        }
+    }
+    if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { Dbg "cred file skipped: $f"; continue }
+    Dbg "cred file in use: $f"
+    foreach ($k in $fileVals.Keys) { $creds[$k] = $fileVals[$k] }
+    break
 }
 
 # Logging is initialised HERE - after the credential files are parsed, so they can
@@ -812,18 +817,21 @@ $baseUrl = $creds['ROGUE_BASE_URL']
 if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
 
-# ── actor resolution: explicit creds → git config → username/hostname ──────
-$actorName = $creds['ROGUE_ACTOR_NAME']
-if (-not $actorName) { try { $actorName = (& git config --global user.name 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorName) { $actorName = $env:USERNAME }
-
-$actorEmail = $creds['ROGUE_ACTOR_EMAIL']
-if (-not $actorEmail) { try { $actorEmail = (& git config --global user.email 2>$null | Out-String).Trim() } catch {} }
-if (-not $actorEmail) {
-    if ($env:USERNAME -and $env:COMPUTERNAME) { $actorEmail = "$($env:USERNAME)@$($env:COMPUTERNAME)" }
-    elseif ($env:USERNAME) { $actorEmail = $env:USERNAME }
-    else { $actorEmail = $env:COMPUTERNAME }
-}
+# ── actor resolution: scripts/actor.ps1 (synced from scripts/shared/actor.ps1) ──
+# env file → git config files → <login>@<host> → unknown. A damaged install with
+# no library still reports the env file values, or the marker, never a blank.
+$actor = @{ Email = [string]$creds['ROGUE_ACTOR_EMAIL']; Name = [string]$creds['ROGUE_ACTOR_NAME'] }
+try {
+    $actorLib = Join-Path $pluginRoot 'scripts\actor.ps1'
+    if (Test-Path -LiteralPath $actorLib) {
+        . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $actorLib)))
+        $actor = Resolve-RogueSharedActor $creds $pluginRoot
+    }
+} catch {}
+$actorName  = [string]$actor.Name
+$actorEmail = [string]$actor.Email
+if (-not $actorName)  { $actorName  = 'unknown' }
+if (-not $actorEmail) { $actorEmail = 'unknown' }
 
 # ── install identity: host + plugin version ────────────────────────────────
 # The fleet roster keys an install on host + actor + family + agent, and until
@@ -1087,10 +1095,9 @@ if ($null -ne $hbUnthrottled) {
     # alone, a long session's log never left the disk.
     #
     # Every value travels as an environment variable, so the command is a constant
-    # with nothing to escape. The actor is passed in, never re-resolved: Cursor's
-    # cascade ends at "$env:USERNAME@$env:COMPUTERNAME" where actor.sh ends at the
-    # hostname, so a second cascade would key the log's source row differently
-    # from the roster row just posted.
+    # with nothing to escape. The actor is passed in, never re-resolved: a second
+    # cascade could key the log's source row differently from the roster row just
+    # posted.
     $shipScript = Join-Path $pluginRoot 'scripts\ship-logs.ps1'
     if (Test-Path -LiteralPath $shipScript) {
         try {

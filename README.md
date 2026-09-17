@@ -31,8 +31,14 @@ The one installer detects every supported coding agent and installs the matching
 Rogue plugin into each — **Claude Code**, **OpenAI Codex**, **Cursor**,
 **Gemini CLI**, **GitHub Copilot CLI**, **Google Antigravity**, and **Kiro** —
 writing the shared `~/.rogue-env` (`%USERPROFILE%\.rogue-env` on
-Windows) once. Claude and Codex install through their native plugin CLIs
-(`claude plugin install` / `codex plugin add`); **Cursor has no plugin CLI**, so
+Windows) once. On a machine whose `/etc/rogue/env` (`C:\ProgramData\rogue\env`)
+already holds `ROGUE_API_KEY` it prompts for nothing and writes no user file:
+that machine file is the one the hooks read, and its key is validated in place.
+A machine file that is not root-owned (SYSTEM/Administrators on Windows) or is
+writable by others is skipped by Kiro and the log shipper, so the installer
+warns and falls back to the user file. Claude and Codex install through
+their native plugin CLIs (`claude plugin install` / `codex plugin add`);
+**Cursor has no plugin CLI**, so
 its plugin is copied into `~/.cursor/plugins/local/rogue` from the release tarball;
 **Gemini CLI** installs from the release tarball via its native
 `gemini extensions install`. **Kiro** (IDE, CLI on both engines, Crew) has no
@@ -93,10 +99,11 @@ scripts/setup.sh / setup.ps1 — credential storage helpers
 All hooks are `type: "command"`. Each event registers **two** entries — a POSIX
 `sh` one (`hook.sh`, for macOS/Linux/WSL) and a PowerShell one (`hook.ps1`, for
 native Windows) — and exactly one does real work per machine (`hook.sh` stands
-down under Git Bash so the PowerShell entry owns Windows). They resolve
-credentials from `${CLAUDE_PLUGIN_ROOT}/env` (bundled), `/etc/rogue/env` /
-`C:\ProgramData\rogue\env` (MDM), or `~/.rogue-env` / `%USERPROFILE%\.rogue-env`
-(per-user) at runtime, then POST the event payload to
+down under Git Bash so the PowerShell entry owns Windows). They read one env file
+at runtime — the first of `/etc/rogue/env` / `C:\ProgramData\rogue\env` (MDM),
+`${CLAUDE_PLUGIN_ROOT}/env` (bundled), and `~/.rogue-env` /
+`%USERPROFILE%\.rogue-env` (per-user) that holds `ROGUE_API_KEY` — then POST the
+event payload to
 `https://api.rogue.security/api/v1/hooks/claude`.
 
 If `ROGUE_API_KEY` is empty, hooks return `{}` (allow) — fail-open by design,
@@ -121,7 +128,15 @@ export ROGUE_ACTOR_NAME='Your Name'
 ```
 
 System-wide MDM deployment can drop the same exports into `/etc/rogue/env` —
-hooks check that path first.
+hooks check that path first, and when it holds `ROGUE_API_KEY` they read no other
+file. Values in the file in use override the process environment.
+
+When the file in use carries no `ROGUE_ACTOR_*`, every hook resolves the actor
+at fire time: `user.email` / `user.name` from
+`${XDG_CONFIG_HOME:-~/.config}/git/config` then `~/.gitconfig` (read as files;
+`git` itself is never run), then `<login>@<hostname>`. Every level is set by
+the local user, so the actor is a self-reported label: authoritative
+attribution is the API key's organization and the enrolled endpoint.
 
 To revoke: `rm ~/.rogue-env` (per-user) or `sudo rm /etc/rogue/env` (MDM).
 

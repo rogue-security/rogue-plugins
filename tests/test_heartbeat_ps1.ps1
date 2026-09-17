@@ -68,8 +68,8 @@ function Set-Stamp { param($Value)
 # Each case re-dot-sources, then resolves the interval the way the dispatcher does.
 #
 # $Interval arrives through the CREDENTIAL MAP, not $env:, because that is where the
-# dispatcher reads it from - the map being the merged bundled env / MDM / per-user
-# file chain. Feeding it through $env: here would test a path the fix deliberately
+# dispatcher reads it from - the map being the process env with the chosen env
+# file over it. Feeding it through $env: here would test a path the fix deliberately
 # removed, and would have passed against the bug it fixes.
 #
 # The parameter is deliberately NOT called $Trigger. heartbeat.ps1 declares
@@ -227,9 +227,9 @@ try {
     $initAt = $psSource.IndexOf('Initialize-RogueBeacon $creds')
     Check "the resolver is called with the creds map" $true ($initAt -gt 0)
     Check "and called AFTER the map is built" $true ($mapAt -gt 0 -and $initAt -gt $mapAt)
-    # In the override list, so process env still beats the files - the precedence
-    # every other knob in this dispatcher follows.
-    Check "the knob is in the process-env override list" $true `
+    # In the process-env list, so it can also be set there when no file sets it - the
+    # shape every other knob in this dispatcher follows.
+    Check "the knob is in the process-env list" $true `
         ($psSource -match "'ROGUE_HEARTBEAT_MIN_INTERVAL'\)\s*\{")
     # Belt and braces: no file-scope $env: read may come back, in the dispatcher or in
     # the library. The only permitted mention of the variable is the override list.

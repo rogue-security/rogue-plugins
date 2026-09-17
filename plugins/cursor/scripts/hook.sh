@@ -38,9 +38,10 @@
 #
 # Logs every invocation to $ROGUE_LOG_FILE (default ~/.rogue/logs/cursor.log).
 #
-# Credential resolution (later file wins; process env wins over all):
-#   1. ${CURSOR_PLUGIN_ROOT}/env   (baked into a compiled customer plugin)
-#   2. /etc/rogue/env              (MDM-provisioned)
+# Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
+# and its values override the process env:
+#   1. /etc/rogue/env              (machine, MDM-provisioned)
+#   2. ${CURSOR_PLUGIN_ROOT}/env   (bundled into a compiled customer plugin)
 #   3. ~/.rogue-env                (user / installer-written)
 
 event="${1:-}"
@@ -75,29 +76,24 @@ esac
 [ -n "$event" ] || { printf '{}'; exit 0; }
 dbg "event=$event"
 
-# ── credential resolution (later file wins; process env wins over all) ─────
-_penv_ROGUE_API_KEY="${ROGUE_API_KEY:-}"
-_penv_ROGUE_ACTOR_EMAIL="${ROGUE_ACTOR_EMAIL:-}"
-_penv_ROGUE_ACTOR_NAME="${ROGUE_ACTOR_NAME:-}"
-_penv_ROGUE_BASE_URL="${ROGUE_BASE_URL:-}"
-
+# ── credential resolution ──────────────────────────────────────────────────
 PLUGIN_ROOT="${CURSOR_PLUGIN_ROOT:-}"
 if [ -z "$PLUGIN_ROOT" ]; then
   PLUGIN_ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)" || PLUGIN_ROOT=""
 fi
 
 # Env files are bash-quoted (`export KEY=value`, written via printf %q), so
-# sourcing them is correct.
-for _f in "$PLUGIN_ROOT/env" /etc/rogue/env "$HOME/.rogue-env"; do
-  if [ -n "$_f" ] && [ -r "$_f" ]; then dbg "cred file found: $_f"; . "$_f" 2>/dev/null
-  else dbg "cred file absent: $_f"; fi
-done
-
-# process env wins over file values
-[ -n "$_penv_ROGUE_API_KEY" ]     && ROGUE_API_KEY="$_penv_ROGUE_API_KEY"
-[ -n "$_penv_ROGUE_ACTOR_EMAIL" ] && ROGUE_ACTOR_EMAIL="$_penv_ROGUE_ACTOR_EMAIL"
-[ -n "$_penv_ROGUE_ACTOR_NAME" ]  && ROGUE_ACTOR_NAME="$_penv_ROGUE_ACTOR_NAME"
-[ -n "$_penv_ROGUE_BASE_URL" ]    && ROGUE_BASE_URL="$_penv_ROGUE_BASE_URL"
+# sourcing them is correct. The first trusted file holding ROGUE_API_KEY is used
+# alone: machine, bundled, user.
+_env_lib="$(dirname -- "$0")/env-file.sh"
+if [ -r "$_env_lib" ]; then
+  . "$_env_lib"
+  for _f in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_f" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_f"; then
+      dbg "cred file in use: $_f"; . "$_f" 2>/dev/null; break
+    else dbg "cred file skipped: $_f"; fi
+  done
+fi
 
 # ── hook log ───────────────────────────────────────────────────────────────
 # `dbg` above only writes to stderr under ROGUE_DEBUG, which Cursor keeps in its
@@ -187,21 +183,11 @@ BASE_URL="${ROGUE_BASE_URL:-https://api.rogue.security}"
 BASE_URL="${BASE_URL%/}"
 dbg "apiKey present (tail $(printf '%s' "$API_KEY" | tail -c 4 2>/dev/null)) baseUrl=$BASE_URL"
 
-# ── actor resolution: explicit creds → git config → whoami/hostname ────────
-_git_cfg() { git config --global "$1" 2>/dev/null; }
-
-actor_name="${ROGUE_ACTOR_NAME:-}"
-[ -n "$actor_name" ] || actor_name="$(_git_cfg user.name)"
-[ -n "$actor_name" ] || actor_name="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
-
-actor_email="${ROGUE_ACTOR_EMAIL:-}"
-[ -n "$actor_email" ] || actor_email="$(_git_cfg user.email)"
-if [ -z "$actor_email" ]; then
-  _u="${USER:-${USERNAME:-$(whoami 2>/dev/null)}}"
-  _h="$(hostname 2>/dev/null)"
-  if [ -n "$_u" ] && [ -n "$_h" ]; then actor_email="$_u@$_h"
-  else actor_email="${_u:-$_h}"; fi
-fi
+# ── actor resolution: env file → git config files → login@hostname → unknown ─
+# scripts/actor.sh is the shared cascade (synced from scripts/shared/actor.sh).
+[ -r "$PLUGIN_ROOT/scripts/actor.sh" ] && . "$PLUGIN_ROOT/scripts/actor.sh"
+actor_name="${ROGUE_ACTOR_NAME:-unknown}"
+actor_email="${ROGUE_ACTOR_EMAIL:-unknown}"
 
 # ── install identity: host + plugin version ────────────────────────────────
 # The fleet roster keys an install on host + actor + family + agent, and until
@@ -783,12 +769,11 @@ if [ -n "$hb_unthrottled" ]; then
   # either way. This is the whole point of the `stop` trigger - on `sessionStart`
   # alone, a long session's log never left the disk.
   #
-  # The actor MUST be passed explicitly. Unlike the other plugins, which get it
-  # from actor.sh (which exports), this dispatcher resolves the actor into plain
-  # shell LOCALS - so without this prefix the child would inherit nothing, find no
-  # identity, and skip. It also must not re-resolve: Cursor's own cascade ends at
-  # "$USER@$(hostname)" where actor.sh ends at `hostname`, so a re-resolve here
-  # would key the log's source row differently from the roster row just posted.
+  # actor.sh exports both vars, so the child would inherit them anyway - the
+  # explicit prefix states the contract at the call site and covers an install
+  # whose actor.sh predates that export. The shipper must not re-resolve: a second
+  # cascade (rogue's actor.sh screens sandbox identities, for one) could key the
+  # log's source row differently from the roster row just posted.
   if [ -r "$PLUGIN_ROOT/scripts/ship-logs.sh" ]; then
     ( ROGUE_ACTOR_EMAIL="$actor_email" ROGUE_ACTOR_NAME="$actor_name" \
         sh "$PLUGIN_ROOT/scripts/ship-logs.sh" \

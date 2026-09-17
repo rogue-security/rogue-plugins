@@ -30,9 +30,9 @@ a flagged model turn is terminated at `PostInvocation`.
   back to `{}`.
 - **Shared credentials.** Reads `~/.rogue-env` (mode 600) from disk each
   invocation — the SAME file used by the Claude Code, Codex, Cursor, and
-  Gemini CLI Rogue plugins. Env precedence (later wins): `<plugin-root>/env`
-  → `/etc/rogue/env` (`C:\ProgramData\rogue\env` on Windows) →
-  `~/.rogue-env`.
+  Gemini CLI Rogue plugins. One env file is read: the first of `/etc/rogue/env`
+  (`C:\ProgramData\rogue\env` on Windows), `<plugin-root>/env`, and
+  `~/.rogue-env` that holds `ROGUE_API_KEY`.
 - **Version** lives in the bundled `VERSION` file at the plugin root (the
   Antigravity `plugin.json` schema has no `version` field).
 
@@ -68,8 +68,8 @@ Run `/status`. You should see HTTP 200 against the ping endpoint, your active
 rulesets, and a tail of recent hook activity (`~/.rogue/logs/antigravity.log` —
 each Rogue plugin logs to its own file, capped at 10 MiB with one `.1` rotation
 kept). `ROGUE_LOG_MAX_BYTES` overrides that cap and `0` turns rotation off;
-`ROGUE_LOG_FILE` / `ROGUE_LOG_DIR` relocate the log. All three are read from
-`~/.rogue-env` (or `/etc/rogue/env`), with the process environment winning.
+`ROGUE_LOG_FILE` / `ROGUE_LOG_DIR` relocate the log. All three are read from the
+env file in use, which overrides the process environment.
 
 ## Uninstall
 

@@ -14,7 +14,9 @@ each step is shown after the bash block where it differs.
 
 ## Step 1: Check existing configuration
 
-Check if `~/.rogue-env` exists with `test -f ~/.rogue-env && echo "exists" || echo "not found"`.
+Check the machine env file first with `grep -q ROGUE_API_KEY /etc/rogue/env 2>/dev/null && echo machine || echo none` (Windows: `if (Test-Path "$env:ProgramData\rogue\env") { Select-String -Path "$env:ProgramData\rogue\env" -Pattern ROGUE_API_KEY -Quiet } else { $false }`). A machine env file that holds `ROGUE_API_KEY` and is owned by root (SYSTEM/Administrators on Windows) is the file the hooks read, alone, so credentials are already configured: say so and stop, without writing the user env file.
+
+Otherwise check if `~/.rogue-env` exists with `test -f ~/.rogue-env && echo "exists" || echo "not found"`.
 
 If already configured, tell the user and ask if they want to reconfigure. If not, continue.
 
