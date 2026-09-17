@@ -16,6 +16,7 @@ function isolateEnv(directory) {
     const file=path.join(directory,entry.name);
     if (entry.isDirectory()) isolateEnv(file);
     else if (entry.name.endsWith('.sh')) fs.writeFileSync(file,fs.readFileSync(file,'utf8').replaceAll('/etc/rogue/env',path.join(temp,'empty-env')).replaceAll('$HOME/.rogue-env',path.join(temp,'empty-env')));
+    else if (entry.name.endsWith('.mjs')) fs.writeFileSync(file,fs.readFileSync(file,'utf8').replaceAll('"/etc/rogue/env"',JSON.stringify(path.join(temp,'empty-env'))));
   }
 }
 isolateEnv(fixturePlugins);
@@ -40,7 +41,7 @@ await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
 function run(command,args,env, input) {
   return new Promise((resolve,reject) => {
-    const child=spawn(command,args,{cwd:repo,env:{...process.env,...env},stdio:['pipe','pipe','pipe']});
+    const child=spawn(command,args,{cwd:repo,env:{...process.env,HOME:temp,USERPROFILE:temp,...env},stdio:['pipe','pipe','pipe']});
     let out='',err=''; child.stdout.on('data',b=>out+=b); child.stderr.on('data',b=>err+=b);
     if (input !== undefined) child.stdin.end(input);
     const timeout=setTimeout(()=>{child.kill();reject(new Error(`Hook read stdin while paused: ${args[0]}`));},10000);
@@ -332,9 +333,14 @@ try {
     }
   });
   await test('a new shell invocation honors persisted pause while offline',async()=>{
-    available=false;
+    paused=true; revision++;
     const root=path.join(fixturePlugins,'codex');
     const env={ROGUE_API_KEY:'provision_codex',ROGUE_BASE_URL:base,ROGUE_PROTECTION_DIR:temp,PLUGIN_ROOT:root,CODEX_PLUGIN_ROOT:root,ROGUE_LOG_DIR:temp};
+    const directory=path.join(temp,fs.readdirSync(temp).find(name=>name.startsWith('codex-default-')));
+    fs.writeFileSync(path.join(directory,'attempt'),'0');
+    const online=await run('bash',[path.join(root,'scripts/hook.sh'),'PreToolUse'],env);
+    assert.equal(online.code,0); assert.deepEqual(JSON.parse(online.out),{});
+    available=false;
     const result=await run('bash',[path.join(root,'scripts/hook.sh'),'PreToolUse'],env);
     assert.equal(result.code,0); assert.deepEqual(JSON.parse(result.out),{});
   });

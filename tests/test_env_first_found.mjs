@@ -184,6 +184,7 @@ test("hook.mjs sends the machine file's key, not the user file's or the process 
   const sb = sandbox();
   const seen = {};
   const server = http.createServer((req, res) => {
+    if ((req.url || "").includes("/hooks/protection/")) { req.resume(); res.writeHead(404); res.end("{}"); return; }
     if ((req.url || "").endsWith("/hooks/gemini")) seen.key = req.headers["x-rogue-api-key"];
     req.on("data", () => {});
     req.on("end", () => {
