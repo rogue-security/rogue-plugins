@@ -311,11 +311,11 @@ try {
     const directory=path.join(temp,'ps-checkpoint'); fs.mkdirSync(directory);
     fs.mkdirSync(path.join(directory,'broken.state'));
     fs.writeFileSync(path.join(directory,'state.json'),JSON.stringify({decision:{protocolVersion:1,revision:50,serverTime:new Date().toISOString(),aidr:{paused:false,revision:50},aispm:{paused:false,revision:0}},receivedAt:new Date().toISOString()}));
-    const script=`$env:ROGUE_PS_LIB_ONLY='1'; . '${path.join(repo,'scripts/shared/ship-logs.ps1')}'; . '${path.join(repo,'scripts/shared/protection.ps1')}'; $script:stateDir='${directory}'; $script:RPDirectory='${directory}'; $script:RPBase='${base}'; $script:RPKey='installation_test_key'; $script:RPRevision=50; try { Write-ShipState broken 10 head 10 log; exit 9 } catch {}; Send-RogueProtectionAck; if (-not $script:RPPersistenceFailed) { exit 8 }`;
+    const script=`$env:ROGUE_PS_LIB_ONLY='1'; . '${path.join(repo,'scripts/shared/ship-logs.ps1')}'; . '${path.join(repo,'scripts/shared/protection.ps1')}'; $script:stateDir='${directory}'; $script:RPDirectory='${directory}'; $script:RPBase='${base}'; $script:RPKey='checkpoint_test_key'; $script:RPRevision=50; try { Write-ShipState broken 10 head 10 log; exit 9 } catch {}; Send-RogueProtectionAck; if (-not $script:RPPersistenceFailed) { exit 8 }`;
     const start=requests.length;
     const result=await run(process.env.ROGUE_TEST_PWSH,['-NoProfile','-Command',script],{},'');
     assert.equal(result.code,0,result.err);
-    const acks=requests.slice(start).filter(call=>call.path.endsWith('/ack')).map(call=>JSON.parse(call.body));
+    const acks=requests.slice(start).filter(call=>call.path.endsWith('/ack') && call.key==='checkpoint_test_key').map(call=>JSON.parse(call.body));
     assert(acks.some(ack=>ack.status==='failed')); assert(!acks.some(ack=>ack.status==='applied'));
   });
   await test('an unavailable enrollment never enables unscoped activity on retry', async () => {

@@ -81,36 +81,35 @@ rogue_protection_leave() {
   rm -f "$ROGUE_PROTECTION_STATE/active.$$"
   rogue_protection_ack
 }
-rogue_protection_init() {
-  # Arguments: log slug, agent family, script directory, optional surface.
-  [ -n "${ROGUE_API_KEY:-}" ] || return 0
-  ROGUE_PROTECTION_BASE=${ROGUE_BASE_URL:-https://api.rogue.security}
-  ROGUE_PROTECTION_BASE=${ROGUE_PROTECTION_BASE%/}
+rogue_protection_select_directory() {
   _rp_hash=$(printf '%s\n%s' "$ROGUE_PROTECTION_BASE" "$ROGUE_API_KEY" | shasum -a 256 2>/dev/null | cut -d' ' -f1)
   [ -n "$_rp_hash" ] || _rp_hash=$(printf '%s\n%s' "$ROGUE_PROTECTION_BASE" "$ROGUE_API_KEY" | sha256sum 2>/dev/null | cut -d' ' -f1)
-  [ -n "$_rp_hash" ] || return 0
+  [ -n "$_rp_hash" ] || return 1
   case "${ROGUE_PROTECTION_STATE:-}" in
     */"$1-default-"*)
       [ "$(cat "$ROGUE_PROTECTION_STATE/credential" 2>/dev/null)" = "$ROGUE_API_KEY" ] || ROGUE_PROTECTION_STATE='' ;;
     *) ROGUE_PROTECTION_STATE='' ;;
   esac
   ROGUE_PROTECTION_STATE="${ROGUE_PROTECTION_STATE:-${ROGUE_PROTECTION_DIR:-$HOME/.rogue/protection}/$1-default-$_rp_hash}"
-  (umask 077; mkdir -p "$ROGUE_PROTECTION_STATE") || return 0
+  (umask 077; mkdir -p "$ROGUE_PROTECTION_STATE") || return 1
   _rp_link=$(cat "$ROGUE_PROTECTION_STATE/installation-directory" 2>/dev/null)
   case "$_rp_link" in "${ROGUE_PROTECTION_STATE%/*}/$1-default-"*)
     if [ "$(cat "$_rp_link/base" 2>/dev/null)" = "$ROGUE_PROTECTION_BASE" ] && [ -s "$_rp_link/credential" ]; then ROGUE_PROTECTION_STATE=$_rp_link; fi ;;
   esac
   rogue_protection_now > "$ROGUE_PROTECTION_STATE/used"
   printf '%s' "$ROGUE_PROTECTION_BASE" > "$ROGUE_PROTECTION_STATE/base"
+  return 0
+}
+rogue_protection_restore_installation() {
   if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then
     for _rp_previous in "${ROGUE_PROTECTION_STATE%/*}/$1-default-"*; do
       [ "$_rp_previous" != "$ROGUE_PROTECTION_STATE" ] || continue
       [ "$(cat "$_rp_previous/base" 2>/dev/null)" = "$ROGUE_PROTECTION_BASE" ] || continue
       _rp_previous_key=$(cat "$_rp_previous/credential" 2>/dev/null) || continue
       [ -n "$_rp_previous_key" ] || continue
-      _rp_restored=$(curl -sS -w '\n%{http_code}' --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H "x-rogue-installation-key: $_rp_previous_key" -H 'content-type: application/json' --data "{\"type\":\"coding_agent\",\"name\":\"$1\",\"family\":\"$2\",\"host\":\"$(rogue_protection_escape "$(hostname)")\",\"version\":\"unknown\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/enroll" 2>/dev/null) || return 0
+      _rp_restored=$(curl -sS -w '\n%{http_code}' --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H "x-rogue-installation-key: $_rp_previous_key" -H 'content-type: application/json' --data "{\"type\":\"coding_agent\",\"name\":\"$1\",\"family\":\"$2\",\"host\":\"$(rogue_protection_escape "$(hostname)")\",\"version\":\"unknown\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/enroll" 2>/dev/null) || return 1
       _rp_restore_status=$(printf '%s' "$_rp_restored" | tail -n 1)
-      case "$_rp_restore_status" in 401|403) continue ;; 2??) ;; *) return 0 ;; esac
+      case "$_rp_restore_status" in 401|403) continue ;; 2??) ;; *) return 1 ;; esac
       _rp_restored_key=$(printf '%s' "$_rp_restored" | sed -n 's/.*"apiKey":"\([A-Za-z0-9_-][A-Za-z0-9_-]*\)".*/\1/p')
       [ "$_rp_restored_key" = "$_rp_previous_key" ] || continue
       (umask 077; printf '%s' "$_rp_previous" > "$ROGUE_PROTECTION_STATE/installation-directory")
@@ -119,17 +118,20 @@ rogue_protection_init() {
       break
     done
   fi
+  return 0
+}
+rogue_protection_enroll_installation() {
   if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then
     _rp_enroll_attempt=$(cat "$ROGUE_PROTECTION_STATE/enroll-attempt" 2>/dev/null) || _rp_enroll_attempt=0
     _rp_elapsed=$(( $(rogue_protection_now) - ${_rp_enroll_attempt:-0} ))
-    if [ "$_rp_elapsed" -ge 0 ] && [ "$_rp_elapsed" -lt 60 ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 0; fi
-    rogue_protection_lock "$ROGUE_PROTECTION_STATE/enroll.lock" || return 0
+    if [ "$_rp_elapsed" -ge 0 ] && [ "$_rp_elapsed" -lt 60 ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 1; fi
+    rogue_protection_lock "$ROGUE_PROTECTION_STATE/enroll.lock" || return 1
     rogue_protection_now > "$ROGUE_PROTECTION_STATE/enroll-attempt"
     if [ ! -s "$ROGUE_PROTECTION_STATE/enrollment-nonce" ]; then
-      (umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$ROGUE_PROTECTION_STATE/enrollment-nonce.tmp" && mv "$ROGUE_PROTECTION_STATE/enrollment-nonce.tmp" "$ROGUE_PROTECTION_STATE/enrollment-nonce") || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 0; }
+      (umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$ROGUE_PROTECTION_STATE/enrollment-nonce.tmp" && mv "$ROGUE_PROTECTION_STATE/enrollment-nonce.tmp" "$ROGUE_PROTECTION_STATE/enrollment-nonce") || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 1; }
     fi
     _rp_nonce=$(cat "$ROGUE_PROTECTION_STATE/enrollment-nonce")
-    [ "${#_rp_nonce}" -eq 64 ] || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 0; }
+    [ "${#_rp_nonce}" -eq 64 ] || { rm -f "$ROGUE_PROTECTION_STATE/enroll.lock"; return 1; }
     _rp_response=$(curl -sS -w '\n%{http_code}' --max-time 5 -H "x-rogue-api-key: $ROGUE_API_KEY" -H 'content-type: application/json' --data "{\"enrollmentNonce\":\"$_rp_nonce\",\"type\":\"coding_agent\",\"name\":\"$1\",\"family\":\"$2\",\"host\":\"$(rogue_protection_escape "$(hostname)")\",\"version\":\"$(rogue_protection_escape "${ROGUE_INSTALL_VERSION:-unknown}")\"}" "$ROGUE_PROTECTION_BASE/api/v1/hooks/protection/enroll" 2>/dev/null) || _rp_response=''
     case "$(printf '%s' "$_rp_response" | tail -n 1)" in
       404) touch "$ROGUE_PROTECTION_STATE/legacy-server" ;;
@@ -140,19 +142,32 @@ rogue_protection_init() {
     if [ -n "$_rp_key" ]; then (umask 077; printf '%s' "$_rp_key" > "$ROGUE_PROTECTION_STATE/credential.tmp"; mv "$ROGUE_PROTECTION_STATE/credential.tmp" "$ROGUE_PROTECTION_STATE/credential"); fi
     rm -f "$ROGUE_PROTECTION_STATE/enroll.lock" 2>/dev/null || true
   fi
+  return 0
+}
+rogue_protection_start_poller() {
+  if mkdir "$ROGUE_PROTECTION_STATE/poll.lock" 2>/dev/null; then
+    nohup sh "$1/protection.sh" --poll "$ROGUE_PROTECTION_STATE" "$ROGUE_PROTECTION_BASE" </dev/null >/dev/null 2>&1 &
+    printf '%s' "$!" > "$ROGUE_PROTECTION_STATE/poll.lock/pid"
+  else
+    _rp_poll_pid=$(cat "$ROGUE_PROTECTION_STATE/poll.lock/pid" 2>/dev/null)
+    if [ -n "$_rp_poll_pid" ] && ! kill -0 "$_rp_poll_pid" 2>/dev/null; then rm -f "$ROGUE_PROTECTION_STATE/poll.lock/pid"; rmdir "$ROGUE_PROTECTION_STATE/poll.lock" 2>/dev/null; fi
+  fi
+}
+rogue_protection_init() {
+  # Arguments: log slug, agent family, script directory, optional surface.
+  [ -n "${ROGUE_API_KEY:-}" ] || return 0
+  ROGUE_PROTECTION_BASE=${ROGUE_BASE_URL:-https://api.rogue.security}
+  ROGUE_PROTECTION_BASE=${ROGUE_PROTECTION_BASE%/}
+  rogue_protection_select_directory "$1" || return 0
+  rogue_protection_restore_installation "$1" "$2" || return 0
+  rogue_protection_enroll_installation "$1" "$2" || return 0
   if [ ! -s "$ROGUE_PROTECTION_STATE/credential" ]; then [ ! -f "$ROGUE_PROTECTION_STATE/legacy-server" ] || ROGUE_PROTECTION_STATE=''; return 0; fi
   ROGUE_API_KEY=$(cat "$ROGUE_PROTECTION_STATE/credential")
   ROGUE_LOG_FILE="$ROGUE_PROTECTION_STATE/$1.log"
   export ROGUE_API_KEY ROGUE_PROTECTION_STATE ROGUE_PROTECTION_BASE ROGUE_LOG_FILE
   _rp_attempt=$(cat "$ROGUE_PROTECTION_STATE/attempt" 2>/dev/null) || _rp_attempt=0
   [ $(( $(rogue_protection_now) - ${_rp_attempt:-0} )) -lt 15 ] || rogue_protection_refresh
-  if mkdir "$ROGUE_PROTECTION_STATE/poll.lock" 2>/dev/null; then
-    nohup sh "$3/protection.sh" --poll "$ROGUE_PROTECTION_STATE" "$ROGUE_PROTECTION_BASE" </dev/null >/dev/null 2>&1 &
-    printf '%s' "$!" > "$ROGUE_PROTECTION_STATE/poll.lock/pid"
-  else
-    _rp_poll_pid=$(cat "$ROGUE_PROTECTION_STATE/poll.lock/pid" 2>/dev/null)
-    if [ -n "$_rp_poll_pid" ] && ! kill -0 "$_rp_poll_pid" 2>/dev/null; then rm -f "$ROGUE_PROTECTION_STATE/poll.lock/pid"; rmdir "$ROGUE_PROTECTION_STATE/poll.lock" 2>/dev/null; fi
-  fi
+  rogue_protection_start_poller "$3"
   rogue_protection_load && ROGUE_PROTECTION_REVISION=$RP_AIDR_REV
   export ROGUE_PROTECTION_REVISION
 }

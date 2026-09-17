@@ -76,10 +76,7 @@ function Update-RogueProtection {
     } catch { } finally { $lock.Dispose() }
     Send-RogueProtectionAck
 }
-function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slug, [string]$Family, [string]$Surface='default', [string]$Version='unknown') {
-    if (-not $Key) { return $Key }
-    if (-not $BaseUrl) { $BaseUrl='https://api.rogue.security' }
-    $script:RPBase=$BaseUrl.TrimEnd('/')
+function Set-RogueProtectionDirectory([string]$Key, [string]$Slug) {
     $root=$env:ROGUE_PROTECTION_DIR
     if (-not $root) {
         $profilePath=$env:USERPROFILE
@@ -90,12 +87,16 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
     try { $id=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes("$script:RPBase`n$Key")))).Replace('-','').ToLowerInvariant() } finally { $hash.Dispose() }
     $script:RPDirectory=Join-Path $root "$Slug-default-$id"
     if ($env:ROGUE_PROTECTION_STATE -and (Split-Path $env:ROGUE_PROTECTION_STATE -Leaf).StartsWith("$Slug-default-") -and (Get-Content -LiteralPath (Join-Path $env:ROGUE_PROTECTION_STATE 'credential') -Raw -ErrorAction SilentlyContinue) -eq $Key) { $script:RPDirectory=$env:ROGUE_PROTECTION_STATE }
-    try { $null=[IO.Directory]::CreateDirectory($script:RPDirectory) } catch { $script:RPDirectory=$null; return $Key }
+    try { $null=[IO.Directory]::CreateDirectory($script:RPDirectory) } catch { $script:RPDirectory=$null; return $false }
     $linked=Get-Content -LiteralPath "$script:RPDirectory/installation-directory" -Raw -ErrorAction SilentlyContinue
     if ($linked -and (Split-Path $linked -Parent) -eq $root -and (Split-Path $linked -Leaf).StartsWith("$Slug-default-") -and (Get-Content -LiteralPath "$linked/base" -Raw -ErrorAction SilentlyContinue) -eq $script:RPBase) { $script:RPDirectory=$linked }
     try { Write-RogueProtectionFile "$script:RPDirectory/used" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()) } catch {}
-    $credential="$script:RPDirectory/credential"
     try { Write-RogueProtectionFile "$script:RPDirectory/base" $script:RPBase } catch {}
+    return $true
+}
+function Restore-RogueProtectionInstallation([string]$Key, [string]$Slug, [string]$Family, [string]$Version) {
+    $root=Split-Path $script:RPDirectory -Parent
+    $credential=Join-Path $script:RPDirectory 'credential'
     if (-not (Test-Path -LiteralPath $credential)) {
         foreach ($previous in @(Get-ChildItem -LiteralPath $root -Directory -Filter "$Slug-default-*" -ErrorAction SilentlyContinue)) {
             if ($previous.FullName -eq $script:RPDirectory -or (Get-Content -LiteralPath (Join-Path $previous.FullName 'base') -Raw -ErrorAction SilentlyContinue) -ne $script:RPBase) { continue }
@@ -107,18 +108,21 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
                 if ($restored.apiKey -ne $previousKey) { continue }
                 Write-RogueProtectionFile "$script:RPDirectory/installation-directory" $previous.FullName
                 $script:RPDirectory=$previous.FullName
-                $credential=Join-Path $script:RPDirectory 'credential'
                 try { Write-RogueProtectionFile "$script:RPDirectory/used" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()) } catch {}
                 break
-            } catch { if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -notin 401,403) { return $Key } }
+            } catch { if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -notin 401,403) { return $false } }
         }
     }
+    return $true
+}
+function Register-RogueProtectionInstallation([string]$Key, [string]$Slug, [string]$Family, [string]$Version) {
+    $credential=Join-Path $script:RPDirectory 'credential'
     if (-not (Test-Path -LiteralPath $credential)) {
         $enrollAttempt=0L
         $null=[long]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/enroll-attempt" -Raw -ErrorAction SilentlyContinue), [ref]$enrollAttempt)
         $enrollElapsed=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $enrollAttempt
-        if ($enrollElapsed -ge 0 -and $enrollElapsed -lt 60) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
-        try { $lock=[IO.File]::Open("$script:RPDirectory/enroll.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch { return $Key }
+        if ($enrollElapsed -ge 0 -and $enrollElapsed -lt 60) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $false }
+        try { $lock=[IO.File]::Open("$script:RPDirectory/enroll.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch { return $false }
         try {
             if (-not (Test-Path -LiteralPath $credential)) {
                 Write-RogueProtectionFile "$script:RPDirectory/enroll-attempt" ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString())
@@ -137,26 +141,39 @@ function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slu
             }
         } finally { $lock.Dispose() }
     }
+    return $true
+}
+function Start-RogueProtectionPoller {
+    $pollLock=$null
+    try { $pollLock=[IO.File]::Open("$script:RPDirectory/poll-start.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch {}
+    try {
+        $pollPid=0
+        $null=[int]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/poll.pid" -Raw -ErrorAction SilentlyContinue), [ref]$pollPid)
+        if ($pollLock -and -not ($pollPid -and (Get-Process -Id $pollPid -ErrorAction SilentlyContinue))) {
+            $scriptFile=Join-Path $script:RPHelperDirectory 'protection.ps1'
+            $escape={param($s) "'" + $s.Replace("'", "''") + "'"}
+            $command="& ([scriptblock]::Create((Get-Content -Raw -LiteralPath $(& $escape $scriptFile)))) -Poll $(& $escape $script:RPDirectory) -Base $(& $escape $script:RPBase)"
+            $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+            $params=@{ FilePath=(Get-Process -Id $PID).Path; ArgumentList=@('-NoProfile','-NonInteractive','-EncodedCommand',$encoded); PassThru=$true }
+            if ($env:OS -eq 'Windows_NT') { $params.WindowStyle='Hidden' }
+            try { $child=Start-Process @params; Write-RogueProtectionFile "$script:RPDirectory/poll.pid" $child.Id.ToString() } catch { }
+        }
+    } finally { if ($pollLock) { $pollLock.Dispose() } }
+}
+function Initialize-RogueProtection([string]$Key, [string]$BaseUrl, [string]$Slug, [string]$Family, [string]$Surface='default', [string]$Version='unknown') {
+    if (-not $Key) { return $Key }
+    if (-not $BaseUrl) { $BaseUrl='https://api.rogue.security' }
+    $script:RPBase=$BaseUrl.TrimEnd('/')
+    if (-not (Set-RogueProtectionDirectory $Key $Slug)) { return $Key }
+    if (-not (Restore-RogueProtectionInstallation $Key $Slug $Family $Version)) { return $Key }
+    if (-not (Register-RogueProtectionInstallation $Key $Slug $Family $Version)) { return $Key }
+    $credential=Join-Path $script:RPDirectory 'credential'
     if (-not (Test-Path -LiteralPath $credential)) { if (Test-Path -LiteralPath "$script:RPDirectory/legacy-server") { $script:RPDirectory=$null }; return $Key }
     $script:RPKey=Get-Content -LiteralPath $credential -Raw
     $attempt=0L
     $null=[long]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/attempt" -Raw -ErrorAction SilentlyContinue), [ref]$attempt)
     if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $attempt -ge 15) { Update-RogueProtection }
-    $pollLock=$null
-    try { $pollLock=[IO.File]::Open("$script:RPDirectory/poll-start.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch {}
-    try {
-    $pollPid=0
-    $null=[int]::TryParse((Get-Content -LiteralPath "$script:RPDirectory/poll.pid" -Raw -ErrorAction SilentlyContinue), [ref]$pollPid)
-    if ($pollLock -and -not ($pollPid -and (Get-Process -Id $pollPid -ErrorAction SilentlyContinue))) {
-        $scriptFile=Join-Path $script:RPHelperDirectory 'protection.ps1'
-        $escape={param($s) "'" + $s.Replace("'", "''") + "'"}
-        $command="& ([scriptblock]::Create((Get-Content -Raw -LiteralPath $(& $escape $scriptFile)))) -Poll $(& $escape $script:RPDirectory) -Base $(& $escape $script:RPBase)"
-        $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-        $params=@{ FilePath=(Get-Process -Id $PID).Path; ArgumentList=@('-NoProfile','-NonInteractive','-EncodedCommand',$encoded); PassThru=$true }
-        if ($env:OS -eq 'Windows_NT') { $params.WindowStyle='Hidden' }
-        try { $child=Start-Process @params; Write-RogueProtectionFile "$script:RPDirectory/poll.pid" $child.Id.ToString() } catch { }
-    }
-    } finally { if ($pollLock) { $pollLock.Dispose() } }
+    Start-RogueProtectionPoller
     $state=Get-RogueProtectionState
     $script:RPRevision=if ($state) { $state.aidr.revision } else { $null }
     $env:ROGUE_PROTECTION_STATE=$script:RPDirectory
