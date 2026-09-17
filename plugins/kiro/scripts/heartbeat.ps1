@@ -345,10 +345,15 @@ function Invoke-Main {
     Initialize-Beacon  # after the env files are parsed so they can set the interval
     Assert-ApiKey      # exits 0 when this install is not configured
     Resolve-BaseUrl
-    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
-    $script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'kiro' -Family 'kiro'
-    Resolve-Actor
     Resolve-Version
+    $protectionPath = Join-Path $pluginRoot 'scripts/protection.ps1'
+    if (-not (Test-Path -LiteralPath $protectionPath -PathType Leaf)) { exit 0 }
+    try {
+        $protectionText = Get-Content -Raw -LiteralPath $protectionPath -ErrorAction Stop
+        . ([scriptblock]::Create($protectionText)) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+    } catch { exit 0 }
+    $script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'kiro' -Family 'kiro' -Version $script:ver
+    Resolve-Actor
     Resolve-Surface
     Send-Heartbeat     # claims the beacon slot, THEN asks Kiro for its version
     Start-LogShipper

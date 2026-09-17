@@ -148,8 +148,21 @@ if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 
 $baseUrl = $creds['ROGUE_BASE_URL']; if (-not $baseUrl) { $baseUrl = 'https://api.rogue.security' }
 $baseUrl = $baseUrl.TrimEnd('/')
-. ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
-$script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'claude' -Family 'claude'
+# -- plugin version (regex from manifest, no python) ------------------------
+$ver = 'unknown'
+$pj = Join-Path $pluginRoot '.claude-plugin\plugin.json'
+if (Test-Path -LiteralPath $pj) {
+    $m = [regex]::Match((Get-Content -Raw -LiteralPath $pj), '"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+)')
+    if ($m.Success) { $ver = $m.Groups[1].Value }
+}
+
+$protectionPath = Join-Path $pluginRoot 'scripts/protection.ps1'
+if (-not (Test-Path -LiteralPath $protectionPath -PathType Leaf)) { exit 0 }
+try {
+    $protectionText = Get-Content -Raw -LiteralPath $protectionPath -ErrorAction Stop
+    . ([scriptblock]::Create($protectionText)) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
+} catch { exit 0 }
+$script:apiKey = Initialize-RogueProtection -Key $apiKey -BaseUrl $baseUrl -Slug 'claude' -Family 'claude' -Version $ver
 
 # -- actor resolution: hook.ps1's Resolve-RogueActor -------------------------
 # The ONE Claude cascade (env file -> CLAUDE_CODE_USER_EMAIL -> git config files ->
@@ -175,14 +188,6 @@ $actorName  = [string]$creds['ROGUE_ACTOR_NAME']
 if ($actor) { $actorEmail = [string]$actor.Email; $actorName = [string]$actor.Name }
 if (-not $actorEmail) { $actorEmail = 'unknown' }
 if (-not $actorName)  { $actorName  = 'unknown' }
-
-# -- plugin version (regex from manifest, no python) ------------------------
-$ver = 'unknown'
-$pj = Join-Path $pluginRoot '.claude-plugin\plugin.json'
-if (Test-Path -LiteralPath $pj) {
-    $m = [regex]::Match((Get-Content -Raw -LiteralPath $pj), '"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+)')
-    if ($m.Success) { $ver = $m.Groups[1].Value }
-}
 
 # -- agent display label from entrypoint (family is the fixed enum "claude") -
 # One table, in scripts/surface.ps1, shared with hook.ps1 - which stamps the

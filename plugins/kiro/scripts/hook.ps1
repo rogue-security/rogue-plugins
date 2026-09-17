@@ -434,11 +434,12 @@ function Write-KiroDecision {
 function Invoke-KiroHook {
     Initialize-KiroContext
     Resolve-KiroActor
+    Resolve-KiroInstall
 if (-not (Test-Path -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1') -PathType Leaf)) { exit 0 }
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $pluginRoot 'scripts')
-$script:apiKey = Initialize-RogueProtection -Key $script:apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'kiro' -Family 'kiro'
-if (-not (Enter-RogueProtection)) { exit 0 }
+$script:apiKey = Initialize-RogueProtection -Key $script:apiKey -BaseUrl $creds['ROGUE_BASE_URL'] -Slug 'kiro' -Family 'kiro' -Version $script:pluginVersion
 try {
+if (-not (Enter-RogueProtection)) { exit 0 }
 
     $payload = Read-KiroPayload
     if (-not (Test-RogueProtectionCurrent)) { exit 0 }
@@ -447,7 +448,6 @@ try {
         Log "outcome=duplicate engine=3.0 trigger=$triggerArg"
         exit 0
     }
-    Resolve-KiroInstall
     Start-KiroHeartbeat
     Send-KiroRequest
 if (-not (Test-RogueProtectionCurrent)) { exit 0 }

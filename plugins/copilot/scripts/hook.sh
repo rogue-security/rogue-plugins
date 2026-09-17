@@ -395,7 +395,7 @@ fi
 URL="${ROGUE_API_URL:-${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/copilot}"
 
 # Buffer stdin so we can enrich it (agentStop/subagentStop) before POSTing.
-BODY="$(rogue_protection_read_input)"
+BODY="$(rogue_protection_read_input)" || { printf '%s' '{}'; exit 0; }
 rogue_protection_current || { printf '%s' '{}'; exit 0; }
 # Re-attribute a subagent's event to its parent session BEFORE any tail
 # augmentation (a subagent agentStop has no transcriptPath, so augment no-ops).

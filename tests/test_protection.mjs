@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -48,7 +48,115 @@ function run(command,args,env, input) {
     child.once('exit',code=>{clearTimeout(timeout);resolve({code,out,err});});
   });
 }
+async function stopPollers(directory = temp) {
+  for (const entry of fs.readdirSync(directory,{withFileTypes:true})) {
+    if (!entry.isDirectory() || entry.name === 'plugins') continue;
+    const child=path.join(directory,entry.name);
+    for (const name of ['poll.pid','poll.lock/pid']) {
+      const file=path.join(child,name);
+      if (!fs.existsSync(file)) continue;
+      const pid=Number(fs.readFileSync(file,'utf8'));
+      if (pid>0) {
+        try { process.kill(pid); } catch {}
+        for (let attempt=0;attempt<100;attempt++) {
+          try { process.kill(pid,0); } catch { break; }
+          await new Promise(resolve=>setTimeout(resolve,20));
+          assert(attempt<99,`test poller ${pid} did not stop`);
+        }
+      }
+      fs.rmSync(file,{force:true});
+    }
+    fs.rmSync(path.join(child,'poll.lock'),{recursive:true,force:true});
+    await stopPollers(child);
+  }
+}
+afterEach(async () => { await stopPollers(); });
 try {
+  await test('Copilot allows without posting when its guarded input reader fails', async () => {
+    const root=path.join(temp,'copilot-read-failure'); fs.cpSync(path.join(fixturePlugins,'copilot'),root,{recursive:true});
+    fs.writeFileSync(path.join(root,'scripts/protection.sh'),`rogue_protection_init() { :; }
+rogue_protection_enter() { return 0; }
+rogue_protection_current() { return 0; }
+rogue_protection_leave() { :; }
+rogue_protection_read_input() { return 1; }
+`);
+    const start=requests.length;
+    const result=await run('sh',[path.join(root,'scripts/hook.sh'),'preToolUse'],{PLUGIN_ROOT:root,COPILOT_PLUGIN_ROOT:root,ROGUE_API_KEY:'reader_test_key',ROGUE_BASE_URL:base},'{"toolName":"shell","toolArgs":{"command":"must-not-post"}}');
+    assert.equal(result.code,0,result.err); assert.deepEqual(JSON.parse(result.out),{});
+    assert(!requests.slice(start).some(call=>call.key==='reader_test_key'));
+  });
+  await test('an empty or invalid poller timestamp exits cleanly and releases its lock', async () => {
+    for (const used of ['', 'invalid']) {
+      const directory=fs.mkdtempSync(path.join(temp,'empty-used-'));
+      fs.mkdirSync(path.join(directory,'poll.lock'));
+      fs.writeFileSync(path.join(directory,'poll.lock/pid'),'0');
+      fs.writeFileSync(path.join(directory,'credential'),'empty_used_key');
+      fs.writeFileSync(path.join(directory,'used'),used);
+      const result=await run('dash',[path.join(repo,'scripts/shared/protection.sh'),'--poll',directory,base],{},'');
+      assert.equal(result.code,0,result.err); assert.equal(result.err,'');
+      assert(!fs.existsSync(path.join(directory,'poll.lock')));
+    }
+  });
+  await test('shell shipper releases a lease when entry loses a pause race', async () => {
+    const root=path.join(temp,'ship-entry-failure'); fs.cpSync(path.join(fixturePlugins,'codex'),root,{recursive:true});
+    const lease=path.join(root,'lease');
+    fs.writeFileSync(path.join(root,'scripts/protection.sh'),`rogue_protection_init() { :; }
+rogue_protection_enter() { touch '${lease}'; return 1; }
+rogue_protection_leave() { rm -f '${lease}'; touch '${lease}.left'; }
+`);
+    const result=await run('sh',[path.join(root,'scripts/ship-logs.sh'),root,'codex','1.0.0','openai'],{},'');
+    assert.equal(result.code,0,result.err); assert(!fs.existsSync(lease)); assert(fs.existsSync(`${lease}.left`));
+  });
+  await test('shell drain failure reports a failed ACK and stops before another chunk', async () => {
+    const directory=path.join(temp,'drain-failure'); fs.mkdirSync(directory);
+    const now=Math.floor(Date.now()/1000);
+    fs.writeFileSync(path.join(directory,'decision'),`1 31 0 0 0 0 ${now} 31 0 ${now}\n`);
+    const library=path.join(directory,'ship-library.sh');
+    fs.writeFileSync(library,fs.readFileSync(path.join(repo,'scripts/shared/ship-logs.sh'),'utf8').replace(/main "\$@"\s*$/,''));
+    const script=`. '${library}'; . '${path.join(repo,'scripts/shared/protection.sh')}'; OFFSET=0; RUN_BYTES_SENT=0; MAX_RUN_BYTES=100; MAX_CHUNKS_PER_DRAIN=10; STATE_KEY=test; ship_next_chunk() { ADVANCE_BYTES=1; }; write_state() { return 1; }; if drain_file log 10 0 head head 10 log; then exit 9; fi; [ "$OFFSET" = 1 ] && [ "$RP_PERSISTENCE_FAILED" = 1 ]; rogue_protection_ack`;
+    const start=requests.length;
+    const result=await run('sh',['-c',script],{ROGUE_PROTECTION_STATE:directory,ROGUE_PROTECTION_BASE:base,ROGUE_API_KEY:'drain_failure_key'},'');
+    assert.equal(result.code,0,result.err);
+    const acks=requests.slice(start).filter(call=>call.key==='drain_failure_key' && call.path.endsWith('/ack')).map(call=>JSON.parse(call.body));
+    assert.deepEqual(acks.map(ack=>[ack.revision,ack.status,ack.error]),[[31,'failed','state_persistence_failed']]);
+  });
+  await test('PowerShell entrypoints resolve versions, tolerate missing helpers, and release failed entry leases', {skip:!process.env.ROGUE_TEST_PWSH}, async () => {
+    for (const [slug,entry] of [['kiro','heartbeat'],['rogue','heartbeat'],['kiro','hook'],['rogue','hook']]) {
+      const root=path.join(temp,`${slug}-${entry}-entrypoint`); fs.cpSync(path.join(fixturePlugins,slug),root,{recursive:true});
+      const script=path.join(root,`scripts/${entry}.ps1`);
+      fs.writeFileSync(script,fs.readFileSync(script,'utf8').replaceAll('$PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows','$false'));
+      const helper=path.join(root,'scripts/protection.ps1');
+      const versionFile=path.join(root,'enrolled-version'); const lease=path.join(root,'lease');
+      const env={KIRO_PLUGIN_ROOT:root,CLAUDE_PLUGIN_ROOT:root,CLAUDE_CODE_ENTRYPOINT:'cli',ROGUE_API_KEY:'entrypoint_test_key',ROGUE_BASE_URL:base,ROGUE_ACTOR_EMAIL:'qa@example.test',ROGUE_ACTOR_NAME:'QA',ROGUE_PS_LIB_ONLY:'',ProgramData:path.join(temp,'empty-machine')};
+      if (entry==='heartbeat') {
+        for (const invalid of [null, 'function {']) {
+          fs.rmSync(helper,{force:true}); if (invalid!==null) fs.writeFileSync(helper,invalid);
+          const start=requests.length;
+          const result=await run(process.env.ROGUE_TEST_PWSH,['-NoProfile','-File',script,...(entry==='hook'?['PreToolUse']:[])],env,'{}');
+          assert.equal(result.code,0,`${slug}: ${result.err}`); assert.equal(result.err,'');
+          assert(!requests.slice(start).some(call=>call.key==='entrypoint_test_key'));
+        }
+      }
+      fs.writeFileSync(helper,`param($ScriptDirectory)
+function Initialize-RogueProtection { param($Key,$BaseUrl,$Slug,$Family,$Version); [IO.File]::WriteAllText('${versionFile}',[string]$Version); ${entry==='heartbeat'?'exit 0':'return $Key'} }
+function Enter-RogueProtection { [IO.File]::WriteAllText('${lease}','active'); return $false }
+function Leave-RogueProtection { param($TimeoutSec); [IO.File]::Delete('${lease}'); [IO.File]::WriteAllText('${lease}.left','left') }
+`);
+      const result=await run(process.env.ROGUE_TEST_PWSH,['-NoProfile','-File',script,...(entry==='hook'?['PreToolUse']:[])],env,'{}');
+      assert.equal(result.code,0,`${slug}/${entry}: ${result.err}`);
+      const manifest=path.join(root,slug==='rogue'?'.claude-plugin/plugin.json':'plugin.json');
+      assert.equal(fs.readFileSync(versionFile,'utf8'),JSON.parse(fs.readFileSync(manifest,'utf8')).version,`${slug}/${entry}`);
+      if (entry==='hook') { assert(!fs.existsSync(lease)); assert(fs.existsSync(`${lease}.left`)); }
+    }
+  });
+  await test('Kiro shell heartbeat resolves its version before enrollment', async () => {
+    const root=path.join(temp,'kiro-heartbeat-version'); fs.cpSync(path.join(fixturePlugins,'kiro'),root,{recursive:true});
+    const versionFile=path.join(root,'enrolled-version');
+    fs.writeFileSync(path.join(root,'scripts/protection.sh'),`rogue_protection_init() { printf '%s' "$ROGUE_INSTALL_VERSION" > '${versionFile}'; exit 0; }\n`);
+    const result=await run('sh',[path.join(root,'scripts/heartbeat.sh'),'kiro_cli'],{KIRO_PLUGIN_ROOT:root,PLUGIN_ROOT:root,ROGUE_API_KEY:'heartbeat_version_key',ROGUE_BASE_URL:base},'');
+    assert.equal(result.code,0,result.err);
+    assert.equal(fs.readFileSync(versionFile,'utf8'),JSON.parse(fs.readFileSync(path.join(root,'plugin.json'),'utf8')).version);
+  });
   await test('every Unix bridge exits before reading paused stdin or sending an activity payload', async () => {
     for (const [plugin,slug,family] of [['rogue','claude','claude'],['codex','codex','openai'],['cursor','cursor','cursor'],['copilot','copilot','copilot'],['antigravity','antigravity','antigravity'],['kiro','kiro','kiro'],['gemini','gemini','gemini']]) {
       const root=path.join(fixturePlugins,plugin);
@@ -175,7 +283,7 @@ try {
         assert.equal(client.current(),false);
         assert.equal(client.enter(),false);
         const beforeAck=requests.length; await client.ack();
-        assert.equal(requests.length,beforeAck);
+        assert(!requests.slice(beforeAck).some(call=>call.key==='malformed_test_key'));
         fs.writeFileSync(client.file('state.json'),saved);
         malformedDecision=invalid;
         await client.refresh();
@@ -232,11 +340,11 @@ try {
     const {Protection}=await import(path.join(fixturePlugins,'gemini/scripts/protection.mjs'));
     const directory=path.join(temp,'persist-failure'); fs.mkdirSync(directory);
     fs.mkdirSync(path.join(directory,'state.json'));
-    const client=new Protection(directory,base,'installation_test_key');
+    const client=new Protection(directory,base,'state_save_failure_key');
     const start=requests.length;
     await client.refresh();
     assert.equal(client.current(),false);
-    const acks=requests.slice(start).filter(call=>call.path.endsWith('/ack')).map(call=>JSON.parse(call.body));
+    const acks=requests.slice(start).filter(call=>call.path.endsWith('/ack') && call.key==='state_save_failure_key').map(call=>JSON.parse(call.body));
     assert(acks.some(ack=>ack.status==='failed' && ack.error==='state_persistence_failed'));
     assert(!acks.some(ack=>ack.status==='applied'));
   });
@@ -311,7 +419,13 @@ try {
       const args=[path.join(root,`scripts/ship-logs.${slug==='gemini'?'mjs':'sh'}`),root,slug,'1.0.0',slug==='codex'?'openai':'gemini'];
       const start=requests.length;
       await run(slug==='gemini'?process.execPath:'sh',args,env,'');
+      const acks=requests.slice(start).filter(call=>call.path.endsWith('/ack')).map(call=>JSON.parse(call.body));
+      const failed=acks.findIndex(ack=>ack.revision===40 && ack.status==='failed' && ack.error==='state_persistence_failed');
+      assert(failed>=0,`${slug} must report its checkpoint failure`);
+      assert(!acks.slice(failed+1).some(ack=>ack.status==='applied'),slug);
+      await stopPollers();
       fs.rmSync(state,{recursive:true});
+      fs.writeFileSync(path.join(directory,'attempt'),'0');
       await run(slug==='gemini'?process.execPath:'sh',args,env,'');
       assert(!requests.slice(start).some(call=>call.path.endsWith('/logs')),slug);
       assert(fs.readFileSync(state,'utf8').includes('revision=40'),slug);
@@ -382,11 +496,7 @@ try {
     assert.equal(result.code,0); assert.deepEqual(JSON.parse(result.out),{});
   });
 } finally {
-  for (const dir of fs.readdirSync(temp)) {
-    for (const name of ['poll.pid','poll.lock/pid']) {
-      try { const pid=Number(fs.readFileSync(path.join(temp,dir,name),'utf8')); if (pid>0) process.kill(pid); } catch {}
-    }
-  }
+  await stopPollers();
   server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));
   fs.rmSync(temp,{recursive:true,force:true});
 }

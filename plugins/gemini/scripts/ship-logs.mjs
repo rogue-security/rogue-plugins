@@ -656,7 +656,10 @@ class Shipper {
       if (advanceBytes <= 0) return { offset, complete: false };
       offset += advanceBytes;
       this.runBytesSent += advanceBytes;
-      if (!this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath)) return {offset, complete:false};
+      if (!this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath)) {
+        await this.protection?.fail();
+        return {offset, complete:false};
+      }
     }
     return { offset, complete: true };
   }
@@ -697,7 +700,7 @@ class Shipper {
       const currentHead = firstLineFingerprint(filePath);
       this.runBytesSent = 0;
       if (this.protection?.revision > 0 && state.revision !== String(this.protection.revision)) {
-        this.writeState(stateKey, fileBytes, currentHead, fileBytes, normalizedPath);
+        if (!this.writeState(stateKey, fileBytes, currentHead, fileBytes, normalizedPath)) await this.protection.fail();
         return;
       }
       let offset = state.offset;
@@ -742,7 +745,10 @@ class Shipper {
           }
         }
         offset = 0;
-        this.writeState(stateKey, 0, currentHead, fileBytes, normalizedPath);
+        if (!this.writeState(stateKey, 0, currentHead, fileBytes, normalizedPath)) {
+          await this.protection?.fail();
+          return;
+        }
       }
 
       await this.drainFile(

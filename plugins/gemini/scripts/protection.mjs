@@ -67,6 +67,12 @@ export class Protection {
     await this.request('ack', { protocolVersion:1, revision:state.revision, status:'applied', aidrPaused:state.aidr.paused, aispmPaused:state.aispm.paused });
     write(this.file('ack'), id);
   }
+  async fail(state = this.state()) {
+    this.persistenceFailed=true;
+    try { write(this.file('persistence-failed'),'1'); } catch {}
+    if (!state) return;
+    try { await this.request('ack',{protocolVersion:1,revision:state.revision,status:'failed',aidrPaused:state.aidr.paused,aispmPaused:state.aispm.paused,error:'state_persistence_failed'}); } catch {}
+  }
   async refresh() {
     const lock=this.file('refresh.lock');
     try { fs.writeFileSync(lock, String(process.pid), { flag:'wx', mode:0o600 }); }
@@ -81,9 +87,7 @@ export class Protection {
           write(this.file('state.json'), JSON.stringify({ decision:state, receivedAt:Date.now() }));
           fs.rmSync(this.file('persistence-failed'),{force:true}); this.persistenceFailed=false;
         } catch {
-          this.persistenceFailed=true;
-          try { write(this.file('persistence-failed'),'1'); } catch {}
-          try { await this.request('ack',{protocolVersion:1,revision:state.revision,status:'failed',aidrPaused:state.aidr.paused,aispmPaused:state.aispm.paused,error:'state_persistence_failed'}); } catch {}
+          await this.fail(state);
         }
       }
     } catch {} finally { fs.rmSync(lock, {force:true}); }

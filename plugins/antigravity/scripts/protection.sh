@@ -207,7 +207,10 @@ rogue_protection_enter() {
 if [ "${0##*/}" = protection.sh ] && [ "${1:-}" = --poll ]; then
   ROGUE_PROTECTION_STATE=$2; ROGUE_PROTECTION_BASE=$3
   ROGUE_API_KEY=$(cat "$ROGUE_PROTECTION_STATE/credential")
-  while [ $(( $(rogue_protection_now) - $(cat "$ROGUE_PROTECTION_STATE/used" 2>/dev/null || echo 0) )) -lt 90 ] || rogue_protection_busy; do
+  while :; do
+    _rp_used=$(cat "$ROGUE_PROTECTION_STATE/used" 2>/dev/null)
+    case "$_rp_used" in ''|*[!0-9]*) _rp_used=0 ;; esac
+    [ $(( $(rogue_protection_now) - _rp_used )) -lt 90 ] || rogue_protection_busy || break
     rogue_protection_refresh
     sleep 15
   done

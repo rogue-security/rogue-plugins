@@ -822,7 +822,7 @@ drain_file() { # <file> <size> <rotated:0|1> <expected-head> <persist-head> <per
     [ "$ADVANCE_BYTES" -gt 0 ] || return 1
     OFFSET=$((OFFSET + ADVANCE_BYTES))
     RUN_BYTES_SENT=$((RUN_BYTES_SENT + ADVANCE_BYTES))
-    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path" || return 1
+    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path" || { rogue_protection_fail; return 1; }
   done
   return 0
 }
@@ -886,7 +886,7 @@ ship_log_file() { # <path>
       fi
     fi
     OFFSET=0
-    write_state "$STATE_KEY" 0 "$_target_head" "$_target_file_bytes" "$_target_abs_path"
+    write_state "$STATE_KEY" 0 "$_target_head" "$_target_file_bytes" "$_target_abs_path" || { rogue_protection_fail; release_lock; return 0; }
   fi
 
   drain_file "$_target_file" "$_target_file_bytes" 0 "$_target_head" \
@@ -903,8 +903,8 @@ main() {
   [ -r "$PLUGIN_ROOT/scripts/protection.sh" ] || exit 0
   . "$PLUGIN_ROOT/scripts/protection.sh"
   rogue_protection_init "$SHIPPER_SLUG" "$AGENT_FAMILY" "$PLUGIN_ROOT/scripts"
-  rogue_protection_enter || exit 0
   trap 'rogue_protection_leave' EXIT
+  rogue_protection_enter || exit 0
   resolve_knobs
   [ -n "$API_KEY" ] || { debug 'not configured -> no-op'; exit 0; }
   command -v curl >/dev/null 2>&1 || { log 'outcome=fail reason=no-curl'; exit 0; }
