@@ -22,6 +22,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body_in = self.rfile.read(length)
+        if self.path.startswith("/api/v1/hooks/protection/"):
+            self.send_response(404)
+            self.end_headers()
+            return
         # Record headers + body so the test can inspect them.
         with open(HEADERS_PATH, "w") as f:
             json.dump({
@@ -44,4 +48,5 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1])
+    http.server.HTTPServer.allow_reuse_address = True
     http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()

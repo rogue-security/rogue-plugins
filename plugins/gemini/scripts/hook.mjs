@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { Protection } from "./protection.mjs";
+let protection;
 // Rogue Security — Gemini CLI hook dispatcher.
 //
 // Usage: node hook.mjs <EventName>
@@ -82,7 +84,7 @@ try {
 // single hook.log with no way to tell whose line was whose. Precedence:
 // explicit file → directory override → per-agent default.
 const LOG_DIR = ENV.ROGUE_LOG_DIR || path.join(HOME, ".rogue", "logs");
-const LOG_FILE = ENV.ROGUE_LOG_FILE || path.join(LOG_DIR, `${PROVIDER}.log`);
+let LOG_FILE = ENV.ROGUE_LOG_FILE || path.join(LOG_DIR, `${PROVIDER}.log`);
 // Size cap. Over it, the current log is renamed to <file>.1 (exactly one
 // generation kept, so worst case on disk is 2x this). A NUMERIC ZERO disables
 // rotation; a NON-NUMERIC value falls back to the default rather than disabling
@@ -121,6 +123,7 @@ function rotateLog() {
   }
 }
 function log(msg) {
+  if (protection && !protection.current()) return;
   try {
     // 0700 dir / 0600 file, matching the `umask 077` the sh dispatchers use.
     // The log carries the server's block reason, which quotes the content that
@@ -265,6 +268,7 @@ function isAgentTaggableEvent(parsed) {
 
 // Read a file as UTF-8, or null if it is missing, unreadable or over `maxBytes`.
 function readCapped(file, maxBytes) {
+  if (protection && !protection.current()) return null;
   try {
     if (fs.statSync(file).size > maxBytes) return null;
     return fs.readFileSync(file, "utf8");
@@ -408,11 +412,20 @@ function resolveSubagentId(parsed) {
 function readStdin() {
   return new Promise((resolve) => {
     const chunks = [];
-    process.stdin.on("data", (c) => chunks.push(c));
-    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    process.stdin.on("error", () => resolve(""));
-    // If nothing is piped, don't hang.
-    if (process.stdin.isTTY) resolve("");
+    const finish = () => {
+      clearInterval(timer);
+      process.stdin.removeListener('data', data);
+      process.stdin.pause();
+      const current=!protection || protection.current();
+      resolve(current ? Buffer.concat(chunks).toString('utf8') : '');
+      chunks.length=0;
+    };
+    const data = (chunk) => { if (!protection || protection.current()) chunks.push(chunk); else finish(); };
+    const timer=setInterval(() => { if (protection && !protection.current()) finish(); },250);
+    process.stdin.on('data',data);
+    process.stdin.once('end',finish);
+    process.stdin.once('error',finish);
+    if (process.stdin.isTTY) finish();
   });
 }
 
@@ -420,7 +433,10 @@ async function main() {
   // Already merged at module load (the log destination depends on it) — reuse it
   // rather than re-reading the same three files.
   const env = ENV;
-  const apiKey = env.ROGUE_API_KEY || "";
+  protection = await Protection.connect(env);
+  const apiKey = protection?.key || env.ROGUE_API_KEY || "";
+  if (protection) LOG_FILE = protection.file("gemini.log");
+  if (protection && !protection.enter()) return emit({});
 
   // SessionStart: fire the detached roster heartbeat, then fall through to POST
   // the event like any other so it is captured for audit. SessionStart is
@@ -462,6 +478,7 @@ async function main() {
   }
 
   const payload = await readStdin();
+  if (protection && !protection.current()) return emit({});
   const actor = resolveActor(env);
   const base = (env.ROGUE_BASE_URL || "https://api.rogue.security").replace(
     /\/+$/,
@@ -490,11 +507,13 @@ async function main() {
 
   let bodyText = "{}";
   try {
+    if (protection && !protection.current()) return emit({});
     const resp = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-rogue-api-key": apiKey,
+        ...(protection?.revision !== undefined ? {"x-rogue-activity-revision":String(protection.revision)} : {}),
         "x-rogue-event": EVENT,
         "x-rogue-actor-email": headerBytes(actor.email),
         "x-rogue-actor-name": headerBytes(actor.name),
@@ -530,7 +549,7 @@ async function main() {
     bodyText = "{}";
   }
 
-  return emit(bodyText);
+  return emit(!protection || protection.current() ? bodyText : {});
 }
 
 main().catch((e) => {

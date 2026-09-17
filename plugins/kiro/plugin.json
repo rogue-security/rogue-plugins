@@ -1,7 +1,7 @@
 {
   "name": "rogue",
-  "version": "1.0.0",
-  "description": "Rogue Security AIDR — real-time AI agent detection and response for Kiro (IDE, CLI, Crew)",
+  "version": "1.0.1",
+  "description": "Rogue Security AIDR \u2014 real-time AI agent detection and response for Kiro (IDE, CLI, Crew)",
   "author": {
     "name": "Rogue Security",
     "url": "https://www.rogue.security"

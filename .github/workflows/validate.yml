@@ -225,6 +225,11 @@ jobs:
           SH=dash sh tests/test_hook_logs.sh
           SH=bash bash tests/test_hook_logs.sh
 
+      - name: Installation pause contract
+        env:
+          ROGUE_TEST_PWSH: pwsh
+        run: node --test tests/test_protection.mjs
+
       - name: Gemini dispatcher contract (node)
         # The only suite that exercises hook.mjs end to end against a real server,
         # and until now the only dispatcher suite CI never ran — the file existed

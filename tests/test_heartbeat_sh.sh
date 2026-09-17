@@ -36,13 +36,13 @@ mkdir -p "$TMPROOT/bin" "$ROOT/.claude-plugin" "$ROOT/scripts" "$HOME_SB"
 # absent. So a tree without it does not test a weaker throttle - it tests no throttle,
 # and every case below passes while asserting nothing. That is exactly what happened
 # the first time this suite met the extracted library.
-cp "$REPO/plugins/rogue/scripts/heartbeat.sh" \
+cp "$REPO/plugins/rogue/scripts/protection.sh" "$REPO/plugins/rogue/scripts/heartbeat.sh" \
    "$REPO/plugins/rogue/scripts/surface.sh" \
    "$REPO/plugins/rogue/scripts/beacon.sh" \
    "$REPO/plugins/rogue/scripts/env-file.sh" \
    "$REPO/plugins/rogue/scripts/actor.sh" "$ROOT/scripts/"
 echo '{"version":"9.9.9"}' > "$ROOT/.claude-plugin/plugin.json"
-printf '#!/bin/sh\necho POST >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/bin/curl"
+printf '#!/bin/sh\ncase "$*" in *hooks/protection/*) exit 22 ;; esac\necho POST >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/bin/curl"
 chmod +x "$TMPROOT/bin/curl"
 echo 'export ROGUE_API_KEY=k' > "$HOME_SB/.rogue-env"
 
@@ -222,11 +222,11 @@ echo "── the kiro heartbeat reports family kiro and the surface it was given
 KIRO_ROOT="$TMPROOT/kiro"
 KIRO_HOME="$TMPROOT/kiro-home"
 mkdir -p "$KIRO_ROOT/scripts" "$KIRO_HOME" "$TMPROOT/kiro-bin"
-cp "$REPO/plugins/kiro/scripts/heartbeat.sh" "$REPO/plugins/kiro/scripts/beacon.sh" \
+cp "$REPO/plugins/kiro/scripts/protection.sh" "$REPO/plugins/kiro/scripts/heartbeat.sh" "$REPO/plugins/kiro/scripts/beacon.sh" \
    "$REPO/plugins/kiro/scripts/actor.sh" "$REPO/plugins/kiro/scripts/install-id.sh" \
    "$REPO/plugins/kiro/scripts/kiro-host.sh" "$REPO/plugins/kiro/scripts/env-file.sh" "$KIRO_ROOT/scripts/"
 echo '{"name":"rogue","version":"9.9.9"}' > "$KIRO_ROOT/plugin.json"
-printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/kiro-bin/curl"
+printf '#!/bin/sh\ncase "$*" in *hooks/protection/*) exit 22 ;; esac\nprintf "%%s\\n" "$*" >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/kiro-bin/curl"
 chmod +x "$TMPROOT/kiro-bin/curl"
 # kiro-cli 2.21.0's shape: `--version` prints "kiro-cli <X.Y.Z>", and
 # `settings chat.defaultAgent` prints the value (quoted, as the real CLI does)
