@@ -13,12 +13,22 @@ const write = (file, value) => {
   fs.writeFileSync(temp, value, { mode: 0o600 });
   fs.renameSync(temp, file);
 };
+const validDecision = (decision) => decision?.protocolVersion === 1
+  && Number.isSafeInteger(decision.revision) && decision.revision >= 0
+  && typeof decision.serverTime === 'string' && Number.isFinite(Date.parse(decision.serverTime))
+  && ['aidr', 'aispm'].every(cap => {
+    const value = decision[cap];
+    return typeof value?.paused === 'boolean'
+      && Number.isSafeInteger(value.revision) && value.revision >= 0
+      && (value.expiresAt === null || (typeof value.expiresAt === 'string' && Number.isFinite(Date.parse(value.expiresAt))));
+  });
 export class Protection {
   constructor(directory, base, key) { this.directory=directory; this.base=base; this.key=key; this.revision=undefined; }
   file(name) { return path.join(this.directory, name); }
   state() {
     try {
       const saved = JSON.parse(read(this.file('state.json')));
+      if (!validDecision(saved?.decision) || !Number.isFinite(saved.receivedAt) || saved.receivedAt < 0) return undefined;
       const now = Date.parse(saved.decision.serverTime) + Date.now() - saved.receivedAt;
       for (const cap of ['aidr','aispm']) {
         if (saved.decision[cap].expiresAt && Date.parse(saved.decision[cap].expiresAt) <= now) saved.decision[cap].paused=false;
@@ -65,7 +75,7 @@ export class Protection {
       write(this.file('attempt'), String(Date.now()));
       const state=await this.request('state');
       const previous=this.state();
-      if (state.protocolVersion !== 1 || !Number.isSafeInteger(state.revision) || !state.aidr || !state.aispm) return;
+      if (!validDecision(state)) return;
       if (!previous || state.revision >= previous.revision) {
         try {
           write(this.file('state.json'), JSON.stringify({ decision:state, receivedAt:Date.now() }));

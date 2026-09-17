@@ -20,7 +20,7 @@ function isolateEnv(directory) {
   }
 }
 isolateEnv(fixturePlugins);
-let revision=1, paused=true, available=true, legacy=false, disconnect=false;
+let revision=1, paused=true, available=true, legacy=false, disconnect=false, malformedDecision;
 const requests=[];
 const server=http.createServer(async (req,res) => {
   let body=''; for await (const chunk of req) body+=chunk;
@@ -32,7 +32,7 @@ const server=http.createServer(async (req,res) => {
   if (req.url.endsWith('/enroll')) { res.end(JSON.stringify({apiKey:'installation_test_key', installation:{id:'test',type:'coding_agent',role:'coding'}})); return; }
   if (req.url.endsWith('/state')) {
     if (req.headers.accept === 'text/tab-separated-values') { res.setHeader('content-type','text/tab-separated-values'); res.end([1,revision,Number(paused),0,0,0,Math.floor(Date.now()/1000),revision,0].join('\t')); return; }
-    res.end(JSON.stringify({protocolVersion:1,revision,serverTime:new Date().toISOString(),aidr:{paused,expiresAt:null,revision},aispm:{paused:false,expiresAt:null,revision:0}})); return;
+    res.end(JSON.stringify(malformedDecision ?? {protocolVersion:1,revision,serverTime:new Date().toISOString(),aidr:{paused,expiresAt:null,revision},aispm:{paused:false,expiresAt:null,revision:0}})); return;
   }
   if (req.url.endsWith('/ack')) { res.end('{"success":true}'); return; }
   res.end('{}');
@@ -151,6 +151,43 @@ try {
     assert.equal(await exit,0); clearTimeout(timeout);
     assert.deepEqual(JSON.parse(out || '{}'),{});
     assert(!requests.slice(start).some(call=>call.path.endsWith('/hooks/gemini')));
+  });
+  await test('Gemini rejects malformed cached and remote decisions without clearing a valid pause',async()=>{
+    const {Protection}=await import(path.join(fixturePlugins,'gemini/scripts/protection.mjs'));
+    const directory=path.join(temp,'malformed-decisions'); fs.mkdirSync(directory);
+    const client=new Protection(directory,base,'malformed_test_key');
+    const decision={protocolVersion:1,revision,serverTime:new Date().toISOString(),aidr:{paused:true,expiresAt:null,revision},aispm:{paused:false,expiresAt:null,revision:0}};
+    const saved=JSON.stringify({decision,receivedAt:Date.now()});
+    const cases=[
+      {...decision,aidr:{...decision.aidr,paused:null}},
+      {...decision,aidr:{...decision.aidr,paused:'false'}},
+      {...decision,aidr:{}},
+      {...decision,aidr:{...decision.aidr,revision:-1}},
+      {...decision,revision:1.5},
+      {...decision,revision:-1},
+      {...decision,serverTime:'invalid'},
+      {...decision,aidr:{...decision.aidr,expiresAt:'invalid'}},
+      {...decision,aispm:null},
+    ];
+    try {
+      for (const invalid of cases) {
+        fs.writeFileSync(client.file('state.json'),JSON.stringify({decision:invalid,receivedAt:Date.now()}));
+        assert.equal(client.current(),false);
+        assert.equal(client.enter(),false);
+        const beforeAck=requests.length; await client.ack();
+        assert.equal(requests.length,beforeAck);
+        fs.writeFileSync(client.file('state.json'),saved);
+        malformedDecision=invalid;
+        await client.refresh();
+        assert.equal(fs.readFileSync(client.file('state.json'),'utf8'),saved);
+        assert.equal(client.current(),false);
+        assert(!requests.slice(beforeAck).some(call=>call.path.endsWith('/ack')));
+      }
+      fs.writeFileSync(client.file('state.json'),JSON.stringify({decision:{...decision,aidr:{...decision.aidr,paused:false}},receivedAt:'invalid'}));
+      assert.equal(client.current(),false);
+      fs.writeFileSync(client.file('state.json'),JSON.stringify({decision:{...decision,aidr:{...decision.aidr,expiresAt:new Date(Date.now()-1000).toISOString()}},receivedAt:Date.now()}));
+      assert.equal(client.current(),true,'a valid expired pause still resumes');
+    } finally {malformedDecision=undefined;}
   });
   await test('Gemini keeps a saved pause when bookkeeping cannot be written',async()=>{
     const root=path.join(fixturePlugins,'gemini');
