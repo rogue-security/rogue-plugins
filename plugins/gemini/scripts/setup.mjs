@@ -42,6 +42,7 @@ const MANAGED = {
   ROGUE_API_KEY: apiKey,
   ROGUE_ACTOR_EMAIL: actorEmail,
   ROGUE_ACTOR_NAME: actorName,
+  ...(process.env.ROGUE_BASE_URL ? { ROGUE_BASE_URL: process.env.ROGUE_BASE_URL } : {}),
 };
 
 for (const [key, value] of Object.entries(MANAGED)) {

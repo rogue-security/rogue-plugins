@@ -38,13 +38,13 @@ Read the key into a shell variable first (don't paste the literal key into the c
 - macOS / Linux:
 ```bash
 read -rs ROGUE_API_KEY   # paste the key at the prompt; not echoed, not in history
-curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" https://api.rogue.security/api/v1/hooks/ping
+curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
 ```
 - Windows (PowerShell):
 ```powershell
 $sec = Read-Host -AsSecureString "Rogue API key"
 $ROGUE_API_KEY = [System.Net.NetworkCredential]::new('', $sec).Password
-try { (Invoke-WebRequest -Uri https://api.rogue.security/api/v1/hooks/ping -Headers @{ 'x-rogue-api-key' = $ROGUE_API_KEY } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
+try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = $ROGUE_API_KEY } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 
 If the response is not `200`, tell the user the key is invalid and ask them to try again.

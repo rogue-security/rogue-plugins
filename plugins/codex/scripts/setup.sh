@@ -33,11 +33,15 @@ ACTOR_EMAIL="${2:-}"
 ACTOR_NAME="${3:-}"
 SURFACE="${4:-codex_cli}"
 
+set --
+[ -z "${ROGUE_BASE_URL:-}" ] || set -- ROGUE_BASE_URL "$ROGUE_BASE_URL"
+
 rogue_write_env_file "$ENV_FILE" \
   ROGUE_API_KEY "$API_KEY" \
   ROGUE_ACTOR_EMAIL "$ACTOR_EMAIL" \
   ROGUE_ACTOR_NAME "$ACTOR_NAME" \
-  ROGUE_CODEX_SURFACE "$SURFACE"
+  ROGUE_CODEX_SURFACE "$SURFACE" \
+  "$@"
 
 echo "OK"
 echo "ENV_FILE=$ENV_FILE"

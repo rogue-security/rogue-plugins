@@ -23,8 +23,8 @@ Ask the user for their Rogue Security API key. It should start with `rsk_`. If t
 
 ## Step 3: Validate the API key
 Replace <KEY> with the key they gave:
-- macOS / Linux: `curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" https://api.rogue.security/api/v1/hooks/ping`
-- Windows: `try { (Invoke-WebRequest -Uri https://api.rogue.security/api/v1/hooks/ping -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }`
+- macOS / Linux: `curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"`
+- Windows: `try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }`
 
 If the response is not 200, tell the user the key is invalid and ask them to try again.
 

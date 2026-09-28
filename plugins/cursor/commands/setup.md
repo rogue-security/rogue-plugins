@@ -33,11 +33,11 @@ Ask the user for their Rogue Security API key (starts with `rsk_`). If they don'
 
 - macOS / Linux:
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" https://api.rogue.security/api/v1/hooks/ping
+curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
 ```
 - Windows (PowerShell):
 ```powershell
-try { (Invoke-WebRequest -Uri https://api.rogue.security/api/v1/hooks/ping -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
+try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 Expect `200`. If not, the key is invalid — ask the user to try again.
 

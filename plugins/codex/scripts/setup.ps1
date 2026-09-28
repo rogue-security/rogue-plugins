@@ -32,12 +32,14 @@ if (-not $ApiKey) {
     exit 1
 }
 
-$restricted = Write-RogueEnvFile -Path $EnvFile -RequireProtection -Values ([ordered]@{
+$values = [ordered]@{
     ROGUE_API_KEY       = $ApiKey
     ROGUE_ACTOR_EMAIL   = $Email
     ROGUE_ACTOR_NAME    = $Name
     ROGUE_CODEX_SURFACE = $Surface
-})
+}
+if ($env:ROGUE_BASE_URL) { $values['ROGUE_BASE_URL'] = $env:ROGUE_BASE_URL }
+$restricted = Write-RogueEnvFile -Path $EnvFile -RequireProtection -Values $values
 
 if (-not $restricted) {
     Write-Error "Failed to restrict permissions on $EnvFile : $script:RogueEnvProtectError"

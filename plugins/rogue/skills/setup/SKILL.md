@@ -37,11 +37,11 @@ Run this command to validate (replace `<KEY>` with the actual key):
 
 - macOS / Linux:
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" https://api.rogue.security/api/v1/hooks/ping
+curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
 ```
 - Windows (PowerShell):
 ```powershell
-try { (Invoke-WebRequest -Uri https://api.rogue.security/api/v1/hooks/ping -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
+try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 
 If the response is not `200`, tell the user the key is invalid and ask them to try again.
