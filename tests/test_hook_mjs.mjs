@@ -42,10 +42,12 @@ function runHook(event, payload, env, prepareHome) {
     child.stdout.on("data", (c) => (out += c));
     child.on("error", reject);
     child.on("close", () => {
+      // Detached children (heartbeat, protection poller) may still be writing
+      // into HOME; a leftover temp dir is harmless, a failed test is not.
       try {
-      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+        fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      } catch {}
       resolve(out);
-      } catch (error) { reject(error); }
     });
     child.stdin.end(payload ?? "");
   });

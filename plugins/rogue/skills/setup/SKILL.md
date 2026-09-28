@@ -37,11 +37,11 @@ Run this command to validate (replace `<KEY>` with the actual key):
 
 - macOS / Linux:
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" https://api.rogue.security/api/v1/hooks/ping
+base="${ROGUE_BASE_URL:-$(sed -n -e 's/^[[:space:]]*export[[:space:]]*ROGUE_BASE_URL=//p' -e 's/^[[:space:]]*ROGUE_BASE_URL=//p' ~/.rogue-env 2>/dev/null | tail -1 | tr -d '[:cntrl:]"' | tr -d "'")}"; base="${base:-https://api.rogue.security}"; curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${base%/}/api/v1/hooks/ping"
 ```
 - Windows (PowerShell):
 ```powershell
-try { (Invoke-WebRequest -Uri https://api.rogue.security/api/v1/hooks/ping -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
+$base = $env:ROGUE_BASE_URL; if (-not $base) { $base = (Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.rogue-env') -ErrorAction SilentlyContinue | Where-Object { $_ -match '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=' } | Select-Object -Last 1) -replace '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=', '' -replace '[''"]', '' }; if (-not $base) { $base = 'https://api.rogue.security' }; try { (Invoke-WebRequest -Uri "$($base.Trim().TrimEnd('/'))/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 
 If the response is not `200`, tell the user the key is invalid and ask them to try again.
