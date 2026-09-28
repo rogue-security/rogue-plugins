@@ -33,11 +33,11 @@ Ask the user for their Rogue Security API key (starts with `rsk_`). If they don'
 
 - macOS / Linux:
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
+base="${ROGUE_BASE_URL:-$(sed -n -e 's/^[[:space:]]*export[[:space:]]*ROGUE_BASE_URL=//p' -e 's/^[[:space:]]*ROGUE_BASE_URL=//p' ~/.rogue-env 2>/dev/null | tail -1 | tr -d '[:cntrl:]"' | tr -d "'")}"; base="${base:-https://api.rogue.security}"; curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${base%/}/api/v1/hooks/ping"
 ```
 - Windows (PowerShell):
 ```powershell
-try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
+$base = $env:ROGUE_BASE_URL; if (-not $base) { $base = (Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.rogue-env') -ErrorAction SilentlyContinue | Where-Object { $_ -match '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=' } | Select-Object -Last 1) -replace '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=', '' -replace '[''"]', '' }; if (-not $base) { $base = 'https://api.rogue.security' }; try { (Invoke-WebRequest -Uri "$($base.Trim().TrimEnd('/'))/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 Expect `200`. If not, the key is invalid — ask the user to try again.
 

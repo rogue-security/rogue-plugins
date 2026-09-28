@@ -66,6 +66,23 @@ check "codex: surface replaced"     "codex_app" "$(sourced "$codex_env" ROGUE_CO
 check "codex: one surface line"     "1"         "$(count_lines "$codex_env" '^export ROGUE_CODEX_SURFACE=')"
 check "codex: base url kept"        "http://localhost:8007" "$(sourced "$codex_env" ROGUE_BASE_URL)"
 
+for plugin in rogue codex cursor copilot antigravity gemini; do
+  if [ "$plugin" = gemini ]; then
+    command -v node >/dev/null 2>&1 || continue
+    writer() { node "$REPO/plugins/gemini/scripts/setup.mjs" "$@"; }
+  else
+    writer() { bash "$REPO/plugins/$plugin/scripts/setup.sh" "$@"; }
+  fi
+  url_env="$SANDBOX/base-url-$plugin/.rogue-env"; mkdir -p "${url_env%/*}"
+  HOME="${url_env%/*}" ROGUE_BASE_URL="https://rogue.corp.internal" writer "k" "e@x.io" "N" >/dev/null
+  check "$plugin: fresh file gets env base url" "https://rogue.corp.internal" "$(sourced "$url_env" ROGUE_BASE_URL)"
+  seed "$url_env"
+  HOME="${url_env%/*}" ROGUE_BASE_URL="https://rogue.corp.internal" writer "k" "e@x.io" "N" >/dev/null
+  check "$plugin: env base url replaces stale" "https://rogue.corp.internal" "$(sourced "$url_env" ROGUE_BASE_URL)"
+  check "$plugin: one base url line"           "1" "$(count_lines "$url_env" '^export ROGUE_BASE_URL=')"
+  check "$plugin: log dir still kept"          "/var/log/rogue" "$(sourced "$url_env" ROGUE_LOG_DIR)"
+done
+
 if command -v node >/dev/null 2>&1; then
   gem_env="$SANDBOX/gemini/.rogue-env"; mkdir -p "${gem_env%/*}"
   seed "$gem_env"

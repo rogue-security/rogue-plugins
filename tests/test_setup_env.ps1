@@ -162,6 +162,15 @@ foreach ($plugin in @('rogue', 'cursor')) {
     Check "${plugin}: base url kept"    'http://localhost:8007' (Get-EnvValue $path 'ROGUE_BASE_URL')
     Check "${plugin}: log dir kept"     '/var/log/rogue'        (Get-EnvValue $path 'ROGUE_LOG_DIR')
     Check "${plugin}: one header line"  1 (Count-Matching $path 'Read by hook subprocesses')
+
+    $env:ROGUE_BASE_URL = 'https://rogue.corp.internal'
+    try {
+        & (Join-Path $repo "plugins/$plugin/scripts/setup.ps1") 'new-key' 'new@example.com' 'New Name' `
+            -WarningAction SilentlyContinue | Out-Null
+    } finally { Remove-Item Env:ROGUE_BASE_URL -ErrorAction SilentlyContinue }
+    Check "${plugin}: env base url replaces stale" 'https://rogue.corp.internal' (Get-EnvValue $path 'ROGUE_BASE_URL')
+    Check "${plugin}: one base url line"           1 (Count-Matching $path '^export ROGUE_BASE_URL=')
+    Check "${plugin}: log dir still kept"          '/var/log/rogue' (Get-EnvValue $path 'ROGUE_LOG_DIR')
 }
 $env:USERPROFILE = $saveSetupProfile
 

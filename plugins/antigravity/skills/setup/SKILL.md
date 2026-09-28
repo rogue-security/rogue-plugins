@@ -38,13 +38,13 @@ Read the key into a shell variable first (don't paste the literal key into the c
 - macOS / Linux:
 ```bash
 read -rs ROGUE_API_KEY   # paste the key at the prompt; not echoed, not in history
-curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"
+base="${ROGUE_BASE_URL:-$(sed -n -e 's/^[[:space:]]*export[[:space:]]*ROGUE_BASE_URL=//p' -e 's/^[[:space:]]*ROGUE_BASE_URL=//p' ~/.rogue-env 2>/dev/null | tail -1 | tr -d '[:cntrl:]"' | tr -d "'")}"; base="${base:-https://api.rogue.security}"; curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: $ROGUE_API_KEY" "${base%/}/api/v1/hooks/ping"
 ```
 - Windows (PowerShell):
 ```powershell
 $sec = Read-Host -AsSecureString "Rogue API key"
 $ROGUE_API_KEY = [System.Net.NetworkCredential]::new('', $sec).Password
-try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = $ROGUE_API_KEY } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
+$base = $env:ROGUE_BASE_URL; if (-not $base) { $base = (Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.rogue-env') -ErrorAction SilentlyContinue | Where-Object { $_ -match '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=' } | Select-Object -Last 1) -replace '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=', '' -replace '[''"]', '' }; if (-not $base) { $base = 'https://api.rogue.security' }; try { (Invoke-WebRequest -Uri "$($base.Trim().TrimEnd('/'))/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = $ROGUE_API_KEY } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 ```
 
 If the response is not `200`, tell the user the key is invalid and ask them to try again.

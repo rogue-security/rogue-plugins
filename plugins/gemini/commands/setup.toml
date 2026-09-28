@@ -23,8 +23,8 @@ Ask the user for their Rogue Security API key. It should start with `rsk_`. If t
 
 ## Step 3: Validate the API key
 Replace <KEY> with the key they gave:
-- macOS / Linux: `curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/ping"`
-- Windows: `try { (Invoke-WebRequest -Uri "$(if ($env:ROGUE_BASE_URL) { $env:ROGUE_BASE_URL } else { 'https://api.rogue.security' })/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }`
+- macOS / Linux: `base="${ROGUE_BASE_URL:-$(sed -n -e 's/^[[:space:]]*export[[:space:]]*ROGUE_BASE_URL=//p' -e 's/^[[:space:]]*ROGUE_BASE_URL=//p' ~/.rogue-env 2>/dev/null | tail -1 | tr -d '[:cntrl:]"' | tr -d "'")}"; base="${base:-https://api.rogue.security}"; curl -s -o /dev/null -w "%{http_code}" -H "x-rogue-api-key: <KEY>" "${base%/}/api/v1/hooks/ping"`
+- Windows: `$base = $env:ROGUE_BASE_URL; if (-not $base) { $base = (Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.rogue-env') -ErrorAction SilentlyContinue | Where-Object { $_ -match '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=' } | Select-Object -Last 1) -replace '^[ \t]*(export[ \t]+)?ROGUE_BASE_URL=', '' -replace '[''"]', '' }; if (-not $base) { $base = 'https://api.rogue.security' }; try { (Invoke-WebRequest -Uri "$($base.Trim().TrimEnd('/'))/api/v1/hooks/ping" -Headers @{ 'x-rogue-api-key' = '<KEY>' } -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }`
 
 If the response is not 200, tell the user the key is invalid and ask them to try again.
 
