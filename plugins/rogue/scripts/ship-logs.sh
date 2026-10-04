@@ -570,9 +570,9 @@ read_state() { # <key> <abs-path>
 write_state() { # <key> <offset> <head> <size> <path>
   _state_tmp_file="$STATE_DIR/.state-tmp-$$"
   printf 'offset=%s\nhead=%s\nsize=%s\npath=%s\n' \
-    "${2:-0}" "${3:-}" "${4:-0}" "${5:-}" > "$_state_tmp_file" 2>/dev/null || return 0
+    "${2:-0}" "${3:-}" "${4:-0}" "${5:-}" > "$_state_tmp_file" 2>/dev/null || return 1
+  [ ! -d "$STATE_DIR/${1:-}.state" ] || return 1
   mv -f "$_state_tmp_file" "$STATE_DIR/${1:-}.state" 2>/dev/null
-  return 0
 }
 
 # ── stage 8: chunks ────────────────────────────────────────────────────────
@@ -817,7 +817,11 @@ drain_file() { # <file> <size> <rotated:0|1> <expected-head> <persist-head> <per
     [ "$ADVANCE_BYTES" -gt 0 ] || return 1
     OFFSET=$((OFFSET + ADVANCE_BYTES))
     RUN_BYTES_SENT=$((RUN_BYTES_SENT + ADVANCE_BYTES))
-    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path"
+    # A lost checkpoint would resend accepted bytes on every run, so stop and say so.
+    write_state "$STATE_KEY" "$OFFSET" "$_drain_persist_head" "$_drain_persist_size" "$_drain_persist_path" || {
+      log "outcome=fail reason=checkpoint-write file=$TARGET_BASENAME offset=$OFFSET"
+      return 1
+    }
   done
   return 0
 }
@@ -876,7 +880,11 @@ ship_log_file() { # <path>
       fi
     fi
     OFFSET=0
-    write_state "$STATE_KEY" 0 "$_target_head" "$_target_file_bytes" "$_target_abs_path"
+    write_state "$STATE_KEY" 0 "$_target_head" "$_target_file_bytes" "$_target_abs_path" || {
+      log "outcome=fail reason=checkpoint-write file=$TARGET_BASENAME offset=0"
+      release_lock
+      return 0
+    }
   fi
 
   drain_file "$_target_file" "$_target_file_bytes" 0 "$_target_head" \

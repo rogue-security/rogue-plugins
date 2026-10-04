@@ -859,6 +859,16 @@ else
 fi
 
 echo
+echo "== a checkpoint that cannot be written stops the drain and is reported"
+new_case checkpoint-fail
+seed 1 3
+# A directory where the state file belongs makes every checkpoint write fail.
+mkdir -p "$CASE/home/.rogue/ship/claude.state"
+ship "ROGUE_SHIP_MAX_BYTES=$LINEB"
+check "only the first chunk was sent before the drain stopped" "1" "$(bodies)"
+check "the failure is logged" "yes" "$(contains 'reason=checkpoint-write' "$(cat "$LOG")")"
+
+echo
 echo "== the shipper leaves no litter in ~/.rogue/ship"
 new_case litter
 seed 1 3

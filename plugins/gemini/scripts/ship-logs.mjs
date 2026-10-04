@@ -481,7 +481,11 @@ class Shipper {
         `offset=${offset}\nhead=${head}\nsize=${size}\npath=${normalizedPath}\n`,
       );
       fs.renameSync(tempFile, destination);
-    } catch {}
+      return true;
+    } catch {
+      this.log(`outcome=fail reason=checkpoint-write file=${this.targetBaseName} offset=${offset}`);
+      return false;
+    }
   }
 
   async sendChunkRequest(bytes, offset, count, rotated) {
@@ -650,7 +654,8 @@ class Shipper {
       if (advanceBytes <= 0) return { offset, complete: false };
       offset += advanceBytes;
       this.runBytesSent += advanceBytes;
-      this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath);
+      // A lost checkpoint would resend accepted bytes on every run, so stop here.
+      if (!this.writeState(stateKey, offset, persistHead, persistSize, normalizedPath)) return { offset, complete: false };
     }
     return { offset, complete: true };
   }
@@ -732,7 +737,7 @@ class Shipper {
           }
         }
         offset = 0;
-        this.writeState(stateKey, 0, currentHead, fileBytes, normalizedPath);
+        if (!this.writeState(stateKey, 0, currentHead, fileBytes, normalizedPath)) return;
       }
 
       await this.drainFile(

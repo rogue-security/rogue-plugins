@@ -638,23 +638,23 @@ function Read-ShipState {
     }
 }
 
-# Write-to-temp-then-move, so a crash mid-write cannot leave a half-written offset.
-# The temp sits in the SAME directory as the destination. The destination is removed
-# first: `Move-Item -Force` onto an existing file is not reliable on Windows
-# PowerShell 5.1, and under -ErrorAction SilentlyContinue a failure there would
-# silently freeze the offset forever.
+# Write-to-temp-then-replace, so a crash mid-write cannot leave a half-written offset and
+# the old checkpoint survives until its replacement lands. File.Replace is atomic where
+# Move-Item -Force onto an existing file is not reliable on Windows PowerShell 5.1.
+# Returns $false on failure so the drain stops instead of resending accepted bytes.
 function Write-ShipState {
     param([string]$Key, [int64]$Offset, [string]$Head, [int64]$Size, [string]$Path)
+    $destination = Join-Path $script:stateDir "$Key.state"
+    $tempFile = Join-Path $script:stateDir (".state-tmp-" + $PID)
     try {
-        $destination = Join-Path $script:stateDir "$Key.state"
-        $tempFile = Join-Path $script:stateDir (".state-tmp-" + $PID)
-        [System.IO.File]::WriteAllText(
-            $tempFile,
-            "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`n",
-            (New-Object System.Text.UTF8Encoding($false)))
-        Remove-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
-        Move-Item -LiteralPath $tempFile -Destination $destination -Force -ErrorAction SilentlyContinue
-    } catch {}
+        [IO.File]::WriteAllText($tempFile, "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`n", (New-Object Text.UTF8Encoding($false)))
+        if ([IO.File]::Exists($destination)) { [IO.File]::Replace($tempFile, $destination, [NullString]::Value) }
+        else { [IO.File]::Move($tempFile, $destination) }
+        return $true
+    } catch {
+        Write-ShipLog "outcome=fail reason=checkpoint-write file=$($script:targetBaseName) offset=$Offset"
+        return $false
+    }
 }
 
 # ── stage 8: chunks ────────────────────────────────────────────────────────
@@ -847,7 +847,7 @@ function Invoke-DrainFile {
         if ($script:advanceBytes -le 0) { return $false }
         $script:offset += $script:advanceBytes
         $script:runBytesSent += $script:advanceBytes
-        Write-ShipState $script:stateKey $script:offset $PersistHead $PersistSize $NormalizedPath
+        if (-not (Write-ShipState $script:stateKey $script:offset $PersistHead $PersistSize $NormalizedPath)) { return $false }
     }
     return $true
 }
@@ -904,7 +904,7 @@ function Ship-LogFile {
                 }
             }
             $script:offset = 0
-            Write-ShipState $script:stateKey 0 $currentHead $fileBytes $normalizedPath
+            if (-not (Write-ShipState $script:stateKey 0 $currentHead $fileBytes $normalizedPath)) { return }
         }
 
         [void](Invoke-DrainFile $Path $fileBytes 0 $currentHead $currentHead $fileBytes $normalizedPath)
