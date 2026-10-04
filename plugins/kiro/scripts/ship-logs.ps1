@@ -92,8 +92,8 @@ $script:targetFamily = ''
 $script:stateKey = ''
 $script:offset = 0
 $script:stateHead = ''
-$script:stateSize = 0; $script:stateRevision = ''
-$script:statePath = ''; $script:stateRevision = ''
+$script:stateSize = 0
+$script:statePath = ''
 $script:advanceBytes = 0
 $script:runBytesSent = 0
 $script:lineLength = 0
@@ -122,7 +122,6 @@ function Write-ShipDebug {
 # the timestamp. "`n" keeps the line ending identical to the sh dispatchers'.
 function Write-ShipLog {
     param([string]$Message)
-    if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return }
     # ALSO to stderr under ROGUE_DEBUG, and unconditionally - before the selfLogFile
     # gate below. The no-argument support invocation has no slug, so it has no log
     # file of its own to write to, and every failure reason (`http=<code>`,
@@ -604,7 +603,7 @@ function Unlock-StateKey {
 # ── stage 7: state ─────────────────────────────────────────────────────────
 function Read-ShipState {
     param([string]$Key, [string]$NormalizedPath)
-    $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:statePath = ''; $script:stateRevision = ''
+    $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:statePath = ''
     $stateFile = Join-Path $script:stateDir "$Key.state"
     if (-not (Test-Path -LiteralPath $stateFile)) { return }
     try {
@@ -625,8 +624,6 @@ function Read-ShipState {
             } elseif ($line -match '^size=(.*)$') {
                 $rawSize = $Matches[1]
                 if ($rawSize -match '^[0-9]+$') { $script:stateSize = [int64]$rawSize } else { $script:stateSize = 0 }
-            } elseif ($line -match '^revision=(.*)$') {
-                $script:stateRevision = $Matches[1]
             } elseif ($line -match '^path=(.*)$') {
                 $script:statePath = $Matches[1]
             }
@@ -637,27 +634,26 @@ function Read-ShipState {
     # shipper at a different file holding the previous file's offset.
     if ($script:statePath -and $script:statePath -ne $NormalizedPath) {
         Write-ShipDebug "state path mismatch ($($script:statePath) != $NormalizedPath) -> treating state as absent"
-        $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:stateRevision = ''
+        $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0
     }
 }
 
-# Commit the discard offset and its pause revision in one file replacement.
+# Write-to-temp-then-replace, so a crash mid-write cannot leave a half-written offset and
+# the old checkpoint survives until its replacement lands. File.Replace is atomic where
+# Move-Item -Force onto an existing file is not reliable on Windows PowerShell 5.1.
+# Returns $false on failure so the drain stops instead of resending accepted bytes.
 function Write-ShipState {
     param([string]$Key, [int64]$Offset, [string]$Head, [int64]$Size, [string]$Path)
     $destination = Join-Path $script:stateDir "$Key.state"
     $tempFile = Join-Path $script:stateDir (".state-tmp-" + $PID)
     try {
-        [IO.File]::WriteAllText($tempFile, "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`nrevision=$script:RPRevision`n", (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText($tempFile, "offset=$Offset`nhead=$Head`nsize=$Size`npath=$Path`n", (New-Object Text.UTF8Encoding($false)))
         if ([IO.File]::Exists($destination)) { [IO.File]::Replace($tempFile, $destination, [NullString]::Value) }
         else { [IO.File]::Move($tempFile, $destination) }
+        return $true
     } catch {
-        $script:RPPersistenceFailed=$true
-        $state=Get-RogueProtectionState
-        if ($state) {
-            $body=@{protocolVersion=1;revision=$state.revision;status='failed';aidrPaused=[bool]$state.aidr.paused;aispmPaused=[bool]$state.aispm.paused;error='state_persistence_failed'} | ConvertTo-Json -Compress
-            try { $null=Invoke-RestMethod -ErrorAction Stop -Uri "$script:RPBase/api/v1/hooks/protection/ack" -Method Post -Headers @{'x-rogue-api-key'=$script:RPKey} -ContentType 'application/json' -Body $body -TimeoutSec 5 } catch {}
-        }
-        throw
+        Write-ShipLog "outcome=fail reason=checkpoint-write file=$($script:targetBaseName) offset=$Offset"
+        return $false
     }
 }
 
@@ -818,7 +814,7 @@ function Send-ChunkRequest {
     try {
         $payload = [System.Text.Encoding]::UTF8.GetBytes($json)
         $response = Invoke-WebRequest -Uri $script:shipUrl -Method Post `
-            -Headers @{ 'x-rogue-api-key' = $script:apiKey; 'x-rogue-activity-revision' = if (Get-Variable RPRevision -Scope Script -ErrorAction SilentlyContinue) { [string]$script:RPRevision } else { '' } } `
+            -Headers @{ 'x-rogue-api-key' = $script:apiKey } `
             -ContentType 'application/json' -Body $payload `
             -UseBasicParsing -TimeoutSec $HTTP_TIMEOUT -ErrorAction Stop
         $httpCode = [int]$response.StatusCode
@@ -844,7 +840,6 @@ function Invoke-DrainFile {
           [string]$PersistHead, [int64]$PersistSize, [string]$NormalizedPath)
     $iteration = 0
     while ($script:offset -lt $FileBytes) {
-        if ((Get-Command Test-RogueProtectionCurrent -ErrorAction SilentlyContinue) -and -not (Test-RogueProtectionCurrent)) { return $false }
         if ($script:runBytesSent -ge $script:maxRunBytes) { Write-ShipDebug 'run budget spent'; return $false }
         $iteration++
         if ($iteration -gt $MAX_CHUNKS_PER_DRAIN) { Write-ShipDebug 'iteration guard'; return $false }
@@ -852,7 +847,7 @@ function Invoke-DrainFile {
         if ($script:advanceBytes -le 0) { return $false }
         $script:offset += $script:advanceBytes
         $script:runBytesSent += $script:advanceBytes
-        Write-ShipState $script:stateKey $script:offset $PersistHead $PersistSize $NormalizedPath
+        if (-not (Write-ShipState $script:stateKey $script:offset $PersistHead $PersistSize $NormalizedPath)) { return $false }
     }
     return $true
 }
@@ -875,10 +870,6 @@ function Ship-LogFile {
         Read-ShipState $script:stateKey $normalizedPath
         $fileBytes = Get-FileLength $Path
         $currentHead = Get-FirstLineFingerprint $Path
-        if ($script:RPDirectory -and $script:RPRevision -gt 0 -and $script:stateRevision -ne [string]$script:RPRevision) {
-            Write-ShipState $script:stateKey $fileBytes $currentHead $fileBytes $normalizedPath
-            return
-        }
         $script:runBytesSent = 0
 
         $rotated = $false
@@ -913,10 +904,10 @@ function Ship-LogFile {
                 }
             }
             $script:offset = 0
-            Write-ShipState $script:stateKey 0 $currentHead $fileBytes $normalizedPath
+            if (-not (Write-ShipState $script:stateKey 0 $currentHead $fileBytes $normalizedPath)) { return }
         }
 
-        if (-not (Invoke-DrainFile $Path $fileBytes 0 $currentHead $currentHead $fileBytes $normalizedPath)) { return }
+        [void](Invoke-DrainFile $Path $fileBytes 0 $currentHead $currentHead $fileBytes $normalizedPath)
     } finally {
         # try/finally, so an early return still releases the lock.
         Unlock-StateKey
@@ -933,12 +924,6 @@ function Invoke-Main {
 
     Initialize-Args
     Import-ShipEnv
-    if (-not (Test-Path -LiteralPath (Join-Path $PluginRoot 'scripts/protection.ps1') -PathType Leaf)) { exit 0 }
-    . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/protection.ps1')))) -ScriptDirectory (Join-Path $PluginRoot 'scripts')
-    $script:creds['ROGUE_API_KEY'] = Initialize-RogueProtection -Key $script:creds['ROGUE_API_KEY'] -BaseUrl $script:creds['ROGUE_BASE_URL'] -Slug $ShipperSlug -Family $AgentFamily -Version $ShipperVersion
-    if ($script:RPDirectory) { $script:creds['ROGUE_LOG_FILE']=$env:ROGUE_LOG_FILE }
-    try {
-    if (-not (Enter-RogueProtection)) { exit 0 }
     Resolve-Knobs
     if (-not $script:apiKey) { Write-ShipDebug 'not configured -> no-op'; exit 0 }
     if (-not (Resolve-ShipActor)) {
@@ -949,7 +934,7 @@ function Invoke-Main {
         exit 0
     }
 
-    $script:stateDir = if ($script:RPDirectory) { Join-Path $script:RPDirectory 'ship' } else { Join-Path (Join-Path (Get-UserHome) '.rogue') 'ship' }
+    $script:stateDir = Join-Path (Join-Path (Get-UserHome) '.rogue') 'ship'
     if (-not (Test-Path -LiteralPath $script:stateDir)) {
         New-Item -ItemType Directory -Path $script:stateDir -Force | Out-Null
     }
@@ -960,7 +945,6 @@ function Invoke-Main {
         Ship-LogFile $target
     }
     exit 0
-    } finally { Leave-RogueProtection }
 }
 
 # The ROGUE_PS_LIB_ONLY seam: load the helpers WITHOUT running the shipper, so
@@ -968,4 +952,4 @@ function Invoke-Main {
 # main body stands down). Every pure helper is defined ABOVE this line.
 if ($env:ROGUE_PS_LIB_ONLY) { return }
 
-try { Invoke-Main } catch { exit 0 }
+Invoke-Main

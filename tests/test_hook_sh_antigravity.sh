@@ -9,11 +9,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-DISPATCH_FIXTURE="$(mktemp -d)"
-cp -R "$REPO/plugins/antigravity/." "$DISPATCH_FIXTURE/"
-# Heartbeat launch behavior is tested below with a marker-writing stub.
-printf '#!/bin/sh\nexit 0\n' > "$DISPATCH_FIXTURE/scripts/heartbeat.sh"
-HOOK="$DISPATCH_FIXTURE/scripts/hook.sh"
+HOOK="$REPO/plugins/antigravity/scripts/hook.sh"
 ACTOR="$REPO/plugins/antigravity/scripts/actor.sh"
 INSTALL_ID="$REPO/plugins/antigravity/scripts/install-id.sh"
 SH="${TEST_SH:-sh}"
@@ -26,7 +22,6 @@ OUT_FILE="$(mktemp)"
 cleanup() {
   [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null || true
   rm -f "$ENV_FILE" "$HEADERS_FILE" "$OUT_FILE"
-  rm -rf "$DISPATCH_FIXTURE"
 }
 trap cleanup EXIT
 
@@ -206,7 +201,6 @@ mkdir -p "$STAGE/scripts"
 cp "$HOOK" "$STAGE/scripts/hook.sh"
 cp "$ACTOR" "$STAGE/scripts/actor.sh"
 cp "$INSTALL_ID" "$STAGE/scripts/install-id.sh"
-cp "$REPO/plugins/antigravity/scripts/protection.sh" "$STAGE/scripts/protection.sh"
 MARKER="$STAGE/heartbeat-fired"
 # The stub records BOTH arguments: the heartbeat is told which surface fired it
 # (three products share one install and only the hook can tell them apart, from the
@@ -334,7 +328,6 @@ mkdir -p "$STAGE/scripts"
 cp "$HOOK" "$STAGE/scripts/hook.sh"
 cp "$ACTOR" "$STAGE/scripts/actor.sh"
 cp "$INSTALL_ID" "$STAGE/scripts/install-id.sh"
-cp "$REPO/plugins/antigravity/scripts/protection.sh" "$STAGE/scripts/protection.sh"
 MARKER="$STAGE/heartbeat-fired"
 cat > "$STAGE/scripts/heartbeat.sh" <<EOF
 #!/bin/sh

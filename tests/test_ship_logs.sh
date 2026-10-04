@@ -51,7 +51,6 @@ SH_PLUGINS='rogue codex cursor copilot antigravity kiro'
 mkdir -p "$T/bin"
 cat > "$T/bin/curl" <<'STUB'
 #!/bin/sh
-for a in "$@"; do case "$a" in */hooks/protection/*) printf '\n404'; exit 0 ;; esac; done
 n=0
 while [ -e "$CAP/body.$n" ]; do n=$((n + 1)); done
 for a in "$@"; do
@@ -114,10 +113,6 @@ ship_as() { # <plugin> <slug|-> <version> <family> [VAR=val …]
     export ROGUE_SHIP_MAX_BYTES='' ROGUE_SHIP_MAX_RUN_BYTES='' ROGUE_SHIP_MAX_LINE_BYTES=''
     for kv in "$@"; do export "${kv?}"; done
     _root="${SHIP_ROOT:-$REPO/plugins/$_p}"
-    if [ -n "${SHIP_ROOT:-}" ]; then
-      mkdir -p "$_root/scripts"
-      cp "$REPO/scripts/shared/protection.sh" "$_root/scripts/protection.sh"
-    fi
     if [ "$_s" = "-" ]; then "$SH" "$REPO/plugins/$_p/scripts/ship-logs.sh"
     else "$SH" "$REPO/plugins/$_p/scripts/ship-logs.sh" "$_root" "$_s" "$_v" "$_fam"; fi )
 }
@@ -862,6 +857,16 @@ else
   check "…and stored one canonical path" "$(canon "$glog")" \
     "$(sed -n 's/^path=//p' "$CASE/home/.rogue/ship/gemini.state" 2>/dev/null)"
 fi
+
+echo
+echo "== a checkpoint that cannot be written stops the drain and is reported"
+new_case checkpoint-fail
+seed 1 3
+# A directory where the state file belongs makes every checkpoint write fail.
+mkdir -p "$CASE/home/.rogue/ship/claude.state"
+ship "ROGUE_SHIP_MAX_BYTES=$LINEB"
+check "only the first chunk was sent before the drain stopped" "1" "$(bodies)"
+check "the failure is logged" "yes" "$(contains 'reason=checkpoint-write' "$(cat "$LOG")")"
 
 echo
 echo "== the shipper leaves no litter in ~/.rogue/ship"
