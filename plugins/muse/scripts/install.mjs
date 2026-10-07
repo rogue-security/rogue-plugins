@@ -16,7 +16,11 @@ plainFile(settings);
 plainFile(receipt);
 mkdirSync(dirname(settings), { recursive: true, mode: 0o700 });
 const lock = `${settings}.rogue-lock`;
-mkdirSync(lock, { mode: 0o700 });
+try { mkdirSync(lock, { mode: 0o700 }); }
+catch (e) {
+  if (e.code === 'EEXIST') throw new Error(`Another Muse installer is running, or a previous run was interrupted. If no installer is running, remove ${lock} and retry.`);
+  throw e;
+}
 let temp;
 try {
   const original = existsSync(settings) ? readFileSync(settings) : null;

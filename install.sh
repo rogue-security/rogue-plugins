@@ -1054,7 +1054,7 @@ install_kiro() {
 }
 
 install_muse() {
-  have_cmd node || die "Muse hook installation requires Node.js. Install Node.js and retry."
+  have_cmd node || { warn "Muse hook installation requires Node.js. Install Node.js and retry."; return 1; }
   local tmp asset url
   tmp="$(mktemp -d)" || return 1
   asset="rogue-plugin-muse.tar.gz"
@@ -1064,12 +1064,12 @@ install_muse() {
     url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/latest/download/${asset}"
   fi
   if ! curl -fsSL --max-time 60 -o "$tmp/plugin.tar.gz" "$url"; then
-    rm -rf "$tmp"; die "Muse plugin download failed. Hooks were not installed."
+    rm -rf "$tmp"; warn "Muse plugin download failed. Hooks were not installed."; return 1
   fi
   tar -xzf "$tmp/plugin.tar.gz" -C "$tmp" && node "$tmp/rogue-plugin-muse/scripts/install.mjs"
   local rc=$?
   rm -rf "$tmp"
-  [ "$rc" = 0 ] || die "Muse hook installation failed."
+  [ "$rc" = 0 ] || { warn "Muse hook installation failed."; return 1; }
 }
 
 # ── CLI flags ─────────────────────────────────────────────────────────────────
@@ -1154,6 +1154,7 @@ main() {
   # Credentials once — every plugin reads the machine env file, else the shared ~/.rogue-env.
   configure_credentials
 
+  local muse_failed=0
   for a in $agents; do
     case "$a" in
       claude)      install_claude ;;
@@ -1163,11 +1164,15 @@ main() {
       copilot)     install_copilot ;;
       antigravity) install_antigravity ;;
       kiro)        install_kiro ;;
-      muse)        install_muse ;;
+      muse)        install_muse || muse_failed=1 ;;
     esac
   done
 
   printf '\n' >&2
+  if [ "$muse_failed" = 1 ]; then
+    warn "Muse hooks were not installed. Other selected agents were processed; fix the Muse error and retry --muse."
+    return 1
+  fi
   ok "Done. ${C_TEAL}Rogue Security${C_RESET} 🟢 (${agents# })"
   note "Open a new session in each agent, then run ${C_DIM}/rogue:status${C_RESET} to verify."
 }

@@ -20,6 +20,9 @@ log() {
 if [ -z "${ROGUE_API_KEY:-}" ]; then log outcome=unconfigured; echo '{}'; exit 0; fi
 . "$PLUGIN_ROOT/scripts/actor.sh"
 . "$PLUGIN_ROOT/scripts/install-id.sh"
+ROGUE_ACTOR_EMAIL=$(printf '%s' "$ROGUE_ACTOR_EMAIL" | tr -d '\000-\037\177')
+ROGUE_ACTOR_NAME=$(printf '%s' "$ROGUE_ACTOR_NAME" | tr -d '\000-\037\177')
+ROGUE_INSTALL_HOST=$(printf '%s' "$ROGUE_INSTALL_HOST" | tr -d '\000-\037\177')
 RAW=$(curl -sS -X POST "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/muse" \
   -H "x-rogue-api-key: $ROGUE_API_KEY" -H "x-rogue-event: $EVENT" \
   -H "x-rogue-agent: muse_code" -H "x-rogue-host: $ROGUE_INSTALL_HOST" \

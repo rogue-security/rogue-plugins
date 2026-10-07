@@ -17,6 +17,11 @@ test('installation is idempotent, preserves foreign hooks and settings, and unin
     const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, '.config') };
     for (let i = 0; i < 2; i++) assert.equal(run('install.mjs', [], { env }).status, 0);
     assert.equal(run('status.mjs', [], { env }).status, 0);
+    mkdirSync(`${file}.rogue-lock`);
+    const locked = run('install.mjs', [], { env });
+    assert.notEqual(locked.status, 0);
+    assert.ok(locked.stderr.includes(`remove ${file}.rogue-lock and retry`));
+    rmSync(`${file}.rogue-lock`, { recursive: true });
     const config = JSON.parse(readFileSync(file));
     assert.equal(config.hooks.PreToolUse.length, 2);
     assert.deepEqual(config.hooks.PreToolUse[0], original.hooks.PreToolUse[0]);
@@ -90,4 +95,23 @@ test('bridge forwards exact bytes and identity, and fails open on HTTP, JSON and
     assert.ok(!logs.includes('local-test-key'));
     assert.match(logs, /outcome=fail-open http=200 reason=invalid-response/);
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(home, { recursive: true, force: true }); }
+});
+
+
+test('missing Muse release fails visibly after processing the remaining selected agents', () => {
+  const home = mkdtempSync(join(tmpdir(), 'muse-release-'));
+  try {
+    const result = spawnSync('bash', ['-c', `
+      export ROGUE_INSTALL_LIB_ONLY=1
+      source "$1"
+      configure_credentials() { :; }
+      have_cmd() { return 0; }
+      curl() { return 22; }
+      install_codex() { echo OTHER_AGENT_PROCESSED; }
+      main --muse --codex
+    `, 'test', join(root, 'install.sh')], { encoding: 'utf8', env: { ...process.env, HOME: home } });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /OTHER_AGENT_PROCESSED/);
+    assert.match(result.stderr, /Muse hooks were not installed/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
