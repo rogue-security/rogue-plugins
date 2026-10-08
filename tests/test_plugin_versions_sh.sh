@@ -19,7 +19,7 @@ out=$(bash "$SCRIPT" "$REPO" 2>/dev/null) || { bad "real tree" "exited non-zero"
 
 flat=$(printf '%s' "$out" | tr -d ' \t\n\r')
 
-for slug in claude codex cursor copilot gemini antigravity kiro; do
+for slug in claude codex cursor copilot gemini antigravity kiro muse; do
   case "$flat" in
     *"\"$slug\":\""*) ok "emits $slug" ;;
     *) bad "emits $slug" "key missing from: $out" ;;
@@ -34,8 +34,8 @@ esac
 # Exactly seven plugin keys — an extra key means a plugin was added without a
 # matching backend mapping, which resolves to null (never outdated).
 keys=$(printf '%s' "$flat" | grep -oE '"[a-z]+":"[0-9]+\.[0-9]+\.[0-9]+"' | wc -l | tr -d ' ')
-if [ "$keys" = "7" ]; then ok "exactly seven plugin versions"; else
-  bad "exactly seven plugin versions" "found $keys"; fi
+if [ "$keys" = "8" ]; then ok "exactly eight plugin versions"; else
+  bad "exactly eight plugin versions" "found $keys"; fi
 
 # Every value must be a bare X.Y.Z. "unknown", "v1.2.3" and "1.2" all coerce
 # wrong on the consumer side.
@@ -91,19 +91,20 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/plugins/rogue/.claude-plugin" "$fixture/plugins/codex/.codex-plugin" \
          "$fixture/plugins/cursor/.cursor-plugin" "$fixture/plugins/copilot" \
-         "$fixture/plugins/gemini" "$fixture/plugins/antigravity" "$fixture/plugins/kiro"
+         "$fixture/plugins/gemini" "$fixture/plugins/antigravity" "$fixture/plugins/kiro" "$fixture/plugins/muse"
 echo '{"version":"1.2.3"}' > "$fixture/plugins/rogue/.claude-plugin/plugin.json"
 echo '{"version":"2.3.4"}' > "$fixture/plugins/codex/.codex-plugin/plugin.json"
 echo '{"version":"3.4.5"}' > "$fixture/plugins/cursor/.cursor-plugin/plugin.json"
 echo '{"version":"9.9.9"}' > "$fixture/plugins/kiro/plugin.json"
 echo '9.9.9' > "$fixture/plugins/kiro/VERSION"
+echo '{"version":"0.1.0"}' > "$fixture/plugins/muse/plugin.json"
 echo '{"version":"4.5.6"}' > "$fixture/plugins/copilot/plugin.json"
 echo '{"version":"5.6.7"}' > "$fixture/plugins/gemini/gemini-extension.json"
 echo '6.7.8' > "$fixture/plugins/antigravity/VERSION"
 
 out=$(bash "$SCRIPT" "$fixture" 2>/dev/null) || bad "complete fixture tree succeeds" "exited non-zero"
 flat=$(printf '%s' "$out" | tr -d ' \t\n\r')
-for mapping in claude:1.2.3 codex:2.3.4 cursor:3.4.5 copilot:4.5.6 gemini:5.6.7 antigravity:6.7.8 kiro:9.9.9; do
+for mapping in claude:1.2.3 codex:2.3.4 cursor:3.4.5 copilot:4.5.6 gemini:5.6.7 antigravity:6.7.8 kiro:9.9.9 muse:0.1.0; do
   slug=${mapping%%:*}; expected=${mapping#*:}
   case "$flat" in
     *"\"$slug\":\"$expected\""*) ok "$slug reads its own fixture ($expected)" ;;

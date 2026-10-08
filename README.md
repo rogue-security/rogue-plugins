@@ -160,3 +160,11 @@ detection as a false positive in the dashboard. Per-prompt only.
 ## License
 
 Proprietary. Copyright © Qualifire, Inc. All rights reserved. See [`LICENSE`](./LICENSE).
+
+## Muse Code
+
+The Muse bridge uses native command hooks and requires Node.js plus bash/curl on macOS or Linux. Install with `bash install.sh --muse` after publishing the `rogue-plugin-muse.tar.gz` asset and deploying the `/api/v1/hooks/muse` API route. From a checkout, `node plugins/muse/scripts/install.mjs` installs the local bundle; configure the existing trusted Rogue credential file first.
+
+The installer preserves foreign hooks and settings, writes private backups, rejects malformed settings, and refuses concurrent installer runs. Start a new Muse session afterward. To uninstall only Rogue's hook entries, run `node ~/.rogue/plugins/muse/scripts/install.mjs --uninstall`.
+
+Prompts, tool calls and permission requests can be denied. Post-tool denies stop further work after the tool has run. Stop and SubagentStop are audit-only. The HTTP bridge fails open after five seconds or on bad responses, beneath Muse's six-second hook timeout. Native Muse 1.4.3 behavior was verified on macOS; Windows is unsupported and Linux native parity remains unverified. Logs are stored in `~/.rogue/logs/muse.log` and shipped through the existing hook-log transport.

@@ -69,6 +69,7 @@ read_plain_version() { # <path-relative-to-root>
   printf '%s' "$v"
 }
 
+MUSE_V=$(read_json_version "plugins/muse/plugin.json")
 CLAUDE_V=$(read_json_version "plugins/rogue/.claude-plugin/plugin.json")
 CODEX_V=$(read_json_version "plugins/codex/.codex-plugin/plugin.json")
 CURSOR_V=$(read_json_version "plugins/cursor/.cursor-plugin/plugin.json")
@@ -96,7 +97,8 @@ cat <<JSON
     "copilot": "$COPILOT_V",
     "gemini": "$GEMINI_V",
     "antigravity": "$ANTIGRAVITY_V",
-    "kiro": "$KIRO_V"
+    "kiro": "$KIRO_V",
+    "muse": "$MUSE_V"
   }
 }
 JSON

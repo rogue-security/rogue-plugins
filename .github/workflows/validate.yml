@@ -88,6 +88,9 @@ jobs:
           done < <(git ls-files 'plugins/**/scripts/*.sh' 'install.sh' 'scripts/*.sh' 'scripts/shared/*.sh' 'tests/manual/*.sh')
           [ "$fail" = 0 ] || exit 1
 
+      - name: Muse hook and installer tests
+        run: node --test tests/test_muse.mjs
+
       - name: Shell unit tests
         # Mostly the dependency-free ones, plus the Cursor dispatcher end-to-end
         # suite, whose python3 mock server the runner already has. dash is

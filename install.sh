@@ -32,6 +32,7 @@
 #   --gemini               install only for Gemini CLI
 #   --copilot              install only for GitHub Copilot CLI
 #   --antigravity          install only for Google Antigravity
+#   --muse                 install only for Muse Code (requires Node.js)
 #   --kiro                 install only for Kiro (IDE, CLI on both engines, Crew)
 #                          (no agent flag = auto-detect and install for every agent found)
 #   --api-key=KEY          same as ROGUE_API_KEY
@@ -651,6 +652,7 @@ status_agent_ctx() { # sets SC_FAMILY / SC_AGENT from $agents
     cursor)  SC_FAMILY="cursor";  SC_AGENT="cursor" ;;
     gemini)  SC_FAMILY="gemini";  SC_AGENT="gemini_cli" ;;
     copilot) SC_FAMILY="copilot"; SC_AGENT="github_copilot" ;;
+    muse)    SC_FAMILY="muse";    SC_AGENT="muse_code" ;;
     kiro)    SC_FAMILY="kiro";    SC_AGENT="kiro_cli" ;;
     *)       SC_FAMILY="claude";  SC_AGENT="claude_code" ;;
   esac
@@ -1051,6 +1053,25 @@ install_kiro() {
   note "Verify with ${C_DIM}sh \"$KIRO_PLUGIN_DIR/scripts/status.sh\"${C_RESET} (surfaces, hook wiring, default agent, API key)."
 }
 
+install_muse() {
+  have_cmd node || { warn "Muse hook installation requires Node.js. Install Node.js and retry."; return 1; }
+  local tmp asset url
+  tmp="$(mktemp -d)" || return 1
+  asset="rogue-plugin-muse.tar.gz"
+  if [ -n "${ROGUE_PLUGIN_VERSION:-}" ]; then
+    url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/download/${ROGUE_PLUGIN_VERSION}/${asset}"
+  else
+    url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/latest/download/${asset}"
+  fi
+  if ! curl -fsSL --max-time 60 -o "$tmp/plugin.tar.gz" "$url"; then
+    rm -rf "$tmp"; warn "Muse plugin download failed. Hooks were not installed."; return 1
+  fi
+  tar -xzf "$tmp/plugin.tar.gz" -C "$tmp" && node "$tmp/rogue-plugin-muse/scripts/install.mjs"
+  local rc=$?
+  rm -rf "$tmp"
+  [ "$rc" = 0 ] || { warn "Muse hook installation failed."; return 1; }
+}
+
 # ── CLI flags ─────────────────────────────────────────────────────────────────
 # Accepts `--flag=value` and `--flag value`. Sets the same globals the env knobs
 # do, so the rest of the script is flag-agnostic. CLI flags override env vars.
@@ -1074,6 +1095,7 @@ parse_args() {
       --gemini)          WANT="$WANT gemini" ;;
       --copilot)         WANT="$WANT copilot" ;;
       --antigravity)     WANT="$WANT antigravity" ;;
+      --muse)            WANT="$WANT muse" ;;
       --kiro)            WANT="$WANT kiro" ;;
       --non-interactive) NON_INTERACTIVE=1 ;;
       --no-statusline)   ROGUE_NO_STATUSLINE=1 ;;
@@ -1107,6 +1129,7 @@ main() {
         antigravity)
           { have_cmd agy || [ -d "$HOME/.gemini/antigravity" ] || [ -d "$HOME/.gemini/antigravity-ide" ] || [ -d "$HOME/.gemini/antigravity-cli" ]; } \
             || die "--antigravity requested but no Antigravity install was detected (looked for: agy CLI, ~/.gemini/antigravity*). Install Google Antigravity first." ;;
+        muse) have_cmd muse || die "Muse Code is not on PATH." ;;
         kiro)
           kiro_detected || die "--kiro requested but no Kiro install was detected (looked for: kiro-cli, /Applications/Kiro.app, ~/.kiro). Install Kiro (https://kiro.dev) first." ;;
       esac
@@ -1124,12 +1147,14 @@ main() {
     have_cmd copilot && agents="$agents copilot"
     { have_cmd agy || [ -d "$HOME/.gemini/antigravity" ] || [ -d "$HOME/.gemini/antigravity-ide" ] || [ -d "$HOME/.gemini/antigravity-cli" ]; } && agents="$agents antigravity"
     kiro_detected && agents="$agents kiro"
+    have_cmd muse && agents="$agents muse"
     [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
   fi
 
   # Credentials once — every plugin reads the machine env file, else the shared ~/.rogue-env.
   configure_credentials
 
+  local muse_failed=0
   for a in $agents; do
     case "$a" in
       claude)      install_claude ;;
@@ -1139,10 +1164,15 @@ main() {
       copilot)     install_copilot ;;
       antigravity) install_antigravity ;;
       kiro)        install_kiro ;;
+      muse)        install_muse || muse_failed=1 ;;
     esac
   done
 
   printf '\n' >&2
+  if [ "$muse_failed" = 1 ]; then
+    warn "Muse hooks were not installed. Other selected agents were processed; fix the Muse error and retry --muse."
+    return 1
+  fi
   ok "Done. ${C_TEAL}Rogue Security${C_RESET} 🟢 (${agents# })"
   note "Open a new session in each agent, then run ${C_DIM}/rogue:status${C_RESET} to verify."
 }

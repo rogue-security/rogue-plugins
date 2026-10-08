@@ -196,6 +196,14 @@ if [ -d "plugins/copilot" ]; then
   rm -rf "$CPSTAGE"
 fi
 
+# Muse uses native command hooks; the archive root is the bridge bundle.
+MUSE_STAGE=$(mktemp -d)
+mkdir -p "$MUSE_STAGE/rogue-plugin-muse"
+cp -R plugins/muse/. "$MUSE_STAGE/rogue-plugin-muse/"
+cp LICENSE "$MUSE_STAGE/rogue-plugin-muse/"
+tar -czf "$DIST/rogue-plugin-muse.tar.gz" -C "$MUSE_STAGE" rogue-plugin-muse
+rm -rf "$MUSE_STAGE"
+
 # ── Version manifest ────────────────────────────────────────────────────────
 # The backend resolves every surface's "latest version" from THIS file, fetched
 # from /releases/latest/download/versions.json. It is the reason a release name

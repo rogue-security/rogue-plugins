@@ -54,7 +54,7 @@ set -u
 
 # ── constants ──────────────────────────────────────────────────────────────
 SHIP_ENDPOINT_PATH="/api/v1/hooks/logs"
-KNOWN_LOG_SLUGS="claude codex cursor gemini copilot antigravity kiro"
+KNOWN_LOG_SLUGS="claude codex cursor gemini copilot antigravity kiro muse"
 # Bytes scanned when fingerprinting a log's first line. NOT the 200 an earlier
 # draft of the design doc specified: a real log line is timestamp + provider +
 # event + up to 400 chars of `raw=`, i.e. commonly 500-700 bytes, so a 200-byte
