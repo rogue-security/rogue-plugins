@@ -221,6 +221,37 @@ test -f ~/.claude/plugins/*/env && echo "bundle env present"
 mode + identity it sees. If the email there matches the assigned user, the
 full pipeline is healthy.
 
+## Hooks users cannot turn off
+
+Claude Code skips plugin hooks under `--bare`, `CLAUDE_CODE_SIMPLE=1`,
+`--safe-mode`, `--setting-sources`, a user's `disableAllHooks`, or a disabled
+plugin. It still runs hooks from its managed settings in every one of those cases.
+To report those sessions too, add one line to the MDM script, after the actor
+provisioning, running as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rogue-security/rogue-plugins/main/install.sh \
+  | bash -s -- --managed
+```
+
+It copies the Claude plugin to a root-owned directory (`/Library/Rogue/claude-bridge`
+on macOS, `/opt/rogue/claude-bridge` on Linux) and registers its hooks in
+`managed-settings.d/50-rogue-security.json` next to Claude Code's
+`managed-settings.json`. The managed hooks read only `/etc/rogue/env`. The plugin
+can stay installed for `/rogue:status`; it stands down for every session the
+managed hooks report. Macs running the Rogue endpoint agent get these hooks from
+the agent and need no extra step.
+
+Claude Code uses one managed source per machine by default. If your organization
+also pushes Claude Code managed settings from claude.ai or an MDM profile, Claude
+Code skips this file, and `/status` lists it under `Skipped sources`. Copy the
+`hooks` block from `50-rogue-security.json` into that source, or set
+`"managedSourcesBehavior": "merge"` there.
+
+Verify with `/status` in Claude Code (`Setting sources` lists `Enterprise managed
+settings (drop-ins)`), then run `claude --bare -p "hi"` and find the session in
+AIDR.
+
 ## How it all fits together
 
 Every hook in the plugin runs this preamble before POSTing the event:

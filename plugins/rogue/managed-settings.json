@@ -1,0 +1,156 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh -c '( nohup sh \"@ROGUE_BRIDGE_ROOT@/scripts/heartbeat.sh\" >/dev/null 2>&1 & )' ; exit 0",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" SessionStart ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" UserPromptSubmit ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" PreToolUse ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" PostToolUse ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" PostToolUseFailure ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" PermissionRequest ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" Stop ; exit 0",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh -c '( nohup sh \"@ROGUE_BRIDGE_ROOT@/scripts/heartbeat.sh\" Stop >/dev/null 2>&1 & )' ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" SessionEnd ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" SubagentStart ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" SubagentStop ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "ConfigChange": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/hook.sh\" ConfigChange ; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

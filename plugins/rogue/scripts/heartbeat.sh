@@ -32,11 +32,14 @@ case "$(uname -s 2>/dev/null)" in
 esac
 
 # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+# Managed hooks read only the root-owned files, as in hook.sh.
+_user_env="$HOME/.rogue-env"; _need_root=0
+[ "${ROGUE_HOOK_SOURCE:-}" = managed ] && { _user_env=""; _need_root=1; }
 _env_lib="$(dirname -- "$0")/env-file.sh"
 if [ -r "$_env_lib" ]; then
   . "$_env_lib"
-  for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
-    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+  for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" ${_user_env:+"$_user_env"}; do
+    if rogue_env_is_trusted "$_env_file" "$_need_root" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
       . "$_env_file"; break
     fi
   done
