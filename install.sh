@@ -1135,23 +1135,25 @@ install_claude_managed() {
   [ -n "$src" ] && [ -f "$src/managed-settings.json" ] \
     || die "This plugin release has no managed-settings.json; pin a newer ROGUE_PLUGIN_VERSION."
 
+  # No set -e here: every step checks itself, and the working bridge is replaced only by a
+  # complete copy, since a partial one would silence every user's hooks.
   umask 022
-  mkdir -p "$(dirname "$bridge")"
+  mkdir -p "$(dirname "$bridge")" || die "Could not create $(dirname "$bridge")."
   rm -rf "$bridge.new"
-  cp -R "$src" "$bridge.new"
-  chown -R 0:0 "$bridge.new"
+  cp -R "$src" "$bridge.new" && chown -R 0:0 "$bridge.new" \
+    || { rm -rf "$bridge.new"; die "Could not copy the plugin to $bridge.new."; }
   rm -rf "$bridge"
-  mv "$bridge.new" "$bridge"
+  mv "$bridge.new" "$bridge" || die "Could not move $bridge.new to $bridge."
   ok "Hooks copied → ${C_DIM}$bridge${C_RESET}"
 
   # Claude Code refuses to start on an invalid managed file, so the drop-in appears only
   # complete, by rename. Claude Code ignores hidden files like the temp one.
-  mkdir -p "$settings_dir"
+  mkdir -p "$settings_dir" || die "Could not create $settings_dir."
   drop_in="$settings_dir/50-rogue-security.json"
-  render_managed_settings "$bridge/managed-settings.json" "$bridge" > "$settings_dir/.50-rogue-security.json.tmp" \
-    || die "Could not render the managed settings for $bridge."
-  chmod 644 "$settings_dir/.50-rogue-security.json.tmp"
-  mv "$settings_dir/.50-rogue-security.json.tmp" "$drop_in"
+  { render_managed_settings "$bridge/managed-settings.json" "$bridge" > "$settings_dir/.50-rogue-security.json.tmp" \
+      && chmod 644 "$settings_dir/.50-rogue-security.json.tmp" \
+      && mv "$settings_dir/.50-rogue-security.json.tmp" "$drop_in"; } \
+    || { rm -f "$settings_dir/.50-rogue-security.json.tmp"; die "Could not write $drop_in."; }
   ok "Managed hooks registered → ${C_DIM}$drop_in${C_RESET}"
 
   [ -f "$MACHINE_ENV_FILE" ] \
