@@ -13,11 +13,15 @@ case "$(uname -s 2>/dev/null)" in
 esac
 
 # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
+# Managed hooks (ROGUE_HOOK_SOURCE=managed, see managed-settings.json) read only the
+# root-owned files, so a user's ~/.rogue-env cannot redirect them.
+_user_env="$HOME/.rogue-env"; _need_root=0
+[ "${ROGUE_HOOK_SOURCE:-}" = managed ] && { _user_env=""; _need_root=1; }
 _env_lib="$(dirname -- "$0")/env-file.sh"
 if [ -r "$_env_lib" ]; then
   . "$_env_lib"
-  for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" "$HOME/.rogue-env"; do
-    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+  for _env_file in /etc/rogue/env "${CLAUDE_PLUGIN_ROOT:-}/env" ${_user_env:+"$_user_env"}; do
+    if rogue_env_is_trusted "$_env_file" "$_need_root" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
       . "$_env_file"; break
     fi
   done
@@ -153,6 +157,29 @@ if [ -z "${ROGUE_API_KEY:-}" ]; then
   exit 0
 fi
 
+PAYLOAD=$(cat)
+
+# One copy per event. Where an admin installed managed hooks (managed-settings.json),
+# Claude Code runs them AND this plugin's hooks. The managed copy marks every session it
+# reports; the plugin copy stands down for marked sessions. The mark comes from managed
+# hooks actually firing, not from their file existing: Claude Code skips that file when a
+# higher managed source wins, and the plugin must keep reporting then. Both copies of the
+# first SessionStart can race, so the server may see that one event twice.
+SESSION_ID=$(printf '%s' "$PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]*\)".*/\1/p' | head -1)
+MANAGED_SESSIONS="$HOME/.rogue/managed-sessions"
+if [ -n "$SESSION_ID" ]; then
+  if [ "${ROGUE_HOOK_SOURCE:-}" = managed ]; then
+    ( umask 077
+      mkdir -p "$MANAGED_SESSIONS" && : > "$MANAGED_SESSIONS/$SESSION_ID"
+      # A resumed session re-marks itself at SessionStart, so old marks are safe to drop.
+      [ "$EVENT" = SessionStart ] && find "$MANAGED_SESSIONS" -type f -mtime +7 -delete ) 2>/dev/null
+  elif [ -e "$MANAGED_SESSIONS/$SESSION_ID" ]; then
+    log "outcome=deferred-to-managed"
+    echo '{}'
+    exit 0
+  fi
+fi
+
 . "${CLAUDE_PLUGIN_ROOT}/scripts/actor.sh"
 # Host + version + surface label, resolved exactly as heartbeat.sh does. Sent on
 # every event so the fleet roster's row stays fresh between session starts, which
@@ -163,7 +190,7 @@ fi
 # reports itself imprecisely to the fleet roster.
 [ -n "${ROGUE_INSTALL_ID_ERROR:-}" ] && log "error=install-id $ROGUE_INSTALL_ID_ERROR"
 
-RESP=$(curl -sS -X POST "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/claude" \
+RESP=$(printf '%s' "$PAYLOAD" | curl -sS -X POST "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hooks/claude" \
   -H "x-rogue-api-key: $ROGUE_API_KEY" \
   -H "x-rogue-event: $EVENT" \
   -H "x-rogue-agent: $ROGUE_INSTALL_AGENT" \

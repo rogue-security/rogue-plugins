@@ -42,6 +42,9 @@
 #   --no-statusline        same as ROGUE_NO_STATUSLINE=1
 #   --plugin-repo=OWNER/R  same as ROGUE_PLUGIN_REPO
 #   --base-url=URL         same as ROGUE_BASE_URL
+#   --managed              as root (MDM): put the Claude Code hooks in its managed
+#                          settings for every user instead of a per-user plugin, so they
+#                          also run under --bare and disableAllHooks. macOS and Linux.
 #   -h | --help            print this and exit
 #
 # Note: a key on the command line is visible in `ps` and shell history. For
@@ -73,6 +76,7 @@ MACHINE_ENV_FILE="/etc/rogue/env"
 NON_INTERACTIVE="${ROGUE_NON_INTERACTIVE:-0}"
 # Explicit agent selection via --claude/--codex/--cursor. Empty = auto-detect all.
 WANT=""
+MANAGED=0
 # Bind the controlling terminal to fd 3 once, so prompts work even under
 # `curl | bash` (where stdin is the script, not the keyboard). If /dev/tty
 # can't be opened (no terminal, or a sandbox that reports "Device not
@@ -1075,7 +1079,89 @@ install_muse() {
 # ── CLI flags ─────────────────────────────────────────────────────────────────
 # Accepts `--flag=value` and `--flag value`. Sets the same globals the env knobs
 # do, so the rest of the script is flag-agnostic. CLI flags override env vars.
-usage() { sed -n '2,43p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; }
+# ── Managed Claude Code hooks (--managed) ─────────────────────────────────────
+# An MDM runs this as root. Claude Code runs managed-settings hooks even under --bare,
+# CLAUDE_CODE_SIMPLE, --safe-mode or a user's disableAllHooks; plugin hooks run under
+# none of those. So the plugin is copied to a root-owned directory and its hooks are
+# registered in Claude Code's managed-settings.d. Nothing per-user is touched: the hooks
+# read their key from /etc/rogue/env, which the MDM provisions (docs/deployment.md). A
+# per-user plugin installed later stands down for every session these hooks report.
+
+# render_managed_settings <template> <bridge-root>: the drop-in for that bridge copy.
+render_managed_settings() {
+  case "$2" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  # The root lands inside JSON strings, quoted shell words and a sed replacement.
+  case "$2" in
+    *[\'\"\\\|\$\`]*|*"
+"*) return 1 ;;
+  esac
+  sed "s|@ROGUE_BRIDGE_ROOT@|$2|g" "$1"
+}
+
+install_claude_managed() {
+  local bridge settings_dir asset url tmp src drop_in
+  [ "$(id -u)" = 0 ] || die "--managed must run as root."
+  case "$(uname -s)" in
+    Darwin)
+      # The endpoint agent writes these hooks itself and its tamper protection
+      # refuses other writers, so a second installer would only fight it.
+      [ -f /Library/LaunchDaemons/security.rogue.endpointagent.guard.plist ] \
+        && die "The Rogue endpoint agent installs these hooks on this Mac; --managed is not needed."
+      bridge="/Library/Rogue/claude-bridge"
+      settings_dir="/Library/Application Support/ClaudeCode/managed-settings.d" ;;
+    Linux)
+      bridge="/opt/rogue/claude-bridge"
+      settings_dir="/etc/claude-code/managed-settings.d" ;;
+    *) die "--managed supports macOS and Linux." ;;
+  esac
+
+  asset="rogue-plugin-claude.tar.gz"
+  if [ -n "${ROGUE_PLUGIN_VERSION:-}" ]; then
+    url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/download/${ROGUE_PLUGIN_VERSION}/${asset}"
+  else
+    url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/latest/download/${asset}"
+  fi
+  tmp="$(mktemp -d)" || die "Could not create a temp dir."
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+  note "Downloading plugin ${C_DIM}${asset}${C_RESET}"
+  curl -fsSL --max-time 60 -o "$tmp/p.tar.gz" "$url" || die "Could not download $url"
+  mkdir -p "$tmp/extract"
+  tar -xzf "$tmp/p.tar.gz" -C "$tmp/extract" || die "Could not extract $asset."
+  src="$(find "$tmp/extract" -type d -path '*/plugins/rogue' | head -1)"
+  [ -n "$src" ] && [ -f "$src/managed-settings.json" ] \
+    || die "This plugin release has no managed-settings.json; pin a newer ROGUE_PLUGIN_VERSION."
+
+  # No set -e here: every step checks itself, and the working bridge is replaced only by a
+  # complete copy, since a partial one would silence every user's hooks.
+  umask 022
+  mkdir -p "$(dirname "$bridge")" || die "Could not create $(dirname "$bridge")."
+  rm -rf "$bridge.new"
+  cp -R "$src" "$bridge.new" && chown -R 0:0 "$bridge.new" \
+    || { rm -rf "$bridge.new"; die "Could not copy the plugin to $bridge.new."; }
+  rm -rf "$bridge"
+  mv "$bridge.new" "$bridge" || die "Could not move $bridge.new to $bridge."
+  ok "Hooks copied → ${C_DIM}$bridge${C_RESET}"
+
+  # Claude Code refuses to start on an invalid managed file, so the drop-in appears only
+  # complete, by rename. Claude Code ignores hidden files like the temp one.
+  mkdir -p "$settings_dir" || die "Could not create $settings_dir."
+  drop_in="$settings_dir/50-rogue-security.json"
+  { render_managed_settings "$bridge/managed-settings.json" "$bridge" > "$settings_dir/.50-rogue-security.json.tmp" \
+      && chmod 644 "$settings_dir/.50-rogue-security.json.tmp" \
+      && mv "$settings_dir/.50-rogue-security.json.tmp" "$drop_in"; } \
+    || { rm -f "$settings_dir/.50-rogue-security.json.tmp"; die "Could not write $drop_in."; }
+  ok "Managed hooks registered → ${C_DIM}$drop_in${C_RESET}"
+
+  [ -f "$MACHINE_ENV_FILE" ] \
+    || warn "$MACHINE_ENV_FILE is missing; the hooks stay silent until it holds ROGUE_API_KEY (docs/deployment.md)."
+  note "Run ${C_DIM}/status${C_RESET} in Claude Code: Setting sources should list Enterprise managed settings (drop-ins)."
+}
+
+usage() { sed -n '2,52p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; }
 
 parse_args() {
   while [ "$#" -gt 0 ]; do
@@ -1099,6 +1185,7 @@ parse_args() {
       --kiro)            WANT="$WANT kiro" ;;
       --non-interactive) NON_INTERACTIVE=1 ;;
       --no-statusline)   ROGUE_NO_STATUSLINE=1 ;;
+      --managed)         MANAGED=1 ;;
       -h|--help)         usage; exit 0 ;;
       *)                 die "Unknown argument: $arg (try --help)" ;;
     esac
@@ -1113,6 +1200,11 @@ kiro_detected() { have_cmd kiro-cli || [ -d /Applications/Kiro.app ] || [ -d "$H
 # ── Dispatch: detect installed agents, install for each ───────────────────────
 main() {
   parse_args "$@"
+
+  if [ "$MANAGED" = 1 ]; then
+    install_claude_managed
+    return
+  fi
 
   if [ -n "$WANT" ]; then
     # Explicit selection (--claude/--codex/--cursor): install exactly these. A CLI

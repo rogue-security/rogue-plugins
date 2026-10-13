@@ -121,6 +121,8 @@ jobs:
           TEST_SH=dash bash tests/test_hook_sh_cursor.sh
           TEST_SH=dash bash tests/test_env_first_found.sh
           TEST_SH=bash bash tests/test_env_first_found.sh
+          TEST_SH=dash bash tests/test_managed_hooks.sh
+          TEST_SH=bash bash tests/test_managed_hooks.sh
           bash tests/test_install_env_sh.sh
       - name: Kiro installer (temp HOME, fake kiro-cli)
         # install.sh --kiro is the only installer that WRITES the vendor's hook
