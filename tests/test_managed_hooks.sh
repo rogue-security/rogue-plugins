@@ -20,7 +20,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "  ok: $*"; }
 
 # ── Template ──────────────────────────────────────────────────────────────────
-python3 "$REPO/scripts/managed-settings.py" --check || fail "managed-settings.json is stale"
+bash "$REPO/scripts/managed-settings.sh" --check || fail "managed-settings.json is stale"
 ok "managed-settings.json matches hooks.json"
 
 render() {
