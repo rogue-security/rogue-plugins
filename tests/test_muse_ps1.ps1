@@ -11,7 +11,8 @@ function Check { param([string]$Name, [scriptblock]$Test)
     $ok = $false; try { $ok = [bool](& $Test) } catch {}
     if ($ok) { Write-Host "ok   $Name" } else { Write-Host "FAIL $Name"; $script:fails++ }
 }
-function Run { param([string[]]$Arguments) & $PsExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Scripts 'install.ps1') @Arguments *> $null; $LASTEXITCODE -eq 0 }
+# Continue: under Stop, Windows PowerShell 5.1 turns a child's stderr into a terminating error.
+function Run { param([string[]]$Arguments) $ErrorActionPreference = 'Continue'; & $PsExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Scripts 'install.ps1') @Arguments *> $null; $LASTEXITCODE -eq 0 }
 function Read-Text { param([string]$Path) [IO.File]::ReadAllText($Path) }
 
 $H = Join-Path ([IO.Path]::GetTempPath()) ("muse-ps1 ' home-" + [IO.Path]::GetRandomFileName())
@@ -44,6 +45,7 @@ try {
         [IO.File]::WriteAllText($S, $doc)
         Check "refuses $doc" { -not (Run @()) -and (Read-Text $S) -ceq $doc }
     }
+    Check 'a refusal releases the lock' { -not (Test-Path "$S.rogue-lock") }
     [IO.File]::WriteAllText($S, '{}'); New-Item -ItemType Directory -Path "$S.rogue-lock" | Out-Null
     Check 'refuses while locked' { -not (Run @()) -and (Read-Text $S) -ceq '{}' }
     Remove-Item "$S.rogue-lock"
@@ -51,7 +53,7 @@ try {
     # hook.ps1 against an in-process mock of the Rogue API.
     Run @() | Out-Null
     $hook = [IO.Path]::Combine($H, '.rogue', 'plugins', 'muse', 'scripts', 'hook.ps1')
-    function Invoke-Hook { param([string]$EventName) ('{"tool_name":"write_file"}' | & $PsExe -NoProfile -ExecutionPolicy Bypass -File $hook $EventName | Out-String).Trim() }
+    function Invoke-Hook { param([string]$EventName) $ErrorActionPreference = 'Continue'; ('{"tool_name":"write_file"}' | & $PsExe -NoProfile -ExecutionPolicy Bypass -File $hook $EventName | Out-String).Trim() }
     Check 'unconfigured hook allows' { (Invoke-Hook 'PreToolUse') -eq '{}' }
     function Start-Mock { param([string]$Body, [int]$Status = 200)
         $port = Get-Random -Minimum 30000 -Maximum 40000
@@ -84,7 +86,7 @@ try {
     Check 'fails open when unreachable' { (Invoke-Hook 'PreToolUse') -eq '{}' }
     Check 'logs every outcome' { (Get-Content ([IO.Path]::Combine($H, '.rogue', 'logs', 'muse.log')) | Select-String 'surface=muse_code').Count -ge 5 }
 } finally {
-    Get-Job | Remove-Job -Force
+    Get-Job -ErrorAction SilentlyContinue | Remove-Job -Force -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $H
 }
 if ($script:fails) { Write-Host "$($script:fails) failed"; exit 1 }

@@ -54,6 +54,7 @@ for doc in '[]' '{"managed_hooks_path": "/etc/corp/hooks.json"}' '{"managed_hook
   printf '%s' "$doc" > "$S"
   check "refuses $doc" '! run && [ "$(cat "$S")" = "$doc" ]'
 done
+check "a refusal releases the lock" '[ ! -e "$S.rogue-lock" ]'
 printf '{}' > "$S"; mkdir "$S.rogue-lock"
 check "refuses while locked" '! run && grep -q "remove $S.rogue-lock and retry" "$H/err" && [ "$(cat "$S")" = "{}" ]'
 rmdir "$S.rogue-lock"

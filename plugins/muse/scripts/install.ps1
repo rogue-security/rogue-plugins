@@ -14,7 +14,14 @@ $ConfigHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { [IO.Path
 $Settings = [IO.Path]::Combine($ConfigHome, 'muse', 'settings.json')
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
 
-function Fail { param([string]$Message) [Console]::Error.WriteLine($Message); exit 1 }
+$Lock = "$Settings.rogue-lock"
+$script:locked = $false
+# Releases the lock itself: Windows PowerShell 5.1 can skip `finally` on `exit`.
+function Fail {
+    param([string]$Message)
+    if ($script:locked) { Remove-Item -LiteralPath $Lock -Force -Recurse -ErrorAction SilentlyContinue }
+    [Console]::Error.WriteLine($Message); exit 1
+}
 
 function Get-HookCommand {
     param([string]$EventName)
@@ -60,9 +67,8 @@ if ($Status) {
 
 if ((Test-Path -LiteralPath $Settings) -and -not (Test-Path -LiteralPath $Settings -PathType Leaf)) { Fail "Refusing non-regular file: $Settings" }
 New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
-$lock = "$Settings.rogue-lock"
-try { New-Item -ItemType Directory -Path $lock | Out-Null }
-catch { Fail "Another Muse installer is running, or a previous run was interrupted. If no installer is running, remove $lock and retry." }
+try { New-Item -ItemType Directory -Path $Lock | Out-Null; $script:locked = $true }
+catch { Fail "Another Muse installer is running, or a previous run was interrupted. If no installer is running, remove $Lock and retry." }
 
 function Set-Settings {
     param([string]$Text)
@@ -91,7 +97,7 @@ try {
             else { Write-Output "Left managed_hooks_path in $Settings; it points at a removed file, which Muse ignores." }
         }
         Write-Output 'Removed Rogue Muse hooks; credentials and other settings preserved.'
-        exit 0
+        return
     }
 
     if ($current -and $current -ne $Hooks) { Fail "Muse already loads managed hooks from $current; leaving it unchanged. Add Rogue's hooks from $Hooks to that file, or remove the setting and retry." }
@@ -118,5 +124,5 @@ try {
     }
     Write-Output "Installed Rogue Muse hooks in $Hooks (managed_hooks_path in $Settings). Start a new Muse session."
 } finally {
-    Remove-Item -LiteralPath $lock -Force -Recurse -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Lock -Force -Recurse -ErrorAction SilentlyContinue
 }
