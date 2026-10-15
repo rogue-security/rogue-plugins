@@ -55,6 +55,10 @@ for doc in '[]' '{"managed_hooks_path": "/etc/corp/hooks.json"}' '{"managed_hook
   check "refuses $doc" '! run && [ "$(cat "$S")" = "$doc" ]'
 done
 check "a refusal releases the lock" '[ ! -e "$S.rogue-lock" ]'
+# A settings write that fails mid-install fails the install and leaves no temp file.
+mkdir -p "$H/shim"; printf '#!/bin/sh\nexit 1\n' > "$H/shim/cmp"; chmod +x "$H/shim/cmp"
+printf '{\n  "provider": "meta"\n}' > "$S"
+check "a failed settings write fails the install" '! PATH="$H/shim:$PATH" run && ! grep -q managed_hooks_path "$S" && [ -z "$(ls "$XDG_CONFIG_HOME/muse" | grep "rogue-[0-9]")" ]'
 printf '{}' > "$S"; mkdir "$S.rogue-lock"
 check "refuses while locked" '! run && grep -q "remove $S.rogue-lock and retry" "$H/err" && [ "$(cat "$S")" = "{}" ]'
 rmdir "$S.rogue-lock"

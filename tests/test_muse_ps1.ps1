@@ -52,8 +52,14 @@ try {
 
     # hook.ps1 against an in-process mock of the Rogue API.
     Run @() | Out-Null
-    $hook = [IO.Path]::Combine($H, '.rogue', 'plugins', 'muse', 'scripts', 'hook.ps1')
-    function Invoke-Hook { param([string]$EventName) $ErrorActionPreference = 'Continue'; ('{"tool_name":"write_file"}' | & $PsExe -NoProfile -ExecutionPolicy Bypass -File $hook $EventName | Out-String).Trim() }
+    # Runs the exact command stored in hooks.json, with this engine standing in for `powershell`.
+    function Invoke-Hook {
+        param([string]$EventName)
+        $ErrorActionPreference = 'Continue'
+        $cmd = @((Read-Text $Hooks | ConvertFrom-Json).hooks.$EventName)[0].hooks[0].command
+        if ($cmd -notmatch '^powershell -NoProfile -NonInteractive -Command "(.*)"$') { return "unexpected command: $cmd" }
+        ('{"tool_name":"write_file"}' | & $PsExe -NoProfile -NonInteractive -Command $Matches[1] | Out-String).Trim()
+    }
     Check 'unconfigured hook allows' { (Invoke-Hook 'PreToolUse') -eq '{}' }
     function Start-Mock { param([string]$Body, [int]$Status = 200)
         $port = Get-Random -Minimum 30000 -Maximum 40000

@@ -23,9 +23,11 @@ function Fail {
     [Console]::Error.WriteLine($Message); exit 1
 }
 
+# A scriptblock rather than -File: a Group Policy AllSigned execution policy overrides -ExecutionPolicy Bypass.
 function Get-HookCommand {
     param([string]$EventName)
-    return "powershell -NoProfile -ExecutionPolicy Bypass -File `"$([IO.Path]::Combine($Root, 'scripts', 'hook.ps1'))`" $EventName"
+    $hook = ([IO.Path]::Combine($Root, 'scripts', 'hook.ps1')).Replace("'", "''")
+    return "powershell -NoProfile -NonInteractive -Command `"& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$hook'))) '$($Root.Replace("'", "''"))' $EventName`""
 }
 
 function Get-HooksJson {

@@ -1,11 +1,11 @@
 # Rogue Security - Muse Code hook bridge for Windows (sibling of hook.sh).
 # Posts the native Muse event to Rogue and relays the API's native response;
 # any failure prints {} so Muse continues (fail-open).
-# Usage: hook.ps1 EventName
-param([string]$EventName = 'unknown')
+# Usage: hook.ps1 PluginRoot EventName. hooks.json runs it as a scriptblock, where $PSScriptRoot is empty.
+param([string]$PluginRoot = '', [string]$EventName = 'unknown')
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
-$PluginRoot = Split-Path -Parent $PSScriptRoot
+if (-not $PluginRoot) { $PluginRoot = Split-Path -Parent $PSScriptRoot }
 $UserHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 
 function Write-Out {

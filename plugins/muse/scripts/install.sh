@@ -50,19 +50,17 @@ fi
 mkdir -p -m 700 "$(dirname "$SETTINGS")" || die "Cannot create $(dirname "$SETTINGS")"
 LOCK="$SETTINGS.rogue-lock"
 mkdir "$LOCK" 2>/dev/null || die "Another Muse installer is running, or a previous run was interrupted. If no installer is running, remove $LOCK and retry."
-TMP=""
-trap 'rm -rf "$LOCK" ${TMP:+"$TMP"}' EXIT
+NEW="$SETTINGS.rogue-$$"
+trap 'rm -rf "$LOCK" "$NEW"' EXIT
 umask 077
 
-# Writes stdin over settings.json atomically, unless Muse changed it meanwhile.
+# Moves $NEW over settings.json atomically, unless Muse changed it meanwhile.
+# Called from the main shell, never a pipeline, so `die` stops the installer.
 replace_settings() {
-  TMP="$SETTINGS.rogue-$$"
-  cat > "$TMP" || die "Cannot write $TMP"
   if [ -n "$ORIGINAL" ]; then cmp -s "$ORIGINAL" "$SETTINGS" || die "Muse settings changed during installation; retry"
   else [ ! -e "$SETTINGS" ] || die "Muse settings changed during installation; retry"; fi
   [ -z "$ORIGINAL" ] || cp "$ORIGINAL" "$SETTINGS.rogue-backup"
-  mv -f "$TMP" "$SETTINGS" || die "Cannot replace $SETTINGS"
-  TMP=""
+  mv -f "$NEW" "$SETTINGS" || die "Cannot replace $SETTINGS"
 }
 
 # awk ends every line with a newline; drop the final one when the original had none, as Muse writes it.
@@ -75,7 +73,7 @@ match_eol() {
 ORIGINAL=""
 if [ -f "$SETTINGS" ]; then
   ORIGINAL="$(mktemp)" && cp "$SETTINGS" "$ORIGINAL" || die "Cannot read $SETTINGS"
-  trap 'rm -rf "$LOCK" "$ORIGINAL" ${TMP:+"$TMP"}' EXIT
+  trap 'rm -rf "$LOCK" "$NEW" "$ORIGINAL"' EXIT
 fi
 CURRENT="$(pointer)"; RC=$?
 [ "$RC" != 2 ] || die "Unrecognized managed_hooks_path in $SETTINGS; leaving it unchanged"
@@ -97,13 +95,12 @@ if [ "$MODE" = --uninstall ]; then
           }
         }
         for (i = 1; i <= NR; i++) if (!drop[i]) print line[i]
-      }' "$ORIGINAL" | match_eol > "$ORIGINAL.out"
-    if cmp -s "$ORIGINAL" "$ORIGINAL.out"; then
+      }' "$ORIGINAL" | match_eol > "$NEW" || die "Cannot write $NEW"
+    if cmp -s "$ORIGINAL" "$NEW"; then
       echo "Left managed_hooks_path in $SETTINGS; it points at a removed file, which Muse ignores."
     else
-      replace_settings < "$ORIGINAL.out"
+      replace_settings
     fi
-    rm -f "$ORIGINAL.out"
   fi
   echo "Removed Rogue Muse hooks; credentials and other settings preserved."
   exit 0
@@ -119,15 +116,16 @@ render_hooks > "$HOOKS.tmp" && mv -f "$HOOKS.tmp" "$HOOKS" || die "Cannot write 
 
 if [ -z "$CURRENT" ]; then
   if [ -z "$ORIGINAL" ] || ! grep -q '[^[:space:]]' "$ORIGINAL"; then
-    printf '{\n  "schema_version": 1,\n  "managed_hooks_path": "%s"\n}\n' "$HOOKS" | replace_settings
+    printf '{\n  "schema_version": 1,\n  "managed_hooks_path": "%s"\n}\n' "$HOOKS" > "$NEW"
   elif [ "$(tr -d '[:space:]' < "$ORIGINAL")" = '{}' ]; then
-    printf '{\n  "managed_hooks_path": "%s"\n}\n' "$HOOKS" | replace_settings
+    printf '{\n  "managed_hooks_path": "%s"\n}\n' "$HOOKS" > "$NEW"
   else
     [ "$(tr -d '[:space:]' < "$ORIGINAL" | head -c1)" = '{' ] || die "Muse settings must be a JSON object: $SETTINGS"
     # The first non-blank character is the object's opening brace; insert right after it.
     awk -v p="$HOOKS" '
       !done && (i = index($0, "{")) { print substr($0, 1, i) "\n  \"managed_hooks_path\": \"" p "\","; $0 = substr($0, i + 1); done = 1; if ($0 ~ /^[[:space:]]*$/) next }
-      { print }' "$ORIGINAL" | match_eol | replace_settings
-  fi
+      { print }' "$ORIGINAL" | match_eol > "$NEW"
+  fi || die "Cannot write $NEW"
+  replace_settings
 fi
 echo "Installed Rogue Muse hooks in $HOOKS (managed_hooks_path in $SETTINGS). Start a new Muse session."
