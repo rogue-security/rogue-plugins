@@ -89,7 +89,9 @@ jobs:
           [ "$fail" = 0 ] || exit 1
 
       - name: Muse hook and installer tests
-        run: node --test tests/test_muse.mjs
+        run: |
+          bash tests/test_muse_sh.sh
+          pwsh -NoProfile -File tests/test_muse_ps1.ps1
 
       - name: Shell unit tests
         # Mostly the dependency-free ones, plus the Cursor dispatcher end-to-end
@@ -437,4 +439,6 @@ jobs:
           powershell -NoProfile -File tests/test_install_env_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_status_kiro_ps1.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_muse_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }

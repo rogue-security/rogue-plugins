@@ -32,7 +32,7 @@
 #   --gemini               install only for Gemini CLI
 #   --copilot              install only for GitHub Copilot CLI
 #   --antigravity          install only for Google Antigravity
-#   --muse                 install only for Muse Code (requires Node.js)
+#   --muse                 install only for Muse Code
 #   --kiro                 install only for Kiro (IDE, CLI on both engines, Crew)
 #                          (no agent flag = auto-detect and install for every agent found)
 #   --api-key=KEY          same as ROGUE_API_KEY
@@ -1058,7 +1058,6 @@ install_kiro() {
 }
 
 install_muse() {
-  have_cmd node || { warn "Muse hook installation requires Node.js. Install Node.js and retry."; return 1; }
   local tmp asset url
   tmp="$(mktemp -d)" || return 1
   asset="rogue-plugin-muse.tar.gz"
@@ -1070,7 +1069,7 @@ install_muse() {
   if ! curl -fsSL --max-time 60 -o "$tmp/plugin.tar.gz" "$url"; then
     rm -rf "$tmp"; warn "Muse plugin download failed. Hooks were not installed."; return 1
   fi
-  tar -xzf "$tmp/plugin.tar.gz" -C "$tmp" && node "$tmp/rogue-plugin-muse/scripts/install.mjs"
+  tar -xzf "$tmp/plugin.tar.gz" -C "$tmp" && bash "$tmp/rogue-plugin-muse/scripts/install.sh"
   local rc=$?
   rm -rf "$tmp"
   [ "$rc" = 0 ] || { warn "Muse hook installation failed."; return 1; }

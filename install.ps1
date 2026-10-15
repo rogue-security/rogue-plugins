@@ -47,6 +47,8 @@
     Install only for Google Antigravity.
 .PARAMETER Kiro
     Install only for Kiro (IDE, CLI on both engines). With no agent switch, every detected agent is installed.
+.PARAMETER Muse
+    Install only for Muse Code.
 #>
 [CmdletBinding()]
 param(
@@ -62,7 +64,8 @@ param(
     [switch]$Gemini,
     [switch]$Copilot,
     [switch]$Antigravity,
-    [switch]$Kiro
+    [switch]$Kiro,
+    [switch]$Muse
 )
 
 $ErrorActionPreference = 'Stop'
@@ -459,6 +462,7 @@ function Register-ApiKey {
         elseif ($hasGemini)  { $scFamily = 'gemini';  $scAgent = 'gemini_cli' }
         elseif ($hasCopilot) { $scFamily = 'copilot'; $scAgent = 'github_copilot' }
         elseif ($hasKiro)    { $scFamily = 'kiro';    $scAgent = 'kiro_cli' }
+        elseif ($hasMuse)    { $scFamily = 'muse';    $scAgent = 'muse_code' }
         $body = @{ agent_family = $scFamily; agent = $scAgent; host = $hostName; actor_email = $ActorEmail } | ConvertTo-Json -Compress
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
         $resp = Invoke-WebRequest -Uri "$($Url.TrimEnd('/'))/api/v1/hooks/status" -Method Post `
@@ -584,7 +588,7 @@ Write-Host "Rogue Security (Windows)" -ForegroundColor Cyan
 # agent still needs its binary; Cursor is a plain file copy, so it installs regardless.
 # Antigravity has no `antigravity` binary on PATH — detect the `agy` CLI or its data
 # dirs under %USERPROFILE%\.gemini (IDE and/or manual-CLI installs).
-$explicit = $Claude -or $Codex -or $Cursor -or $Gemini -or $Copilot -or $Antigravity -or $Kiro
+$explicit = $Claude -or $Codex -or $Cursor -or $Gemini -or $Copilot -or $Antigravity -or $Kiro -or $Muse
 if ($explicit) {
     $hasClaude      = [bool]$Claude
     $hasCodex       = [bool]$Codex
@@ -593,6 +597,7 @@ if ($explicit) {
     $hasCopilot     = [bool]$Copilot
     $hasAntigravity = [bool]$Antigravity
     $hasKiro        = [bool]$Kiro
+    $hasMuse        = [bool]$Muse
     if ($hasClaude -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Die "-Claude requested but the 'claude' CLI is not on PATH. Install Claude Code (https://claude.com/code) first."
     }
@@ -611,6 +616,9 @@ if ($explicit) {
     if ($hasKiro -and -not (Test-KiroInstalled)) {
         Die "-Kiro requested but no Kiro install was detected (looked for: kiro-cli, %LOCALAPPDATA%\Programs\Kiro, %USERPROFILE%\.kiro). Install Kiro (https://kiro.dev) first."
     }
+    if ($hasMuse -and -not (Get-Command muse -ErrorAction SilentlyContinue)) {
+        Die "-Muse requested but the 'muse' CLI is not on PATH. Install Muse Code first."
+    }
 } else {
     $hasClaude      = [bool](Get-Command claude -ErrorAction SilentlyContinue)
     $hasCodex       = [bool](Get-Command codex  -ErrorAction SilentlyContinue)
@@ -619,8 +627,9 @@ if ($explicit) {
     $hasCopilot     = [bool](Get-Command copilot -ErrorAction SilentlyContinue)
     $hasAntigravity = [bool](Get-Command agy -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $env:USERPROFILE '.gemini\antigravity*'))
     $hasKiro        = Test-KiroInstalled
-    if (-not ($hasClaude -or $hasCodex -or $hasCursor -or $hasGemini -or $hasCopilot -or $hasAntigravity -or $hasKiro)) {
-        Die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
+    $hasMuse        = [bool](Get-Command muse -ErrorAction SilentlyContinue)
+    if (-not ($hasClaude -or $hasCodex -or $hasCursor -or $hasGemini -or $hasCopilot -or $hasAntigravity -or $hasKiro -or $hasMuse)) {
+        Die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro, muse). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, Kiro (https://kiro.dev), or Muse Code first."
     }
 }
 # Claude shells out to git to clone the marketplace; git is required only for it.
@@ -879,6 +888,37 @@ if ($hasKiro) {
         Log "Verify with: powershell -NoProfile -ExecutionPolicy Bypass -File `"$pluginDir\scripts\status.ps1`""
     } catch {
         Warn2 "Kiro plugin not installed ($($_.Exception.Message)). If the asset isn't published yet, re-run the installer once it is."
+    } finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+# Muse: download the release tarball and run its own installer, which writes
+# Rogue's managed hooks file and points Muse's settings.json at it. Non-fatal.
+if ($hasMuse) {
+    Write-Host ""
+    Write-Host "Rogue Security - Muse Code" -ForegroundColor Cyan
+    $asset = 'rogue-plugin-muse.tar.gz'
+    if ($env:ROGUE_PLUGIN_VERSION) {
+        $url = "https://github.com/$PluginRepo/releases/download/$($env:ROGUE_PLUGIN_VERSION)/$asset"
+    } else {
+        $url = "https://github.com/$PluginRepo/releases/latest/download/$asset"
+    }
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("rogue-muse-" + [System.IO.Path]::GetRandomFileName())
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        Log "Downloading plugin $asset"
+        $tarball = Join-Path $tmp 'p.tar.gz'
+        Invoke-WebRequest -Uri $url -OutFile $tarball -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        & tar -xzf $tarball -C $tmp
+        if ($LASTEXITCODE -ne 0) { throw "Could not extract the Muse plugin tarball (is 'tar' available?)." }
+        $museInstaller = [System.IO.Path]::Combine($tmp, 'rogue-plugin-muse', 'scripts', 'install.ps1')
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $museInstaller
+        if ($LASTEXITCODE -ne 0) { throw 'the Muse hook installer failed' }
+        Ok 'Muse hooks installed'
+        Log "Verify with: powershell -NoProfile -ExecutionPolicy Bypass -File `"$env:USERPROFILE\.rogue\plugins\muse\scripts\install.ps1`" -Status"
+    } catch {
+        Warn2 "Muse hooks not installed ($($_.Exception.Message)). If the asset isn't published yet, re-run the installer once it is."
     } finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
