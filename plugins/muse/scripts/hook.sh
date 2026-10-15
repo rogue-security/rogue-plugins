@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Usage: hook.sh EventName /absolute/path/to/node
+# Usage: hook.sh EventName
 PLUGIN_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 EVENT="${1:-unknown}"
-NODE="${2:-node}"
 . "$PLUGIN_ROOT/scripts/env-file.sh"
 for file in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
   if rogue_env_is_trusted "$file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$file"; then
@@ -34,7 +33,8 @@ CODE=$(printf '%s' "$RAW" | tail -n1)
 if [ "$RC" -ne 0 ] || [ "$CODE" != 200 ]; then
   log "outcome=fail-open http=$CODE rc=$RC"; echo '{}'; exit 0
 fi
-RESP=$(printf '%s' "$RAW" | sed '$d' | "$NODE" "$PLUGIN_ROOT/scripts/response.mjs" "$EVENT" 2>/dev/null) || { log "outcome=fail-open http=$CODE reason=invalid-response"; echo '{}'; exit 0; }
+# The API already answers in Muse's native form ({} allows); Muse ignores output it cannot parse.
+RESP=$(printf '%s' "$RAW" | sed '$d')
 [ -n "$RESP" ] || RESP='{}'
 OUTCOME=allow
 [ "$RESP" = '{}' ] || OUTCOME=block
