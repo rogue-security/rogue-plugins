@@ -118,6 +118,9 @@ jobs:
           TEST_SH=dash bash tests/test_auto_update_sh.sh
           bash tests/test_gitignore_bundles.sh
           TEST_SH=dash bash tests/test_setup_env.sh
+          # hook.sh execs the installed native dispatcher, so both scripts run under dash too.
+          TEST_SH=sh bash tests/test_hook_binary_sh.sh
+          TEST_SH=dash bash tests/test_hook_binary_sh.sh
           TEST_SH=bash bash tests/test_setup_env.sh
           SH=bash bash tests/test_hook_sh_cursor.sh
           TEST_SH=dash bash tests/test_hook_sh_cursor.sh
@@ -441,4 +444,6 @@ jobs:
           powershell -NoProfile -File tests/test_status_kiro_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_muse_ps1.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_hook_binary_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -36,6 +36,21 @@
         "hooks": [
           {
             "type": "command",
+            "command": "sh -c '( nohup sh \"$CLAUDE_PLUGIN_ROOT/scripts/hook-binary.sh\" >/dev/null 2>&1 & )' ; exit 0",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -NonInteractive -Command \"Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-Command','& ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path (Get-Item Env:CLAUDE_PLUGIN_ROOT).Value ''scripts/hook-binary.ps1''))))'\" ; exit 0",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/warn.sh\" ; exit 0",
             "timeout": 20
           }

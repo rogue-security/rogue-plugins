@@ -87,6 +87,7 @@ skills/setup/SKILL.md        — /rogue:setup slash command
 skills/status/SKILL.md       — /rogue:status slash command
 scripts/hook.sh              — POSIX-sh + curl dispatcher (macOS/Linux/WSL)
 scripts/hook.ps1             — PowerShell dispatcher (native Windows)
+scripts/hook-binary.sh / .ps1 — installs the native dispatcher pinned in rogue-hook.json
 scripts/setup.sh / setup.ps1 — credential storage helpers
 ```
 
@@ -108,6 +109,19 @@ event payload to
 
 If `ROGUE_API_KEY` is empty, hooks return `{}` (allow) — fail-open by design,
 so Claude Code never hangs on Rogue infrastructure issues.
+
+### Native dispatcher
+
+When `rogue-hook.json` pins a version, SessionStart runs `hook-binary.sh` (or
+`hook-binary.ps1`) in the background. It downloads that version of the native `rogue-hook`
+binary through `GET /api/v1/hooks/binary` with the API key, checks it against the pinned
+sha256, and installs it as `${CLAUDE_PLUGIN_DATA}/rogue-hook` (`rogue-hook.exe` on Windows).
+From then on `hook.sh` and `hook.ps1` hand each event to the binary, which does the same
+work without `curl` or per-event subprocesses (about 5 ms instead of 85 ms per event on
+macOS). Without a pin, or when the download fails or does not match, the binary is removed
+and the scripts handle events as before. Managed hooks never hand off. The last install
+attempt is logged to `~/.rogue/hook-binary.log`. The binary's source and releases live in
+the private Rogue monorepo; this repo carries only the pin.
 
 ## Slash commands
 

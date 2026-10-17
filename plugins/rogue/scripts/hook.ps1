@@ -362,6 +362,28 @@ try {
 # guard on the version to avoid a false stand-down there.
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { Write-Raw '{}'; exit 0 }
 
+# The native dispatcher installed by hook-binary.ps1 does this script's whole job.
+# Bytes are copied both ways untouched, so no console codepage re-encodes the payload
+# or the response. Once the binary exits its output is already in the pipe; the bounded
+# wait covers a detached Cowork alert window inheriting the pipe and holding it open.
+$nativeHook = if ($env:CLAUDE_PLUGIN_DATA) { Join-Path $env:CLAUDE_PLUGIN_DATA 'rogue-hook.exe' }
+if ($nativeHook -and $env:ROGUE_HOOK_SOURCE -ne 'managed' -and (Test-Path -LiteralPath $nativeHook -PathType Leaf)) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo $nativeHook, "claude $EventName"
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    [Console]::OpenStandardInput().CopyTo($proc.StandardInput.BaseStream)
+    $proc.StandardInput.Close()
+    $stdout = [Console]::OpenStandardOutput()
+    $copy = $proc.StandardOutput.BaseStream.CopyToAsync($stdout)
+    $proc.WaitForExit()
+    [void]$copy.Wait(2000)
+    $stdout.Flush()
+    exit 0
+}
+
 # Run only when Claude Code is the one invoking the hook (mirrors hook.sh's gate;
 # matches the "run hooks only when claude executes them" fix).
 if (-not $env:CLAUDE_CODE_ENTRYPOINT) { Write-Raw '{}'; exit 0 }
