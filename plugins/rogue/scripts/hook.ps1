@@ -385,7 +385,13 @@ if ($nativeHook -and $env:ROGUE_HOOK_SOURCE -ne 'managed' -and (Test-Path -Liter
     $proc.StandardInput.Close()
     $stdout = [Console]::OpenStandardOutput()
     $copy = $proc.StandardOutput.BaseStream.CopyToAsync($stdout)
-    $proc.WaitForExit()
+    # Past the binary's 15 s request timeout but inside the 20 s hook timeout, so a stuck
+    # child is killed here instead of outliving this script.
+    if (-not $proc.WaitForExit(18000)) {
+        try { $proc.Kill() } catch {}
+        Write-Raw '{}'
+        exit 0
+    }
     [void]$copy.Wait(2000)
     $stdout.Flush()
     exit 0
