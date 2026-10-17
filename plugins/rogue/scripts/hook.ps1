@@ -362,6 +362,13 @@ try {
 # guard on the version to avoid a false stand-down there.
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { Write-Raw '{}'; exit 0 }
 
+# Run only when Claude Code is the one invoking the hook (mirrors hook.sh's gate;
+# matches the "run hooks only when claude executes them" fix).
+if (-not $env:CLAUDE_CODE_ENTRYPOINT) { Write-Raw '{}'; exit 0 }
+
+if (-not $EventName) { Dbg "no event name -> {}"; Write-Raw '{}'; exit 0 }
+Dbg "event=$EventName"
+
 # The native dispatcher installed by hook-binary.ps1 does this script's whole job.
 # Bytes are copied both ways untouched, so no console codepage re-encodes the payload
 # or the response. Once the binary exits its output is already in the pipe; the bounded
@@ -383,13 +390,6 @@ if ($nativeHook -and $env:ROGUE_HOOK_SOURCE -ne 'managed' -and (Test-Path -Liter
     $stdout.Flush()
     exit 0
 }
-
-# Run only when Claude Code is the one invoking the hook (mirrors hook.sh's gate;
-# matches the "run hooks only when claude executes them" fix).
-if (-not $env:CLAUDE_CODE_ENTRYPOINT) { Write-Raw '{}'; exit 0 }
-
-if (-not $EventName) { Dbg "no event name -> {}"; Write-Raw '{}'; exit 0 }
-Dbg "event=$EventName"
 
 # -- plugin root ------------------------------------------------------------
 $pluginRoot = $env:CLAUDE_PLUGIN_ROOT

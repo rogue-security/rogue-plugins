@@ -14,7 +14,8 @@ esac
 
 # The native dispatcher installed by hook-binary.sh does this script's whole job.
 # Managed hooks never hand off: CLAUDE_PLUGIN_DATA there would be user-controlled.
-if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ "${ROGUE_HOOK_SOURCE:-}" != managed ] && [ -x "$CLAUDE_PLUGIN_DATA/rogue-hook" ]; then
+if [ -n "$EVENT" ] && [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ] && [ -n "${CLAUDE_PLUGIN_DATA:-}" ] &&
+  [ "${ROGUE_HOOK_SOURCE:-}" != managed ] && [ -x "$CLAUDE_PLUGIN_DATA/rogue-hook" ]; then
   exec "$CLAUDE_PLUGIN_DATA/rogue-hook" claude "$EVENT"
 fi
 
