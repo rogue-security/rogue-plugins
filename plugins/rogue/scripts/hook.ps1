@@ -381,13 +381,17 @@ if ($nativeHook -and $env:ROGUE_HOOK_SOURCE -ne 'managed' -and (Test-Path -Liter
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $proc = [System.Diagnostics.Process]::Start($psi)
-    [Console]::OpenStandardInput().CopyTo($proc.StandardInput.BaseStream)
-    $proc.StandardInput.Close()
+    # One 18 s budget for feeding stdin and waiting: past the binary's 15 s request timeout
+    # but inside the 20 s hook timeout, so a stuck child is killed here instead of outliving
+    # this script.
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $stdout = [Console]::OpenStandardOutput()
     $copy = $proc.StandardOutput.BaseStream.CopyToAsync($stdout)
-    # Past the binary's 15 s request timeout but inside the 20 s hook timeout, so a stuck
-    # child is killed here instead of outliving this script.
-    if (-not $proc.WaitForExit(18000)) {
+    $feed = [Console]::OpenStandardInput().CopyToAsync($proc.StandardInput.BaseStream)
+    $fed = $feed.Wait(18000)
+    if ($fed) { $proc.StandardInput.Close() }
+    $left = [int][Math]::Max(0, 18000 - $clock.ElapsedMilliseconds)
+    if (-not $fed -or -not $proc.WaitForExit($left)) {
         try { $proc.Kill() } catch {}
         Write-Raw '{}'
         exit 0
