@@ -12,6 +12,13 @@ case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*) echo '{}'; exit 0 ;;
 esac
 
+# The native dispatcher installed by hook-binary.sh does this script's whole job.
+# Managed hooks never hand off: CLAUDE_PLUGIN_DATA there would be user-controlled.
+if [ -n "$EVENT" ] && [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ] && [ -n "${CLAUDE_PLUGIN_DATA:-}" ] &&
+  [ "${ROGUE_HOOK_SOURCE:-}" != managed ] && [ -x "$CLAUDE_PLUGIN_DATA/rogue-hook" ]; then
+  exec "$CLAUDE_PLUGIN_DATA/rogue-hook" claude "$EVENT"
+fi
+
 # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
 # Managed hooks (ROGUE_HOOK_SOURCE=managed, see managed-settings.json) read only the
 # root-owned files, so a user's ~/.rogue-env cannot redirect them.
