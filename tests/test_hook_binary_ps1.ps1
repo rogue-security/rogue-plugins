@@ -79,7 +79,7 @@ function Invoke-Plugin {
 }
 function Install { Set-Content -LiteralPath (Join-Path $srv 'requests') -Value $null; [void](Invoke-Plugin 'hook-binary.ps1') }
 function Read-Log { Get-Content -Raw -LiteralPath (Join-Path $sbHome '.rogue\hook-binary.log') }
-function Read-Requests { [string](Get-Content -Raw -LiteralPath (Join-Path $srv 'requests')) }
+function Read-Requests { "$(Get-Content -Raw -LiteralPath (Join-Path $srv 'requests') -ErrorAction SilentlyContinue)".Trim() }
 
 try {
     for ($i = 0; $i -lt 50; $i++) {
@@ -107,7 +107,7 @@ try {
     Write-Host 'already installed: no download'
     Install
     Check 'log reports current' $true ((Read-Log) -match 'already installed')
-    Check 'no request' '' ((Read-Requests).Trim())
+    Check 'no request' '' (Read-Requests)
 
     Write-Host 'new pin whose download does not match: old exe moved aside, scripts take over'
     New-Stub '0.2.0'
