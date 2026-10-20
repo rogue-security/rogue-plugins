@@ -148,33 +148,34 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 # Kiro has no plugin CLI either: the bridge is copied under ~/.rogue/plugins/kiro and
 # the installer writes the hook files that point Kiro at it (see kiro_install_plugin).
 
+add_and_refresh_marketplace() {
+  local cli="$1" refresh_command="$2" marketplace="$3" add_err
+  note "Adding marketplace ${C_DIM}$ROGUE_PLUGIN_REPO${C_RESET}"
+  add_err="$("$cli" plugin marketplace add "$ROGUE_PLUGIN_REPO" 2>&1)" && add_err=""
+  if "$cli" plugin marketplace "$refresh_command" "$marketplace" >/dev/null 2>&1; then
+    ok "Marketplace up to date"
+  else
+    warn "Could not add or update marketplace (continuing — it may already be present)"
+    [ -n "$add_err" ] && note "${C_DIM}${add_err}${C_RESET}"
+  fi
+}
+
+update_or_install_plugin() {
+  local cli="$1" plugin_slug="$2"
+  if "$cli" plugin update "$plugin_slug" >/dev/null 2>&1; then
+    ok "Plugin updated"
+  elif "$cli" plugin install "$plugin_slug" >/dev/null 2>&1; then
+    ok "Plugin installed"
+  else
+    die "$cli plugin install failed. Run '$cli plugin install $plugin_slug' to see the error."
+  fi
+}
+
 # ── Marketplace + plugin install (Claude) ─────────────────────────────────────
 claude_install_plugin() {
-  note "Adding marketplace ${C_DIM}$ROGUE_PLUGIN_REPO${C_RESET}"
-  # Capture stderr so a real failure (e.g. missing git, clone error) is surfaced
-  # instead of swallowed — otherwise it resurfaces later as a misleading
-  # "plugin not found" from the install step.
-  local add_err
-  if add_err="$(claude plugin marketplace add "$ROGUE_PLUGIN_REPO" 2>&1)"; then
-    ok "Marketplace added"
-  else
-    # Already present (or transient) — refresh from source instead.
-    if claude plugin marketplace update "$MARKETPLACE_NAME" >/dev/null 2>&1; then
-      ok "Marketplace updated"
-    else
-      warn "Could not add or update marketplace (continuing — it may already be present)"
-      [ -n "$add_err" ] && note "${C_DIM}${add_err}${C_RESET}"
-    fi
-  fi
-
+  add_and_refresh_marketplace claude update "$MARKETPLACE_NAME"
   note "Installing plugin ${C_DIM}${PLUGIN_NAME}@${MARKETPLACE_NAME}${C_RESET}"
-  if claude plugin install "${PLUGIN_NAME}@${MARKETPLACE_NAME}" >/dev/null 2>&1; then
-    ok "Plugin installed"
-  elif claude plugin update "$PLUGIN_NAME" >/dev/null 2>&1; then
-    ok "Plugin updated"
-  else
-    die "claude plugin install failed. Run 'claude plugin install ${PLUGIN_NAME}@${MARKETPLACE_NAME}' to see the error."
-  fi
+  update_or_install_plugin claude "${PLUGIN_NAME}@${MARKETPLACE_NAME}"
 }
 
 # ── Marketplace + plugin install (Codex) ──────────────────────────────────────
@@ -182,21 +183,8 @@ claude_install_plugin() {
 # .claude-plugin/marketplace.json — both name the marketplace `rogue-marketplace`
 # and the plugin `rogue`, so the slug and `${PLUGIN_NAME}@${MARKETPLACE_NAME}` match.
 codex_install_plugin() {
-  note "Adding marketplace ${C_DIM}$ROGUE_PLUGIN_REPO${C_RESET}"
-  local add_err
-  if add_err="$(codex plugin marketplace add "$ROGUE_PLUGIN_REPO" 2>&1)"; then
-    ok "Marketplace added"
-  else
-    if codex plugin marketplace upgrade "$MARKETPLACE_NAME" >/dev/null 2>&1; then
-      ok "Marketplace updated"
-    else
-      warn "Could not add or update Codex marketplace (continuing — it may already be present)"
-      [ -n "$add_err" ] && note "${C_DIM}${add_err}${C_RESET}"
-    fi
-  fi
-
+  add_and_refresh_marketplace codex upgrade "$MARKETPLACE_NAME"
   note "Installing plugin ${C_DIM}${PLUGIN_NAME}@${MARKETPLACE_NAME}${C_RESET}"
-  # Codex uses `plugin add` (not `install`); idempotent re-add is fine.
   if codex plugin add "${PLUGIN_NAME}@${MARKETPLACE_NAME}" >/dev/null 2>&1; then
     ok "Plugin installed"
   else
@@ -213,27 +201,9 @@ codex_install_plugin() {
 # rogue@rogue-copilot to disambiguate.
 COPILOT_MARKETPLACE_NAME="rogue-copilot"
 copilot_install_plugin() {
-  note "Adding marketplace ${C_DIM}$ROGUE_PLUGIN_REPO${C_RESET}"
-  local add_err
-  if add_err="$(copilot plugin marketplace add "$ROGUE_PLUGIN_REPO" 2>&1)"; then
-    ok "Marketplace added"
-  else
-    if copilot plugin marketplace update "$COPILOT_MARKETPLACE_NAME" >/dev/null 2>&1; then
-      ok "Marketplace updated"
-    else
-      warn "Could not add or update Copilot marketplace (continuing — it may already be present)"
-      [ -n "$add_err" ] && note "${C_DIM}${add_err}${C_RESET}"
-    fi
-  fi
-
+  add_and_refresh_marketplace copilot update "$COPILOT_MARKETPLACE_NAME"
   note "Installing plugin ${C_DIM}${PLUGIN_NAME}@${COPILOT_MARKETPLACE_NAME}${C_RESET}"
-  if copilot plugin install "${PLUGIN_NAME}@${COPILOT_MARKETPLACE_NAME}" >/dev/null 2>&1; then
-    ok "Plugin installed"
-  elif copilot plugin update "$PLUGIN_NAME" >/dev/null 2>&1; then
-    ok "Plugin updated"
-  else
-    die "copilot plugin install failed. Run 'copilot plugin install ${PLUGIN_NAME}@${COPILOT_MARKETPLACE_NAME}' to see the error."
-  fi
+  update_or_install_plugin copilot "${PLUGIN_NAME}@${COPILOT_MARKETPLACE_NAME}"
 }
 
 # ── File-copy install (Cursor) ────────────────────────────────────────────────
