@@ -581,9 +581,13 @@ function Add-AndRefreshMarketplace {
 
 function Update-OrInstallPlugin {
     param([string]$Cli, [string]$PluginSlug)
-    try { & $Cli plugin update $PluginSlug 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { Ok 'Plugin updated'; return } } catch {}
-    try { & $Cli plugin install $PluginSlug 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { Ok 'Plugin installed'; return } } catch {}
-    Die "$Cli plugin install failed. Run '$Cli plugin install $PluginSlug' to see the error."
+    $installedPlugins = ''
+    try { $installedPlugins = (& $Cli plugin list 2>$null | Out-String) } catch {}
+    $command = if ($installedPlugins.Contains($PluginSlug)) { 'update' } else { 'install' }
+    $succeeded = $false
+    try { & $Cli plugin $command $PluginSlug 2>&1 | Out-Null; $succeeded = $LASTEXITCODE -eq 0 } catch {}
+    if (-not $succeeded) { Die "$Cli plugin $command failed. Run '$Cli plugin $command $PluginSlug' to see the error." }
+    if ($command -eq 'update') { Ok 'Plugin updated' } else { Ok 'Plugin installed' }
 }
 
 

@@ -15,6 +15,7 @@ $fakeCli = Join-Path $bin 'fake-plugin-cli-fixture.ps1'
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Argv)
 $snapshot = Join-Path $env:FAKE_CLI_STATE 'marketplace-snapshot'
 $installed = Join-Path $env:FAKE_CLI_STATE 'installed-version'
+$installedSlug = Join-Path $env:FAKE_CLI_STATE 'installed-slug'
 Add-Content -LiteralPath (Join-Path $env:FAKE_CLI_STATE 'cli.log') -Value ($Argv -join ' ')
 $command = ($Argv | Select-Object -First 3) -join ' '
 if ($command -eq 'plugin marketplace add') {
@@ -26,9 +27,14 @@ if ($command -eq 'plugin marketplace update') {
     exit 0
 }
 $sub = "$($Argv[0]) $($Argv[1])"
+if ($sub -eq 'plugin list') {
+    if (Test-Path -LiteralPath $installedSlug) { Get-Content -LiteralPath $installedSlug }
+    exit 0
+}
 if ($sub -eq 'plugin install') {
     if (Test-Path -LiteralPath $installed) { exit 0 }
     Copy-Item -LiteralPath $snapshot -Destination $installed
+    [System.IO.File]::WriteAllText($installedSlug, $Argv[2])
 }
 if ($sub -eq 'plugin update') {
     if (-not (Test-Path -LiteralPath $installed)) { exit 1 }
@@ -73,12 +79,12 @@ function Install-FromMarketplace {
 $env:PUBLISHED_VERSION = '1.0.0'
 Install-FromMarketplace
 Assert-Eq (Get-InstalledVersion) '1.0.0' 'fresh: the published version is installed'
-Assert-Eq (Get-CliCalls) 'plugin marketplace add rogue-test/rogue-plugins | plugin marketplace update rogue-marketplace | plugin update rogue@rogue-marketplace | plugin install rogue@rogue-marketplace' 'fresh: marketplace added and refreshed, update tried, then install'
+Assert-Eq (Get-CliCalls) 'plugin marketplace add rogue-test/rogue-plugins | plugin marketplace update rogue-marketplace | plugin list | plugin install rogue@rogue-marketplace' 'fresh: marketplace added and refreshed, plugin installed'
 
 $env:PUBLISHED_VERSION = '1.0.1'
 Install-FromMarketplace
 Assert-Eq (Get-InstalledVersion) '1.0.1' 'upgrade: the installed version moves to the newly published version'
-Assert-Eq (Get-CliCalls) 'plugin marketplace add rogue-test/rogue-plugins | plugin marketplace update rogue-marketplace | plugin update rogue@rogue-marketplace' 'upgrade: marketplace refreshed, update alone runs'
+Assert-Eq (Get-CliCalls) 'plugin marketplace add rogue-test/rogue-plugins | plugin marketplace update rogue-marketplace | plugin list | plugin update rogue@rogue-marketplace' 'upgrade: marketplace refreshed, installed plugin updated'
 
 $env:PATH = $prevPath
 $env:USERPROFILE = $prevProfile
