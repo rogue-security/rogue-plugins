@@ -569,25 +569,33 @@ function Configure-Credentials {
     Write-UserEnvFile
 }
 
+function Invoke-PluginCli {
+    param([string]$Cli, [string[]]$CliArgs)
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = (& $Cli @CliArgs 2>&1 | Out-String)
+        return @{ Output = $output; ExitCode = $LASTEXITCODE }
+    } catch {
+        return @{ Output = $_.Exception.Message; ExitCode = 1 }
+    }
+}
+
 function Add-AndRefreshMarketplace {
     param([string]$Cli, [string]$RefreshCommand, [string]$Marketplace)
     Log "Adding marketplace $PluginRepo"
-    try { & $Cli plugin marketplace add $PluginRepo 2>&1 | Out-Null } catch {}
-    $refreshed = $false
-    try { & $Cli plugin marketplace $RefreshCommand $Marketplace 2>&1 | Out-Null; $refreshed = $LASTEXITCODE -eq 0 } catch {}
-    if ($refreshed) { Ok 'Marketplace up to date' }
+    Invoke-PluginCli $Cli @('plugin', 'marketplace', 'add', $PluginRepo) | Out-Null
+    $refresh = Invoke-PluginCli $Cli @('plugin', 'marketplace', $RefreshCommand, $Marketplace)
+    if ($refresh.ExitCode -eq 0) { Ok 'Marketplace up to date' }
     else { Warn2 "Could not refresh the $Cli marketplace - the plugin may stay at its current version." }
 }
 
 function Update-OrInstallPlugin {
     param([string]$Cli, [string]$PluginSlug)
-    $listed = $false
-    try { $installedPlugins = (& $Cli plugin list 2>&1 | Out-String); $listed = $LASTEXITCODE -eq 0 } catch {}
-    if (-not $listed) { Die "$Cli plugin list failed. Run '$Cli plugin list' to see the error." }
-    $command = if ($installedPlugins.Contains($PluginSlug)) { 'update' } else { 'install' }
-    $succeeded = $false
-    try { & $Cli plugin $command $PluginSlug 2>&1 | Out-Null; $succeeded = $LASTEXITCODE -eq 0 } catch {}
-    if (-not $succeeded) { Die "$Cli plugin $command failed. Run '$Cli plugin $command $PluginSlug' to see the error." }
+    $listing = Invoke-PluginCli $Cli @('plugin', 'list')
+    if ($listing.ExitCode -ne 0) { Die "$Cli plugin list failed. Run '$Cli plugin list' to see the error." }
+    $command = if ($listing.Output.Contains($PluginSlug)) { 'update' } else { 'install' }
+    $result = Invoke-PluginCli $Cli @('plugin', $command, $PluginSlug)
+    if ($result.ExitCode -ne 0) { Die "$Cli plugin $command failed. Run '$Cli plugin $command $PluginSlug' to see the error." }
     if ($command -eq 'update') { Ok 'Plugin updated' } else { Ok 'Plugin installed' }
 }
 
@@ -679,9 +687,8 @@ if ($hasCodex) {
     Write-Host "Rogue Security - OpenAI Codex" -ForegroundColor Cyan
     Add-AndRefreshMarketplace -Cli 'codex' -RefreshCommand 'upgrade' -Marketplace $MarketplaceName
     Log "Installing plugin $PluginName@$MarketplaceName"
-    $installed = $false
-    try { & codex plugin add "$PluginName@$MarketplaceName" 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $installed = $true } } catch {}
-    if (-not $installed) { Die "codex plugin add failed. Run 'codex plugin add $PluginName@$MarketplaceName' to see the error." }
+    $codexAdd = Invoke-PluginCli 'codex' @('plugin', 'add', "$PluginName@$MarketplaceName")
+    if ($codexAdd.ExitCode -ne 0) { Die "codex plugin add failed. Run 'codex plugin add $PluginName@$MarketplaceName' to see the error." }
     Ok 'Plugin installed'
     Warn2 'Codex skips untrusted hooks - open /hooks in Codex and trust the Rogue entries once.'
 }

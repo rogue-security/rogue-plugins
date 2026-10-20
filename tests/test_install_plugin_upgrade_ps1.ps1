@@ -17,6 +17,7 @@ $snapshot = Join-Path $env:FAKE_CLI_STATE 'marketplace-snapshot'
 $installed = Join-Path $env:FAKE_CLI_STATE 'installed-version'
 $installedSlug = Join-Path $env:FAKE_CLI_STATE 'installed-slug'
 Add-Content -LiteralPath (Join-Path $env:FAKE_CLI_STATE 'cli.log') -Value ($Argv -join ' ')
+[Console]::Error.WriteLine('notice: the fake plugin CLI writes to stderr on every call')
 $command = ($Argv | Select-Object -First 3) -join ' '
 if ($command -eq 'plugin marketplace add') {
     if (-not (Test-Path -LiteralPath $snapshot)) { [System.IO.File]::WriteAllText($snapshot, $env:PUBLISHED_VERSION) }
