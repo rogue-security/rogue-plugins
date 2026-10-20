@@ -22,6 +22,7 @@ cat > "$BIN/fake-plugin-cli" <<'STUB'
 cli="$(basename "$0")"
 snapshot="$HOME/$cli-marketplace-snapshot"
 installed="$HOME/$cli-installed-version"
+installed_slug="$HOME/$cli-installed-slug"
 echo "$*" >> "$HOME/$cli.log"
 [ -z "${FAKE_CLI_BROKEN:-}" ] || exit 1
 case "$*" in
@@ -34,11 +35,15 @@ case "$*" in
   "plugin marketplace update "*|"plugin marketplace upgrade "*)
     [ -f "$snapshot" ] || exit 1
     printf '%s' "$PUBLISHED_VERSION" > "$snapshot" ;;
+  "plugin list")
+    cat "$installed_slug" 2>/dev/null ;;
   "plugin install "*)
     [ -f "$installed" ] && exit 0
-    cp "$snapshot" "$installed" ;;
+    cp "$snapshot" "$installed"
+    printf '%s\n' "$3" > "$installed_slug" ;;
   "plugin update "*)
     [ -f "$installed" ] || exit 1
+    [ -z "${FAKE_UPDATE_BROKEN:-}" ] || exit 1
     cp "$snapshot" "$installed" ;;
   "plugin add "*)
     cp "$snapshot" "$installed" ;;
@@ -86,6 +91,13 @@ run_install "$H" PUBLISHED_VERSION=1.0.2
 for cli in claude codex copilot; do
   check "second upgrade: $cli moves again" "1.0.2" "$(installed_version "$H" "$cli")"
 done
+
+run_install "$H" PUBLISHED_VERSION=1.0.3 FAKE_UPDATE_BROKEN=1
+[ "$LAST_RC" != 0 ] && ok "failed update: install fails" || bad "failed update: install fails" "exited 0"
+check "failed update: claude stays on its version" "1.0.2" "$(installed_version "$H" claude)"
+check "failed update: the error names the update command" "1" \
+  "$(grep -c "Run 'claude plugin update rogue@rogue-marketplace' to see the error" "$ERR" || :)"
+check "failed update: no success is reported" "0" "$(grep -c 'Plugin installed' "$ERR" || :)"
 
 H="$WORK/broken"
 run_install "$H" PUBLISHED_VERSION=1.0.0 FAKE_CLI_BROKEN=1

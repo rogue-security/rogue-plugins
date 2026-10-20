@@ -162,12 +162,14 @@ add_and_refresh_marketplace() {
 
 update_or_install_plugin() {
   local cli="$1" plugin_slug="$2"
-  if "$cli" plugin update "$plugin_slug" >/dev/null 2>&1; then
+  if "$cli" plugin list 2>/dev/null | grep -qF "$plugin_slug"; then
+    "$cli" plugin update "$plugin_slug" >/dev/null 2>&1 \
+      || die "$cli plugin update failed. Run '$cli plugin update $plugin_slug' to see the error."
     ok "Plugin updated"
-  elif "$cli" plugin install "$plugin_slug" >/dev/null 2>&1; then
-    ok "Plugin installed"
   else
-    die "$cli plugin install failed. Run '$cli plugin install $plugin_slug' to see the error."
+    "$cli" plugin install "$plugin_slug" >/dev/null 2>&1 \
+      || die "$cli plugin install failed. Run '$cli plugin install $plugin_slug' to see the error."
+    ok "Plugin installed"
   fi
 }
 
