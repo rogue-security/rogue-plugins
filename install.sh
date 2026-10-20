@@ -155,14 +155,16 @@ add_and_refresh_marketplace() {
   if "$cli" plugin marketplace "$refresh_command" "$marketplace" >/dev/null 2>&1; then
     ok "Marketplace up to date"
   else
-    warn "Could not add or update marketplace (continuing — it may already be present)"
+    warn "Could not refresh the $cli marketplace — the plugin may stay at its current version"
     [ -n "$add_err" ] && note "${C_DIM}${add_err}${C_RESET}"
   fi
 }
 
 update_or_install_plugin() {
-  local cli="$1" plugin_slug="$2"
-  if "$cli" plugin list 2>/dev/null | grep -qF "$plugin_slug"; then
+  local cli="$1" plugin_slug="$2" installed_plugins
+  installed_plugins="$("$cli" plugin list 2>/dev/null)" \
+    || die "$cli plugin list failed. Run '$cli plugin list' to see the error."
+  if printf '%s\n' "$installed_plugins" | grep -qF "$plugin_slug"; then
     "$cli" plugin update "$plugin_slug" >/dev/null 2>&1 \
       || die "$cli plugin update failed. Run '$cli plugin update $plugin_slug' to see the error."
     ok "Plugin updated"

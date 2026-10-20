@@ -28,6 +28,7 @@ if ($command -eq 'plugin marketplace update') {
 }
 $sub = "$($Argv[0]) $($Argv[1])"
 if ($sub -eq 'plugin list') {
+    if ($env:FAKE_LIST_BROKEN) { exit 1 }
     if (Test-Path -LiteralPath $installedSlug) { Get-Content -LiteralPath $installedSlug }
     exit 0
 }
@@ -85,6 +86,16 @@ $env:PUBLISHED_VERSION = '1.0.1'
 Install-FromMarketplace
 Assert-Eq (Get-InstalledVersion) '1.0.1' 'upgrade: the installed version moves to the newly published version'
 Assert-Eq (Get-CliCalls) 'plugin marketplace add rogue-test/rogue-plugins | plugin marketplace update rogue-marketplace | plugin list | plugin update rogue@rogue-marketplace' 'upgrade: marketplace refreshed, installed plugin updated'
+
+$env:FAKE_LIST_BROKEN = '1'
+$powershell = (Get-Process -Id $PID).Path
+$failedListing = & $powershell -NoProfile -Command "`$env:ROGUE_INSTALL_LIB_ONLY = '1'; . '$installer'; Update-OrInstallPlugin -Cli 'fake-plugin-cli' -PluginSlug 'rogue@rogue-marketplace'" 2>&1 | Out-String
+$failedListingExit = $LASTEXITCODE
+$env:FAKE_LIST_BROKEN = $null
+Assert-Eq $failedListingExit 1 'failed listing: the installer stops'
+Assert-Eq (Get-InstalledVersion) '1.0.1' 'failed listing: the installed version is unchanged'
+Assert-Eq ($failedListing.Contains("Run 'fake-plugin-cli plugin list' to see the error")) $true 'failed listing: the error names the list command'
+Assert-Eq ($failedListing.Contains('Plugin installed')) $false 'failed listing: no success is reported'
 
 $env:PATH = $prevPath
 $env:USERPROFILE = $prevProfile

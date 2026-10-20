@@ -34,8 +34,10 @@ case "$*" in
     printf '%s' "$PUBLISHED_VERSION" > "$snapshot" ;;
   "plugin marketplace update "*|"plugin marketplace upgrade "*)
     [ -f "$snapshot" ] || exit 1
+    [ -z "${FAKE_REFRESH_BROKEN:-}" ] || exit 1
     printf '%s' "$PUBLISHED_VERSION" > "$snapshot" ;;
   "plugin list")
+    [ -z "${FAKE_LIST_BROKEN:-}" ] || exit 1
     cat "$installed_slug" 2>/dev/null ;;
   "plugin install "*)
     [ -f "$installed" ] && exit 0
@@ -99,10 +101,20 @@ check "failed update: the error names the update command" "1" \
   "$(grep -c "Run 'claude plugin update rogue@rogue-marketplace' to see the error" "$ERR" || :)"
 check "failed update: no success is reported" "0" "$(grep -c 'Plugin installed' "$ERR" || :)"
 
+run_install "$H" PUBLISHED_VERSION=1.0.3 FAKE_LIST_BROKEN=1
+[ "$LAST_RC" != 0 ] && ok "failed listing: install fails" || bad "failed listing: install fails" "exited 0"
+check "failed listing: claude stays on its version" "1.0.2" "$(installed_version "$H" claude)"
+check "failed listing: the error names the list command" "1" "$(grep -c "Run 'claude plugin list' to see the error" "$ERR" || :)"
+check "failed listing: no success is reported" "0" "$(grep -c 'Plugin installed' "$ERR" || :)"
+
+run_install "$H" PUBLISHED_VERSION=1.0.4 FAKE_REFRESH_BROKEN=1
+check "failed refresh: claude stays on the last fetched version" "1.0.3" "$(installed_version "$H" claude)"
+check "failed refresh: the warning says the plugin may not move" "3" "$(grep -c 'marketplace — the plugin may stay at its current version' "$ERR" || :)"
+
 H="$WORK/broken"
 run_install "$H" PUBLISHED_VERSION=1.0.0 FAKE_CLI_BROKEN=1
 [ "$LAST_RC" != 0 ] && ok "broken: install fails" || bad "broken: install fails" "exited 0"
 check "broken: the error names the command to retry" "1" \
-  "$(grep -c "Run 'claude plugin install rogue@rogue-marketplace' to see the error" "$ERR" || :)"
+  "$(grep -c "Run 'claude plugin list' to see the error" "$ERR" || :)"
 
 [ "$fails" -eq 0 ] && echo "all plugin upgrade installer tests passed" || { echo "$fails failure(s)"; exit 1; }
