@@ -576,13 +576,14 @@ function Add-AndRefreshMarketplace {
     $refreshed = $false
     try { & $Cli plugin marketplace $RefreshCommand $Marketplace 2>&1 | Out-Null; $refreshed = $LASTEXITCODE -eq 0 } catch {}
     if ($refreshed) { Ok 'Marketplace up to date' }
-    else { Warn2 'Could not add or update marketplace (continuing - it may already be present).' }
+    else { Warn2 "Could not refresh the $Cli marketplace - the plugin may stay at its current version." }
 }
 
 function Update-OrInstallPlugin {
     param([string]$Cli, [string]$PluginSlug)
-    $installedPlugins = ''
-    try { $installedPlugins = (& $Cli plugin list 2>$null | Out-String) } catch {}
+    $listed = $false
+    try { $installedPlugins = (& $Cli plugin list 2>&1 | Out-String); $listed = $LASTEXITCODE -eq 0 } catch {}
+    if (-not $listed) { Die "$Cli plugin list failed. Run '$Cli plugin list' to see the error." }
     $command = if ($installedPlugins.Contains($PluginSlug)) { 'update' } else { 'install' }
     $succeeded = $false
     try { & $Cli plugin $command $PluginSlug 2>&1 | Out-Null; $succeeded = $LASTEXITCODE -eq 0 } catch {}
