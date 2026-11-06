@@ -3,6 +3,7 @@ Tiny HTTP mock that records the inbound headers (so the smoke test can assert
 on x-rogue-event etc.) and returns whatever bytes the env var MOCK_RESPONSE
 contains. Sends MOCK_STATUS as the HTTP status (default 200). MOCK_DELAY (seconds,
 default 0) holds the response back so a bridge's timeout path can be exercised.
+MOCK_CALLS, if set, is a file that gets one "<path> <body>" line per request.
 
 Usage:
     MOCK_RESPONSE='{"hookSpecificOutput":{"permissionDecision":"deny"}}' \
@@ -29,6 +30,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "body": body_in.decode("utf-8", errors="replace"),
                 "path": self.path,
             }, f)
+        calls = os.environ.get("MOCK_CALLS")
+        if calls:
+            with open(calls, "a") as f:
+                f.write(f"{self.path} {body_in.decode('utf-8', errors='replace')}\n")
         time.sleep(float(os.environ.get("MOCK_DELAY", "0")))
         status = int(os.environ.get("MOCK_STATUS", "200"))
         body = os.environ.get("MOCK_RESPONSE", "{}").encode()

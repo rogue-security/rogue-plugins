@@ -43,7 +43,7 @@ suites() {
     antigravity) echo "test_hook_sh_antigravity.sh" ;;
     muse) echo "test_muse_sh.sh" ;;
     gemini) echo "test_hook_mjs.mjs" ;;
-    codex) echo "" ;;
+    codex) echo "test_hook_sh_codex.sh" ;;
   esac
 }
 SHARED_SUITES="test_hook_logs.sh test_ship_logs.sh"
