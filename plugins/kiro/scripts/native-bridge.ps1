@@ -85,8 +85,10 @@ function Invoke-RogueNativeHandoff {
     $copyOut = $proc.StandardOutput.BaseStream.CopyToAsync($stdout)
     $copyErr = $proc.StandardError.BaseStream.CopyToAsync($stderr)
     $feed = [Console]::OpenStandardInput().CopyToAsync($proc.StandardInput.BaseStream)
-    $fed = $feed.Wait($BudgetMs)
-    if ($fed) { $proc.StandardInput.Close() }
+    # A child that exits without reading its input (e.g. unconfigured) breaks the pipe: that counts as fed.
+    $fed = $true
+    try { $fed = $feed.Wait($BudgetMs) } catch {}
+    if ($fed) { try { $proc.StandardInput.Close() } catch {} }
     $left = [int][Math]::Max(0, $BudgetMs - $clock.ElapsedMilliseconds)
     if (-not $fed -or -not $proc.WaitForExit($left)) {
         try { $proc.Kill() } catch {}

@@ -17,7 +17,8 @@ function Read-Text { param([string]$Path) [IO.File]::ReadAllText($Path) }
 
 $H = Join-Path ([IO.Path]::GetTempPath()) ("muse-ps1 ' home-" + [IO.Path]::GetRandomFileName())
 New-Item -ItemType Directory -Path $H | Out-Null
-$env:USERPROFILE = $H; $env:XDG_CONFIG_HOME = Join-Path $H '.config'
+# HOME too: off Windows, a native child resolves the home from it.
+$env:USERPROFILE = $H; $env:HOME = $H; $env:XDG_CONFIG_HOME = Join-Path $H '.config'
 $S = [IO.Path]::Combine($H, '.config', 'muse', 'settings.json')
 $Hooks = [IO.Path]::Combine($H, '.rogue', 'plugins', 'muse', 'hooks.json')
 try {
