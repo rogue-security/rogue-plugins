@@ -26,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
+  EXT_ROOT,
   HOME,
   SCRIPT_DIR,
   SURFACE,
@@ -34,6 +35,7 @@ import {
   headerBytes,
   installId,
 } from "./shared.mjs";
+import { nativeHandoff } from "./native-bridge.mjs";
 
 const EVENT = process.argv[2] || "unknown";
 
@@ -421,6 +423,17 @@ async function main() {
   // rather than re-reading the same three files.
   const env = ENV;
   const apiKey = env.ROGUE_API_KEY || "";
+
+  // The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+  // until then this starts its download and carries on. The 18 s budget sits past the binary's
+  // 15 s request timeout and inside Gemini's 20 s hook timeout. See native-bridge.mjs.
+  if (process.argv[2]) {
+    nativeHandoff(EXT_ROOT, "gemini", ["gemini", EVENT], {
+      settings: env,
+      budgetMs: 18000,
+      failOpen: "{}",
+    });
+  }
 
   // SessionStart: fire the detached roster heartbeat, then fall through to POST
   // the event like any other so it is captured for audit. SessionStart is

@@ -30,6 +30,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellUnquote, isTrustedEnvFile, IS_WIN } from "./shared.mjs";
+import { nativeHandoff } from "./native-bridge.mjs";
 
 // ── constants ──────────────────────────────────────────────────────────────
 const SHIP_ENDPOINT_PATH = "/api/v1/hooks/logs";
@@ -759,6 +760,14 @@ class Shipper {
 
   async run() {
     this.env = loadEnv(this.pluginRoot);
+    // The pinned native bridge ships the same files with the same state once it is installed.
+    if (!this.shipAllLogs) {
+      nativeHandoff(this.pluginRoot, this.shipperSlug, ["ship-logs", this.shipperSlug, this.shipperVersion], {
+        settings: this.env,
+        budgetMs: 600000,
+        failOpen: "",
+      });
+    }
     this.resolveKnobs();
     if (!this.apiKey) {
       this.debug("not configured -> no-op");

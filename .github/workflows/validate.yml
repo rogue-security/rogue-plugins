@@ -246,6 +246,7 @@ jobs:
         run: |
           node --test tests/test_hook_mjs.mjs
           node --test tests/test_env_first_found.mjs
+          node --test tests/test_native_bridge_mjs.mjs
 
       - name: Log-shipper contract (sh)
         # The shipper is a byte-offset state machine over a file another process is

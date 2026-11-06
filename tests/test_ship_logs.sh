@@ -133,6 +133,8 @@ ship_mjs() { # <slug> <version> <family> [VAR=val …]
     export ROGUE_LOG_FILE='' ROGUE_LOG_DIR='' ROGUE_SHIP_ALL=''
     export ROGUE_SHIP_MAX_BYTES='' ROGUE_SHIP_MAX_RUN_BYTES='' ROGUE_SHIP_MAX_LINE_BYTES=''
     for kv in "$@"; do export "${kv?}"; done
+    # The native bridge posts for itself, past ship_probe.mjs's stubbed fetch.
+    if bridge_native; then ROGUE_BASE_URL="$(bridge_capture "$CAP" "${FAKE_CODE:-200}")"; export ROGUE_BASE_URL; fi
     node tests/ship_probe.mjs "$REPO/plugins/gemini" "$_s" "$_v" "$_fam" )
 }
 
@@ -678,8 +680,12 @@ done
 # user.email was silent while every other plugin on that machine shipped under
 # `anon`. There is no actor.sh here to stage the value in — Gemini's caller passes it
 # in the child's env — so the variants are the env value itself.
+# Script-only: these hold ship-logs.mjs to the identity its caller passes in; the native bridge
+# resolves the actor itself (the same cascade heartbeat.mjs uses), so there is no caller value.
 if ! command -v node >/dev/null 2>&1; then
   echo "NOTE: node not found — skipping the Node identity cases"
+elif bridge_native; then
+  echo "NOTE: native bridge — skipping the caller-passed Node identity cases"
 else
   # Staged in an ENV FILE rather than the process env, and that is not incidental:
   # loadEnv merges a process-env var only when it is truthy, so an exported EMPTY
