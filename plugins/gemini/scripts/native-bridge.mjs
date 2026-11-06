@@ -8,7 +8,8 @@
 // process's stdin, and its stdout, stderr and exit code are relayed byte for byte. When it is not,
 // native-bridge-install.mjs is started detached to download it, and the caller carries on.
 //
-// No pin, managed hooks, a relative plugin root or a kill switch all mean: stay on the script.
+// No pin, managed hooks, a relative plugin root, a kill switch or a binary (or its directory) that
+// another user could replace all mean: stay on the script. The last never starts the installer.
 //   ROGUE_NATIVE_BRIDGE=0         every family stays on its script bridge
 //   ROGUE_NATIVE_BRIDGE_GEMINI=0  Gemini does
 //   ROGUE_NATIVE_BRIDGE_DIR       install root instead of ~/.rogue/bin/rogue-hook
@@ -16,7 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { HOME, IS_WIN } from "./shared.mjs";
+import { HOME, IS_WIN, isProtected } from "./shared.mjs";
 
 export function pinnedVersion(root) {
   try {
@@ -42,6 +43,15 @@ function runnable(file) {
     if (!fs.statSync(file).isFile()) return false;
     if (!IS_WIN) fs.accessSync(file, fs.constants.X_OK);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// The binary gets the payload and the API key: it runs only if no other user can replace it.
+function protectedBinary(file) {
+  try {
+    return isProtected(fs.statSync(file)) && isProtected(fs.statSync(path.dirname(file)));
   } catch {
     return false;
   }
@@ -90,6 +100,7 @@ export function nativeHandoff(root, family, args, { settings = {}, budgetMs = 18
     }
     return;
   }
+  if (!protectedBinary(bin)) return;
 
   // stdin is inherited, so the binary reads the agent's payload bytes untouched. The answer is
   // captured rather than inherited so a killed binary can be replaced by the fail-open answer.

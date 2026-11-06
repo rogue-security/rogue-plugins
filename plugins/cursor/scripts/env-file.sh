@@ -4,10 +4,17 @@
 # configuration must belong to root; neither group nor other may write it.
 rogue_env_is_trusted() (
   [ -f "$1" ] && [ -r "$1" ] || exit 1
+  case "$1:${2:-0}" in /etc/rogue/env:*|*:1) rogue_path_is_protected "$1" 1 ;; *) rogue_path_is_protected "$1" ;; esac
+)
+
+# The ownership rule itself, for a file or a directory: owned by the current user
+# or root (root only when the second argument is 1), and neither group nor other
+# may write it.
+rogue_path_is_protected() ( # <path> [1]
   info=$(stat -Lc '%u %a' "$1" 2>/dev/null) || info=$(stat -Lf '%u %Lp' "$1" 2>/dev/null) || exit 1
   owner=${info%% *}; mode=${info#* }
   case "$owner:$mode" in *[!0-9:]*|:*) exit 1 ;; esac
-  case "$1:${2:-0}" in /etc/rogue/env:*|*:1) [ "$owner" = 0 ] || exit 1 ;; esac
+  [ "${2:-0}" != 1 ] || [ "$owner" = 0 ] || exit 1
   [ "$owner" = 0 ] || [ "$owner" = "$(id -u)" ] || exit 1
   [ "$((0$mode & 022))" = 0 ]
 )

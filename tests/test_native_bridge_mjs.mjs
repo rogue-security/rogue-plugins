@@ -133,7 +133,11 @@ test("pin, binary missing: hook.mjs answers itself and starts the download", pos
   requests = [];
   const r = await hook("BeforeTool", "{}", { ROGUE_API_KEY: "", ROGUE_NATIVE_BRIDGE_RETRY: "0" });
   assert.equal(r.out, "{}");
-  assert.ok(await until(() => installed("0.1.0")), "the detached download installed it");
+  // The log line follows the rename, so wait for both.
+  assert.ok(
+    await until(() => installed("0.1.0") && binaryLog().includes("installed")),
+    "the detached download installed it",
+  );
   assert.match(binaryLog(), /rogue-hook 0\.1\.0: installed/);
   assert.match(requests[0], /^\/api\/v1\/hooks\/download\?version=0\.1\.0&os=/);
   assert.match(requests[0], /key=test-key$/);
@@ -170,6 +174,18 @@ test("a binary that outlives the budget is killed and the fail-open answer writt
   assert.equal(r.out, "{}");
   assert.equal(r.code, 0);
   assert.ok(Date.now() - started < 4000, "the budget bounds the wait");
+});
+
+test("a binary another user could replace never runs", posix, async () => {
+  const bin = path.join(BIN_DIR, "0.1.0", "rogue-hook");
+  const native = `{"native":"gemini BeforeTool root=${PLUGIN}","stdin":{}}`;
+  fs.chmodSync(bin, 0o757);
+  assert.equal((await hook("BeforeTool", "{}", { ROGUE_API_KEY: "" })).out, "{}");
+  fs.chmodSync(bin, 0o755);
+  fs.chmodSync(path.dirname(bin), 0o775);
+  assert.equal((await hook("BeforeTool", "{}", { ROGUE_API_KEY: "" })).out, "{}");
+  fs.chmodSync(path.dirname(bin), 0o755);
+  assert.equal((await hook("BeforeTool", "{}")).out, native);
 });
 
 test("managed hooks, kill switches and a relative root keep the script", posix, async () => {

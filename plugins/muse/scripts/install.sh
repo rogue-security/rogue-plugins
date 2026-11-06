@@ -113,7 +113,7 @@ if [ "$SOURCE" != "$ROOT" ]; then
   mkdir -p "$ROOT" && cp -R "$SOURCE/scripts" "$SOURCE/plugin.json" "$ROOT/" || die "Cannot copy the bridge to $ROOT"
   # The native bridge pin travels with the scripts; a bundle without one stays on them.
   if [ -f "$SOURCE/rogue-hook.json" ]; then cp "$SOURCE/rogue-hook.json" "$ROOT/" || die "Cannot copy the bridge to $ROOT"
-  else rm -f "$ROOT/rogue-hook.json"; fi
+  else rm -f "$ROOT/rogue-hook.json" || die "Cannot remove the old native bridge pin $ROOT/rogue-hook.json"; fi
 fi
 render_hooks > "$HOOKS.tmp" && mv -f "$HOOKS.tmp" "$HOOKS" || die "Cannot write $HOOKS"
 

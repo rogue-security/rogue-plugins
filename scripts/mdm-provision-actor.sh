@@ -10,7 +10,7 @@
 # The hooks read ONE env file: the first of /etc/rogue/env, <plugin-root>/env,
 # ~/.rogue-env that holds ROGUE_API_KEY, and nothing from the others. So this
 # file must carry the key to be read at all, and once it does it replaces the
-# bundled env entirely — mode and the auto-update pin included.
+# bundled env entirely — mode included.
 #
 # Usage — env vars (recommended for MDM payloads that substitute their own
 # placeholders for the assigned user):

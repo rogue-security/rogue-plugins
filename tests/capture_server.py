@@ -2,6 +2,8 @@
 
     python3 tests/capture_server.py <port> <ctrl-dir>
 
+Port 0 picks a free port; once listening, the server writes the port it got to <ctrl-dir>/port.
+
 Per request it reads the case's settings from <ctrl-dir>, which the suite rewrites before every
 run, and records exactly what the fake curl would have:
   ctrl/cap    capture directory: the body goes to <cap>/body.N, the first free N
@@ -58,4 +60,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+with open(os.path.join(CTRL, "port.tmp"), "w") as f:
+    f.write(str(server.server_address[1]))
+os.replace(os.path.join(CTRL, "port.tmp"), os.path.join(CTRL, "port"))
+server.serve_forever()

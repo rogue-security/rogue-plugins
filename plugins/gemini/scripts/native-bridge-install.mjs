@@ -131,7 +131,8 @@ async function main() {
   if (typeof url !== "string" || !url) giveUp(`no download URL for ${key}`);
 
   try {
-    fs.mkdirSync(path.join(dir, version), { recursive: true });
+    // The hand-off runs only a binary in a directory nobody else can write.
+    fs.mkdirSync(path.join(dir, version), { recursive: true, mode: 0o755 });
   } catch {
     giveUp(`cannot create ${path.join(dir, version)}`);
   }

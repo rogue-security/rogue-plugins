@@ -37,6 +37,8 @@ DIR="$(rogue_native_dir)"
 DEST="$DIR/$VERSION/rogue-hook"
 [ -x "$DEST" ] && exit 0
 
+# The hand-off runs only a binary in a directory nobody else can write.
+umask 022
 mkdir -p "$HOME/.rogue" "$DIR" 2>/dev/null || exit 0
 LOG="$HOME/.rogue/hook-binary.log"
 say() { printf '%s rogue-hook %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION" "$1" >> "$LOG" 2>/dev/null; }
@@ -48,7 +50,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   rmdir "$LOCK" 2>/dev/null; mkdir "$LOCK" 2>/dev/null || exit 0
 fi
 TMP=""
-trap 'rmdir "$LOCK" 2>/dev/null; [ -n "$TMP" ] && rm -f "$TMP"' EXIT
+trap 'rmdir "$LOCK" 2>/dev/null; [ -n "$TMP" ] && rm -f "$TMP" "$TMP.version"' EXIT
 STAMP="$DIR/.attempt-$VERSION"
 RETRY="${ROGUE_NATIVE_BRIDGE_RETRY:-900}"
 case "$RETRY" in ''|*[!0-9]*) RETRY=900 ;; esac
@@ -94,7 +96,16 @@ GOT="$(sha256 "$TMP")"
 [ "$GOT" = "$WANT" ] || give_up "sha256 mismatch: got $GOT, pinned $WANT"
 chmod 755 "$TMP" 2>/dev/null
 # Catches a binary this machine cannot run (noexec mount, wrong arch) before a hook would exec it.
-[ "$("$TMP" --version 2>/dev/null)" = "rogue-hook $VERSION" ] || give_up "downloaded binary does not run here"
+# Bounded like native-bridge-install.mjs: one that stalls is killed rather than holding the lock.
+"$TMP" --version >"$TMP.version" 2>/dev/null &
+PROBE=$!
+WAITED=0
+while kill -0 "$PROBE" 2>/dev/null && [ "$WAITED" -lt 10 ]; do sleep 1; WAITED=$((WAITED + 1)); done
+kill -9 "$PROBE" 2>/dev/null
+wait "$PROBE" 2>/dev/null
+REPORTED="$(cat "$TMP.version" 2>/dev/null)"
+rm -f "$TMP.version"
+[ "$REPORTED" = "rogue-hook $VERSION" ] || give_up "downloaded binary does not run here"
 mv -f "$TMP" "$DEST" 2>/dev/null || give_up "cannot install $DEST"
 TMP=""
 rm -f "$STAMP" 2>/dev/null

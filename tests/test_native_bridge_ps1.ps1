@@ -32,15 +32,24 @@ $binDir = Join-Path (Join-Path (Join-Path $sbHome '.rogue') 'bin') 'rogue-hook'
 New-Item -ItemType Directory -Force -Path $srv, $sbHome | Out-Null
 Copy-Item -Recurse -LiteralPath (Join-Path $repo 'plugins/rogue') -Destination $plugin
 Remove-Item -LiteralPath (Join-Path $plugin 'rogue-hook.json') -ErrorAction SilentlyContinue
-$port = Get-Random -Minimum 30000 -Maximum 40000
 $python = if ($onWindows) { 'python' } else { 'python3' }
-$server = Start-Process $python -ArgumentList @((Join-Path $repo 'tests/native_bridge_server.py'), $port, $srv) -PassThru
-Start-Sleep -Milliseconds 800
+# The mock picks a free port and reports it once listening.
+$server = Start-Process $python -ArgumentList @((Join-Path $repo 'tests/native_bridge_server.py'), 0, $srv) -PassThru
+$portFile = Join-Path $srv 'port'
+foreach ($i in 1..100) { if ((Test-Path -LiteralPath $portFile) -or $server.HasExited) { break }; Start-Sleep -Milliseconds 100 }
+if (-not (Test-Path -LiteralPath $portFile)) {
+    Write-Host 'FAIL: tests/native_bridge_server.py did not start'
+    if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+    Remove-Item -Recurse -Force -LiteralPath $work -ErrorAction SilentlyContinue
+    exit 1
+}
+$port = [IO.File]::ReadAllText($portFile).Trim()
 [IO.File]::WriteAllText((Join-Path $sbHome '.rogue-env'), "export ROGUE_API_KEY=test-key`nexport ROGUE_BASE_URL=http://127.0.0.1:$port`n")
 if (-not $onWindows) { & chmod 600 (Join-Path $sbHome '.rogue-env') }
 
-# The stub answers --version, echoes its arguments, ROGUE_PLUGIN_ROOT and stdin, writes "err" to
-# stderr and exits 2 when the first argument is "kiro" (the one family that denies by exit code).
+# The stub answers --version (never, with STUB_HANG), echoes its arguments, ROGUE_PLUGIN_ROOT and
+# stdin, writes "err" to stderr and exits 2 when the first argument is "kiro" (the one family that
+# denies by exit code). With STUB_SLEEP=<s> it first writes half an answer and sleeps.
 function New-Stub {
     param([string]$Version)
     $blob = Join-Path $srv 'blob'
@@ -49,9 +58,17 @@ function New-Stub {
 using System; using System.IO; using System.Text;
 public static class Stub {
     public static int Main(string[] a) {
-        if (a.Length > 0 && a[0] == "--version") { Console.Out.Write("rogue-hook $Version\n"); return 0; }
+        if (a.Length > 0 && a[0] == "--version") {
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("STUB_HANG"))) System.Threading.Thread.Sleep(30000);
+            Console.Out.Write("rogue-hook $Version\n"); return 0;
+        }
         var input = new MemoryStream(); Console.OpenStandardInput().CopyTo(input);
         var o = Console.OpenStandardOutput();
+        var nap = Environment.GetEnvironmentVariable("STUB_SLEEP");
+        if (!string.IsNullOrEmpty(nap)) {
+            var part = Encoding.UTF8.GetBytes("{\"partial\":"); o.Write(part, 0, part.Length); o.Flush();
+            System.Threading.Thread.Sleep(int.Parse(nap) * 1000);
+        }
         var head = Encoding.UTF8.GetBytes("{\"native\":\"" + string.Join(" ", a) + " root=" + Environment.GetEnvironmentVariable("ROGUE_PLUGIN_ROOT").Replace("\\", "/") + "\",\"stdin\":");
         o.Write(head, 0, head.Length); var b = input.ToArray(); o.Write(b, 0, b.Length); o.WriteByte(125); o.Flush();
         if (a.Length > 0 && a[0] == "kiro") { Console.Error.Write("err"); return 2; }
@@ -63,7 +80,9 @@ public static class Stub {
         Add-Type -TypeDefinition $src -OutputAssembly $out -OutputType ConsoleApplication
         Copy-Item -LiteralPath $out -Destination $blob -Force
     } else {
-        $sh = "#!/bin/sh`n[ `"`$1`" = --version ] && { echo `"rogue-hook $Version`"; exit 0; }`n" +
+        $sh = "#!/bin/sh`n[ `"`$1`" = --version ] && [ -n `"`$STUB_HANG`" ] && exec sleep 30`n" +
+            "[ `"`$1`" = --version ] && { echo `"rogue-hook $Version`"; exit 0; }`n" +
+            "[ -n `"`$STUB_SLEEP`" ] && { printf '{`"partial`":'; sleep `"`$STUB_SLEEP`"; }`n" +
             "printf '{`"native`":`"%s %s root=%s`",`"stdin`":%s}' `"`$1`" `"`$2`" `"`$ROGUE_PLUGIN_ROOT`" `"`$(cat)`"`n" +
             "[ `"`$1`" = kiro ] && { printf err >&2; exit 2; }`nexit 0`n"
         [IO.File]::WriteAllText($blob, $sh)
@@ -100,21 +119,31 @@ function Invoke-Fresh {
     $p.WaitForExit()
     return @{ Out = $out; Err = $err; Code = $p.ExitCode }
 }
-$lib = (Join-Path $plugin 'scripts/native-bridge.ps1').Replace("'", "''")
 function Invoke-Handoff {
-    param([string[]]$Arguments, [string]$Stdin = '', [hashtable]$Env = @{}, [string]$Settings = '@{}', [string]$Root = $plugin)
+    param([string[]]$Arguments, [string]$Stdin = '', [hashtable]$Env = @{}, [string]$Settings = '@{}', [string]$Root = $plugin, [int]$BudgetMs = 10000)
     $argList = ($Arguments | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
+    $lib = (Join-Path $Root 'scripts/native-bridge.ps1').Replace("'", "''")
     $code = ". ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$lib'))); " +
-        "Invoke-RogueNativeHandoff -Root '$($Root.Replace("'", "''"))' -Family $($Arguments[0]) -Arguments @($argList) -Settings $Settings -BudgetMs 10000 -FailOpen '{}'; " +
+        "Invoke-RogueNativeHandoff -Root '$($Root.Replace("'", "''"))' -Family $($Arguments[0]) -Arguments @($argList) -Settings $Settings -BudgetMs $BudgetMs -FailOpen '{}'; " +
         "[Console]::Out.Write('kept')"
     Invoke-Fresh -Code $code -Stdin $Stdin -Env $Env
 }
 function Invoke-Install {
+    param([hashtable]$Env = @{})
     $installer = (Join-Path $plugin 'scripts/native-bridge-install.ps1').Replace("'", "''")
     [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
-    Invoke-Fresh -Code "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$installer'))) '$($plugin.Replace("'", "''"))'" | Out-Null
+    Invoke-Fresh -Code "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$installer'))) '$($plugin.Replace("'", "''"))'" -Env $Env | Out-Null
 }
-function Get-Installed { param([string]$Version) Test-Path -LiteralPath (Join-Path (Join-Path $binDir $Version) $exe) -PathType Leaf }
+function Get-Installed { param([string]$Version, [string]$Dir = $binDir) Test-Path -LiteralPath (Join-Path (Join-Path $Dir $Version) $exe) -PathType Leaf }
+# Lets every identity write $Path (Everyone on Windows, group and other elsewhere), or restores it.
+function Set-Exposed {
+    param([string]$Path, [bool]$On)
+    if (-not $onWindows) { & chmod $(if ($On) { 'go+w' } else { 'go-w' }) $Path; return }
+    $acl = Get-Acl -LiteralPath $Path
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule ((New-Object System.Security.Principal.SecurityIdentifier 'S-1-1-0'), 'Write', 'Allow')
+    if ($On) { $acl.AddAccessRule($rule) } else { [void]$acl.RemoveAccessRule($rule) }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
 function Get-Log { $p = Join-Path (Join-Path $sbHome '.rogue') 'hook-binary.log'; if (Test-Path $p) { Get-Content -Raw $p } else { '' } }
 
 try {
@@ -127,7 +156,8 @@ try {
     Write-Host 'pin, binary missing: kept, and the detached download installs it'
     Set-Pin '0.1.0' (Get-Sha (Join-Path $srv 'blob'))
     Check 'kept while missing' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
-    foreach ($i in 1..100) { if (Get-Installed '0.1.0') { break }; Start-Sleep -Milliseconds 100 }
+    # The log line follows the rename, so wait for both.
+    foreach ($i in 1..100) { if ((Get-Installed '0.1.0') -and (Get-Log).Contains('installed')) { break }; Start-Sleep -Milliseconds 100 }
     Check 'installed' $true (Get-Installed '0.1.0')
     Contains 'log reports install' 'rogue-hook 0.1.0: installed' (Get-Log)
     Contains 'lookup carries version' '/api/v1/hooks/download?version=0.1.0&os=' (Get-Content -Raw (Join-Path $srv 'requests'))
@@ -146,6 +176,51 @@ try {
     Check 'the family switch from the env file keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_CLAUDE = '0' }").Out
     Check 'a relative root never hands off' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} '@{}' 'plugin').Out
 
+    Write-Host 'a child that outlives the budget: only the fail-open answer is written'
+    $r = Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ STUB_SLEEP = '5' } -BudgetMs 1500
+    Check 'fail-open answer alone' '{}' $r.Out
+    Check 'exit 0' 0 $r.Code
+
+    Write-Host 'ROGUE_NATIVE_BRIDGE_DIR from the env file in use'
+    $empty = Join-Path $work 'empty'
+    New-Item -ItemType Directory -Force -Path $empty | Out-Null
+    $r = Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ HOME = $empty; USERPROFILE = $empty } "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($binDir.Replace("'", "''"))' }"
+    Check 'the hand-off finds the binary there' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" $r.Out
+    $altHome = Join-Path $work 'alt-home'
+    $altDir = Join-Path $work 'alt-bin'
+    New-Item -ItemType Directory -Force -Path $altHome | Out-Null
+    [IO.File]::WriteAllText((Join-Path $altHome '.rogue-env'), "export ROGUE_API_KEY=test-key`nexport ROGUE_BASE_URL=http://127.0.0.1:$port`nexport ROGUE_NATIVE_BRIDGE_DIR=$altDir`n")
+    if (-not $onWindows) { & chmod 600 (Join-Path $altHome '.rogue-env') }
+    Invoke-Install @{ HOME = $altHome; USERPROFILE = $altHome }
+    Check 'the installer installs there' $true (Get-Installed '0.1.0' $altDir)
+
+    Write-Host 'a binary another user could replace never runs'
+    $bin = Join-Path (Join-Path $binDir '0.1.0') $exe
+    Set-Exposed $bin $true
+    Check 'exposed binary keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+    Set-Exposed $bin $false
+    if (-not $onWindows) {
+        Set-Exposed (Split-Path -Parent $bin) $true
+        Check 'exposed directory keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+        Set-Exposed (Split-Path -Parent $bin) $false
+    }
+    Check 'a protected binary runs again' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+
+    Write-Host 'inside the retry interval no installer is started'
+    $probeRoot = Join-Path $work 'probe-plugin'
+    New-Item -ItemType Directory -Force -Path (Join-Path $probeRoot 'scripts') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $plugin 'scripts/native-bridge.ps1') -Destination (Join-Path $probeRoot 'scripts')
+    [IO.File]::WriteAllText((Join-Path $probeRoot 'rogue-hook.json'), "{`n  `"version`": `"0.9.0`"`n}`n")
+    $started = Join-Path $work 'installer-started'
+    [IO.File]::WriteAllText((Join-Path $probeRoot 'scripts/native-bridge-install.ps1'), "[IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'yes')")
+    [IO.File]::WriteAllText((Join-Path $binDir '.attempt-0.9.0'), '0')
+    Check 'kept' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ ROGUE_NATIVE_BRIDGE_RETRY = '900' } -Root $probeRoot).Out
+    Start-Sleep -Seconds 3
+    Check 'no installer started' $false (Test-Path -LiteralPath $started)
+    Check 'kept' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ ROGUE_NATIVE_BRIDGE_RETRY = '0' } -Root $probeRoot).Out
+    foreach ($i in 1..100) { if (Test-Path -LiteralPath $started) { break }; Start-Sleep -Milliseconds 100 }
+    Check 'with no retry interval it is' $true (Test-Path -LiteralPath $started)
+
     Write-Host 'a download that does not match the pin is never installed'
     New-Stub '0.2.0'
     Set-Pin '0.2.0' ('0' * 64)
@@ -158,6 +233,19 @@ try {
     Invoke-Install
     Check 'no binary' $false (Get-Installed '0.3.0')
     Contains 'log reports it' 'does not run here' (Get-Log)
+
+    Write-Host 'a failed attempt is not retried inside the retry interval'
+    Invoke-Install @{ ROGUE_NATIVE_BRIDGE_RETRY = '900' }
+    Check 'no request' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
+
+    Write-Host 'a binary that never answers --version is killed and not installed'
+    New-Stub '0.5.0'
+    Set-Pin '0.5.0' (Get-Sha (Join-Path $srv 'blob'))
+    Invoke-Install @{ STUB_HANG = '1' }
+    Check 'no binary' $false (Get-Installed '0.5.0')
+    Contains 'log reports it' '0.5.0: downloaded binary does not run here' (Get-Log)
+    Check 'no temp file left' 0 @(Get-ChildItem -Force -LiteralPath (Join-Path $binDir '0.5.0')).Count
+    Check 'the lock is released' $false (Test-Path -LiteralPath (Join-Path $binDir '.lock-0.5.0'))
 } finally {
     if ($server) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -Recurse -Force -LiteralPath $work -ErrorAction SilentlyContinue

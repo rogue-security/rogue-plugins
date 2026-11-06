@@ -189,8 +189,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/
 
 The script accepts its inputs via either env vars (`ROGUE_API_KEY`,
 `ROGUE_ACTOR_EMAIL`, `ROGUE_ACTOR_NAME`) or CLI args (`--key`, `--email`,
-`--name`). Use whichever your MDM substitutes natively. `--mode`,
-`--base-url` and `--auto-update` are optional.
+`--name`). Use whichever your MDM substitutes natively. `--mode` and
+`--base-url` are optional.
 
 ### Offline / air-gapped fleets
 
@@ -268,8 +268,8 @@ values override the process environment, and a file without the key is skipped:
 
 | Source | Written by | Carries |
 | --- | --- | --- |
-| `/etc/rogue/env` | MDM script (Step 3) | Org API key, identity, mode, auto-update pin; first candidate |
-| `${CLAUDE_PLUGIN_ROOT}/env` | Compile script (Step 1) | Org API key, enforcement mode, auto-update pin; read until Step 3 lands |
+| `/etc/rogue/env` | MDM script (Step 3) | Org API key, identity, mode; first candidate |
+| `${CLAUDE_PLUGIN_ROOT}/env` | Compile script (Step 1) | Org API key, enforcement mode, `ROGUE_AUTO_UPDATE=0` for updaters of older releases; read until Step 3 lands |
 | `~/.rogue-env` | User running `/rogue:setup` | Per-user; not used in managed deployments |
 
 ## Operations
@@ -289,8 +289,10 @@ When new plugin behavior ships (e.g. new hook events, schema changes),
 recompile with `--from vX.Y.Z` to pin a specific release, then upload the
 new zip to the Claude management UI. The updater recognises a compiled bundle
 by its own `env` file and leaves it alone, so user devices never auto-pull from
-GitHub — every update to a compiled bundle is admin-controlled. Every other
-install updates itself; there is no opt-out.
+GitHub — every update to a compiled bundle is admin-controlled. The compiled
+`env` also carries `ROGUE_AUTO_UPDATE=0`, the only signal the updater of a
+release older than the bundled-`env` check obeys. Every other install updates
+itself; there is no opt-out.
 
 ### User reassignment / device transfer
 

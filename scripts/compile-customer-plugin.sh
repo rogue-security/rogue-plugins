@@ -220,7 +220,9 @@ PY
   printf 'export ROGUE_API_KEY=%q\n'      "$KEY"
   printf 'export ROGUE_PRETOOLUSE_ON_BLOCK=%q\n' "$MODE"
   [ -n "$BASE_URL" ] && printf 'export ROGUE_BASE_URL=%q\n' "$BASE_URL"
-  # The bundled version is the truth — don't let auto-update clobber it.
+  # For bundles compiled --from an older release: their updater stands down only on this line. The
+  # current updater ignores it and recognises a compiled bundle by this env file.
+  echo 'export ROGUE_AUTO_UPDATE=0'
 } > "$STAGE/env"
 chmod 600 "$STAGE/env"
 

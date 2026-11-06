@@ -8,14 +8,24 @@ bridge_native() { [ "${ROGUE_TEST_BRIDGE:-script}" = native ]; }
 
 BRIDGE_CTRL=""
 BRIDGE_URL=""
+# The server picks a free port and reports it once listening; a server that dies or stays silent
+# stops the suite rather than letting it talk to whatever else holds a port.
 bridge_start() {
   bridge_native || return 0
   BRIDGE_CTRL="$(mktemp -d)"
-  _port=$((RANDOM % 10000 + 40000))
-  python3 "$(dirname "${BASH_SOURCE[0]}")/../capture_server.py" "$_port" "$BRIDGE_CTRL" &
+  python3 "$(dirname "${BASH_SOURCE[0]}")/../capture_server.py" 0 "$BRIDGE_CTRL" &
   BRIDGE_PID=$!
-  for _ in $(seq 1 50); do nc -z 127.0.0.1 "$_port" 2>/dev/null && break; sleep 0.1; done
-  BRIDGE_URL="http://127.0.0.1:$_port"
+  for _ in $(seq 1 100); do
+    [ -s "$BRIDGE_CTRL/port" ] && break
+    kill -0 "$BRIDGE_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+  if [ ! -s "$BRIDGE_CTRL/port" ]; then
+    echo "FAIL: tests/capture_server.py did not start" >&2
+    bridge_stop
+    exit 1
+  fi
+  BRIDGE_URL="http://127.0.0.1:$(cat "$BRIDGE_CTRL/port")"
 }
 
 bridge_stop() {

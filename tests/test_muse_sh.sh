@@ -65,6 +65,13 @@ check "a failed settings write fails the install" '! PATH="$H/shim:$PATH" run &&
 printf '{}' > "$S"; mkdir "$S.rogue-lock"
 check "refuses while locked" '! run && grep -q "remove $S.rogue-lock and retry" "$H/err" && [ "$(cat "$S")" = "{}" ]'
 rmdir "$S.rogue-lock"
+# A bundle without a pin removes the installed one; when that fails the install does too, or the
+# hooks would keep handing events to the old binary. A directory stands in for an undeletable pin.
+if [ ! -f "$REPO/plugins/muse/rogue-hook.json" ]; then
+  mkdir -p "$H/.rogue/plugins/muse/rogue-hook.json/x"
+  check "an old pin that cannot be removed fails the install" '! run && grep -q "Cannot remove the old native bridge pin" "$H/err" && [ "$(cat "$S")" = "{}" ]'
+  rm -rf "$H/.rogue/plugins/muse/rogue-hook.json"
+fi
 
 # hook.sh relays the native response and fails open.
 run

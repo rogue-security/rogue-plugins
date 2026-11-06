@@ -8,8 +8,14 @@ if ($PSVersionTable.PSVersion.Major -eq 5) {
 # administrators/system. System-wide configuration cannot be user-owned.
 function Test-RogueEnvFile {
     param([string]$Path, [switch]$System)
+    try { if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false } } catch { return $false }
+    return (Test-RogueProtectedPath $Path -System:$System)
+}
+
+# The ownership rule itself: for a file anywhere, and off Windows for a directory too.
+function Test-RogueProtectedPath {
+    param([string]$Path, [switch]$System)
     try {
-        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
         if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
             $info = & stat -Lc '%u %a' $Path 2>$null
             if ($LASTEXITCODE -ne 0) { $info = & stat -Lf '%u %Lp' $Path 2>$null }

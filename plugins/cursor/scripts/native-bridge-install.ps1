@@ -12,11 +12,30 @@ if (-not $Root -or -not [System.IO.Path]::IsPathRooted($Root)) { exit 0 }
 try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch { exit 0 }
 $version = Get-RogueNativeVersion $Root
 if (-not $version) { exit 0 }
-$dir = Get-RogueNativeDir
+$onWindows = -not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)
+$home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+
+# Same env file rule as the hooks, read first so ROGUE_NATIVE_BRIDGE_DIR resolves as theirs does: the
+# first trusted file holding ROGUE_API_KEY is used alone. Without the trust helper no file is read.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/env-file.ps1') -ErrorAction Stop))) } catch {}
+$creds = @{ ROGUE_API_KEY = $env:ROGUE_API_KEY; ROGUE_BASE_URL = $env:ROGUE_BASE_URL; ROGUE_NATIVE_BRIDGE_DIR = $env:ROGUE_NATIVE_BRIDGE_DIR }
+$machine = if ($onWindows) { Join-Path $env:ProgramData 'rogue\env' } else { '/etc/rogue/env' }
+$files = if (Get-Command Test-RogueEnvFile -ErrorAction SilentlyContinue) { @($machine, (Join-Path $Root 'env'), (Join-Path $home_ '.rogue-env')) } else { @() }
+foreach ($f in $files) {
+    if (-not (Test-RogueEnvFile $f -System:($f -eq $machine))) { continue }
+    $vals = @{}
+    foreach ($line in (Get-Content -LiteralPath $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { $vals[$Matches[1]] = $Matches[2].Trim().Trim("'").Trim('"') }
+    }
+    if (-not ([string]$vals['ROGUE_API_KEY']).Trim()) { continue }
+    foreach ($k in @($creds.Keys)) { if ($vals.ContainsKey($k)) { $creds[$k] = $vals[$k] } }
+    break
+}
+
+$dir = Get-RogueNativeDir $creds
 $dest = Join-Path (Join-Path $dir $version) (Get-RogueNativeExe)
 if (Test-Path -LiteralPath $dest -PathType Leaf) { exit 0 }
 
-$home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 $rogueDir = Join-Path $home_ '.rogue'
 New-Item -ItemType Directory -Force -Path $rogueDir, $dir | Out-Null
 $logPath = Join-Path $rogueDir 'hook-binary.log'
@@ -30,7 +49,7 @@ function Lock-RogueInstall {
     try { [System.IO.File]::Open($lock, 'CreateNew', 'Write').Dispose(); return $true } catch { return $false }
 }
 if (-not (Lock-RogueInstall)) {
-    $lockItem = Get-Item -LiteralPath $lock -ErrorAction SilentlyContinue
+    $lockItem = Get-Item -Force -LiteralPath $lock -ErrorAction SilentlyContinue
     if ($lockItem -and $lockItem.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-10)) { exit 0 }
     Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
     if (-not (Lock-RogueInstall)) { exit 0 }
@@ -40,7 +59,7 @@ try {
     $stamp = Join-Path $dir ".attempt-$version"
     $retry = 900
     if ($env:ROGUE_NATIVE_BRIDGE_RETRY -match '^[0-9]{1,9}$') { $retry = [int]$env:ROGUE_NATIVE_BRIDGE_RETRY }
-    $last = Get-Item -LiteralPath $stamp -ErrorAction SilentlyContinue
+    $last = Get-Item -Force -LiteralPath $stamp -ErrorAction SilentlyContinue
     if ($retry -gt 0 -and $last -and $last.LastWriteTimeUtc -le (Get-Date).ToUniversalTime() -and
         $last.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddSeconds(-$retry)) { exit 0 }
     Set-Content -LiteralPath $stamp -Value ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
@@ -50,7 +69,6 @@ try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch {}
 
-    $onWindows = -not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)
     if ($onWindows) {
         # An x64 PowerShell on an ARM64 machine reports AMD64 and keeps the real arch in PROCESSOR_ARCHITEW6432.
         $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -69,21 +87,6 @@ try {
     if (-not $m.Success) { Give-Up "no pinned sha256 for $platform" }
     $want = $m.Groups[1].Value
 
-    # Same env file rule as the hooks: the first trusted file holding ROGUE_API_KEY is used alone.
-    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/env-file.ps1') -ErrorAction Stop))) } catch {}
-    $creds = @{ ROGUE_API_KEY = $env:ROGUE_API_KEY; ROGUE_BASE_URL = $env:ROGUE_BASE_URL }
-    $machine = if ($onWindows) { Join-Path $env:ProgramData 'rogue\env' } else { '/etc/rogue/env' }
-    foreach ($f in @($machine, (Join-Path $Root 'env'), (Join-Path $home_ '.rogue-env'))) {
-        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
-        if ((Get-Command Test-RogueEnvFile -ErrorAction SilentlyContinue) -and -not (Test-RogueEnvFile $f)) { continue }
-        $vals = @{}
-        foreach ($line in (Get-Content -LiteralPath $f)) {
-            if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { $vals[$Matches[1]] = $Matches[2].Trim().Trim("'").Trim('"') }
-        }
-        if (-not ([string]$vals['ROGUE_API_KEY']).Trim()) { continue }
-        foreach ($k in @($creds.Keys)) { if ($vals.ContainsKey($k)) { $creds[$k] = $vals[$k] } }
-        break
-    }
     if (-not $creds.ROGUE_API_KEY) { Give-Up 'no ROGUE_API_KEY' }
     $base = if ($creds.ROGUE_BASE_URL) { $creds.ROGUE_BASE_URL.TrimEnd('/') } else { 'https://api.rogue.security' }
     try {
@@ -93,13 +96,27 @@ try {
     if (-not $resp.url) { Give-Up "no download URL for $platform" }
 
     New-Item -ItemType Directory -Force -Path (Join-Path $dir $version) | Out-Null
+    # The hand-off runs only a binary in a directory nobody else can write.
+    if (-not $onWindows) { & chmod 755 (Join-Path $dir $version) }
     $tmp = Join-Path (Join-Path $dir $version) ".rogue-hook.download.$PID$(if ($onWindows) { '.exe' })"
     try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $resp.url -OutFile $tmp } catch { Give-Up 'download failed' }
     $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
     if ($got -ne $want) { Give-Up "sha256 mismatch: got $got, pinned $want" }
     if (-not $onWindows) { & chmod 755 $tmp }
-    # Catches a binary this machine cannot run before a hook would hand events to it.
-    if ((& $tmp --version) -ne "rogue-hook $version") { Give-Up 'downloaded binary does not run here' }
+    # Catches a binary this machine cannot run before a hook would hand events to it. Bounded like
+    # native-bridge-install.mjs: one that stalls is killed rather than holding the lock.
+    $reported = ''
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo $tmp, '--version'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $probe = [System.Diagnostics.Process]::Start($psi)
+        $read = $probe.StandardOutput.ReadToEndAsync()
+        if ($probe.WaitForExit(10000)) { $reported = $read.Result.TrimEnd("`r", "`n") }
+        else { try { $probe.Kill() } catch {}; [void]$probe.WaitForExit(5000) }
+    } catch {}
+    if ($reported -ne "rogue-hook $version") { Give-Up 'downloaded binary does not run here' }
     Move-Item -LiteralPath $tmp -Destination $dest -Force
     if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) { Give-Up "cannot install $dest" }
     $tmp = ''

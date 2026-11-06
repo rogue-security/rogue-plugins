@@ -111,7 +111,11 @@ try {
         # The native bridge pin travels with the scripts; a bundle without one stays on them.
         $pin = [IO.Path]::Combine($source, 'rogue-hook.json')
         if (Test-Path -LiteralPath $pin -PathType Leaf) { Copy-Item -Force -LiteralPath $pin -Destination $Root }
-        else { Remove-Item -Force -LiteralPath ([IO.Path]::Combine($Root, 'rogue-hook.json')) -ErrorAction SilentlyContinue }
+        else {
+            # File.Delete ignores a missing file; any other failure would leave the hooks on the old pin.
+            $oldPin = [IO.Path]::Combine($Root, 'rogue-hook.json')
+            try { [IO.File]::Delete($oldPin) } catch { Fail "Cannot remove the old native bridge pin $oldPin" }
+        }
     }
     [IO.File]::WriteAllText("$Hooks.tmp", (Get-HooksJson), $Utf8)
     Move-Item -LiteralPath "$Hooks.tmp" -Destination $Hooks -Force

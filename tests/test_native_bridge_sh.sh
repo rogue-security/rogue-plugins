@@ -9,7 +9,6 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SH="${TEST_SH:-sh}"
-PORT=$((RANDOM % 10000 + 30000))
 WORK="$(mktemp -d)"
 PLUGIN="$WORK/plugin"
 SRV="$WORK/srv"
@@ -26,19 +25,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The mock picks a free port and reports it once listening.
+python3 "$REPO/tests/native_bridge_server.py" 0 "$SRV" &
+MOCK_PID=$!
+for _ in $(seq 1 100); do
+  [ -s "$SRV/port" ] && break
+  kill -0 "$MOCK_PID" 2>/dev/null || break
+  sleep 0.1
+done
+[ -s "$SRV/port" ] || { echo "FAIL: tests/native_bridge_server.py did not start"; exit 1; }
+PORT="$(cat "$SRV/port")"
+
 cat > "$HOME/.rogue-env" <<EOF2
 export ROGUE_API_KEY=test-key
 export ROGUE_BASE_URL=http://127.0.0.1:${PORT}
 EOF2
 chmod 600 "$HOME/.rogue-env"
 
-python3 "$REPO/tests/native_bridge_server.py" "$PORT" "$SRV" &
-MOCK_PID=$!
-for _ in $(seq 1 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
-
-# Stub binary: answers --version and echoes its arguments and stdin as the hook answer.
+# Stub binary: answers --version (or never does, with STUB_HANG) and echoes its arguments and stdin
+# as the hook answer.
 stub() { # <version>
-  printf '#!/bin/sh\n[ "$1" = --version ] && { echo "rogue-hook %s"; exit 0; }\nprintf "{\\"native\\":\\"%%s %%s root=%%s\\",\\"stdin\\":%%s}" "$1" "$2" "$ROGUE_PLUGIN_ROOT" "$(cat)"\n' "$1" > "$SRV/blob"
+  printf '#!/bin/sh\n[ "$1" = --version ] && [ -n "$STUB_HANG" ] && exec sleep 30\n[ "$1" = --version ] && { echo "rogue-hook %s"; exit 0; }\nprintf "{\\"native\\":\\"%%s %%s root=%%s\\",\\"stdin\\":%%s}" "$1" "$2" "$ROGUE_PLUGIN_ROOT" "$(cat)"\n' "$1" > "$SRV/blob"
 }
 sha() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d ' ' -f 1; }
 pin() { # <version> <sha256 for this platform>
@@ -79,8 +86,10 @@ check "hook.sh answers itself" "{}" "$(hook PreToolUse '{}' ROGUE_API_KEY='')"
 
 echo "pin, binary missing: hook.sh still answers itself and starts the download"
 pin 0.1.0 "$(sha "$SRV/blob")"
-check "script answer" "{}" "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
-for _ in $(seq 1 50); do [ "$(installed 0.1.0)" = present ] && break; sleep 0.1; done
+# Under a group-writable umask too: the install must still be one the hand-off accepts.
+check "script answer" "{}" "$(umask 002; hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+# The log line follows the rename, so wait for both.
+for _ in $(seq 1 100); do [ "$(installed 0.1.0)" = present ] && case "$(log)" in *installed*) break ;; esac; sleep 0.1; done
 check "the detached download installed it" "present" "$(installed 0.1.0)"
 contains "log reports install" "rogue-hook 0.1.0: installed" "$(log)"
 contains "lookup carries version and platform" "/api/v1/hooks/download?version=0.1.0&os=" "$(head -n 1 "$SRV/requests")"
@@ -99,6 +108,15 @@ mkdir -p "$WORK/kill-home/.rogue/bin"; cp -R "$BIN_DIR" "$WORK/kill-home/.rogue/
 check "the kill switch works from the env file" '{}' "$(hook PreToolUse '{}' HOME="$WORK/kill-home")"
 check "heartbeat hands off" "{\"native\":\"heartbeat claude root=$PLUGIN\",\"stdin\":}" \
   "$(env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$PLUGIN" "$SH" "$PLUGIN/scripts/heartbeat.sh" SessionStart </dev/null)"
+
+echo "a binary another user could replace never runs"
+chmod o+w "$BIN_DIR/0.1.0/rogue-hook"
+check "other-writable binary keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+chmod 755 "$BIN_DIR/0.1.0/rogue-hook"
+chmod g+w "$BIN_DIR/0.1.0"
+check "group-writable directory keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+chmod 755 "$BIN_DIR/0.1.0"
+check "a protected binary runs again" "{\"native\":\"claude PreToolUse root=$PLUGIN\",\"stdin\":{}}" "$(hook PreToolUse '{}')"
 
 echo "already installed: no download"
 install
@@ -122,6 +140,15 @@ contains "log reports it" "does not run here" "$(log)"
 echo "a failed attempt is not retried inside the retry interval"
 install ROGUE_NATIVE_BRIDGE_RETRY=900
 check "no request" "" "$(cat "$SRV/requests")"
+
+echo "a binary that never answers --version is killed and not installed"
+stub 0.5.0
+pin 0.5.0 "$(sha "$SRV/blob")"
+install STUB_HANG=1
+check "no binary" "absent" "$(installed 0.5.0)"
+contains "log reports it" "0.5.0: downloaded binary does not run here" "$(log)"
+check "no temp file left" "" "$(ls -A "$BIN_DIR/0.5.0" 2>/dev/null)"
+check "the lock is released" "absent" "$([ -e "$BIN_DIR/.lock-0.5.0" ] && echo present || echo absent)"
 
 echo "a missing route answer installs nothing"
 stub 0.4.0

@@ -4,11 +4,13 @@ native bridge install tests. Appends "<path> key=<x-rogue-api-key>" per request 
 <dir>/requests and serves <dir>/blob as the binary. POSTed hook events get {}.
 
 Usage: python3 native_bridge_server.py <port> <dir>
+Port 0 picks a free port; once listening, the server writes the port it got to <dir>/port.
 """
 import http.server
+import os
 import sys
 
-port, srv = int(sys.argv[1]), sys.argv[2]
+srv = sys.argv[2]
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -38,4 +40,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
+port = server.server_address[1]
+with open(os.path.join(srv, "port.tmp"), "w") as f:
+    f.write(str(port))
+os.replace(os.path.join(srv, "port.tmp"), os.path.join(srv, "port"))
+server.serve_forever()

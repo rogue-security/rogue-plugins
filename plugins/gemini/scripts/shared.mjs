@@ -53,7 +53,14 @@ export function isTrustedEnvFile(file) {
   if (!st.isFile()) return false;
   const system = file === "/etc/rogue/env" || file === "C:\\ProgramData\\rogue\\env";
   if (IS_WIN) return !system;
-  if (st.uid !== 0 && (system || st.uid !== process.getuid())) return false;
+  return isProtected(st, system);
+}
+
+// The ownership rule itself, for a file or a directory's stat: owned by root or (unless rootOnly)
+// the current user, and writable by neither group nor other. Windows has no POSIX owner or mode.
+export function isProtected(st, rootOnly = false) {
+  if (IS_WIN) return true;
+  if (st.uid !== 0 && (rootOnly || st.uid !== process.getuid())) return false;
   return (st.mode & 0o022) === 0;
 }
 
