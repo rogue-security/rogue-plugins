@@ -235,6 +235,7 @@ cp "$REPO/plugins/kiro/scripts/heartbeat.sh" "$REPO/plugins/kiro/scripts/beacon.
    "$REPO/plugins/kiro/scripts/actor.sh" "$REPO/plugins/kiro/scripts/install-id.sh" \
    "$REPO/plugins/kiro/scripts/kiro-host.sh" "$REPO/plugins/kiro/scripts/env-file.sh" "$KIRO_ROOT/scripts/"
 echo '{"name":"rogue","version":"9.9.9"}' > "$KIRO_ROOT/plugin.json"
+bridge_pin "$KIRO_ROOT" kiro
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/kiro-bin/curl"
 chmod +x "$TMPROOT/kiro-bin/curl"
 # kiro-cli 2.21.0's shape: `--version` prints "kiro-cli <X.Y.Z>", and
@@ -266,17 +267,22 @@ cat > "$KIRO_APP/Contents/Info.plist" <<'PLIST'
 PLIST
 echo 'export ROGUE_API_KEY=k' > "$KIRO_HOME/.rogue-env"
 KIRO_STAMP="$KIRO_HOME/.rogue/beacon/.last-kiro"
-# kiro_beacon <surface> <trigger> → the recorded curl arguments (one line per call)
+# kiro_beacon <surface> <trigger> → the recorded curl arguments (one line per call);
+# on the native bridge, the capture server's request lines and the bodies posted.
 # `env -u` scrubs the developer's own ROGUE_* (this suite is very likely run from a
 # shell that exports a real key): only the temp HOME's env file may configure it.
 kiro_beacon() {
   : > "$TMPROOT/kiro-calls"; : > "$TMPROOT/kiro-cli-calls"
+  rm -rf "$TMPROOT/kiro-cap"; mkdir -p "$TMPROOT/kiro-cap"
   env -u ROGUE_API_KEY -u ROGUE_BASE_URL -u ROGUE_ACTOR_EMAIL -u ROGUE_ACTOR_NAME \
       SB_CALLS="$TMPROOT/kiro-calls" KIRO_CLI_LOG="$TMPROOT/kiro-cli-calls" \
       PATH="$TMPROOT/kiro-bin:$PATH" HOME="$KIRO_HOME" \
+      ROGUE_BASE_URL="$(bridge_capture "$TMPROOT/kiro-cap" 200 "$TMPROOT/kiro-calls")" \
+      ROGUE_VERSIONS_URL="http://127.0.0.1:9/versions.json" \
       ROGUE_KIRO_APP="${ROGUE_KIRO_APP:-$TMPROOT/no-app}" KIRO_FAKE_DEFAULT="${KIRO_FAKE_DEFAULT:-}" \
       "$SH" "$KIRO_ROOT/scripts/heartbeat.sh" "$1" "$2" >/dev/null 2>&1
   cat "$TMPROOT/kiro-calls"
+  cat "$TMPROOT/kiro-cap"/body.* 2>/dev/null
 }
 has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 out="$(kiro_beacon kiro_ide SessionStart)"

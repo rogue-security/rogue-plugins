@@ -4,6 +4,10 @@ on x-rogue-event etc.) and returns whatever bytes the env var MOCK_RESPONSE
 contains. Sends MOCK_STATUS as the HTTP status (default 200). MOCK_DELAY (seconds,
 default 0) holds the response back so a bridge's timeout path can be exercised.
 MOCK_CALLS, if set, is a file that gets one "<path> <body>" line per request.
+MOCK_ONLY_PATH, when set, limits all of that to requests for that path: any other
+request is answered {} at once and appended to <headers-file>.other as one
+"<METHOD> <path> <body>" line, so a detached heartbeat cannot overwrite the
+recorded hook request.
 
 Usage:
     MOCK_RESPONSE='{"hookSpecificOutput":{"permissionDecision":"deny"}}' \
@@ -23,6 +27,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body_in = self.rfile.read(length)
+        only = os.environ.get("MOCK_ONLY_PATH")
+        if only and self.path != only:
+            with open(HEADERS_PATH + ".other", "a") as f:
+                f.write(f"{self.command} {self.path} {body_in.decode('utf-8', errors='replace')}\n")
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            return
         # Record headers + body so the test can inspect them.
         with open(HEADERS_PATH, "w") as f:
             json.dump({

@@ -344,6 +344,13 @@ function Invoke-Main {
     Import-Credentials
     Initialize-Beacon  # after the env files are parsed so they can set the interval
     Assert-ApiKey      # exits 0 when this install is not configured
+
+    # The pinned native bridge sends the beacon and ships the log itself once it is installed.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $script:pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+    if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+        Invoke-RogueNativeHandoff -Root $script:pluginRoot -Family kiro -Arguments @('heartbeat', 'kiro', $Trigger, $Agent) `
+            -Settings $creds -BudgetMs 60000 -FailOpen ''
+    }
     Resolve-BaseUrl
     Resolve-Actor
     Resolve-Version

@@ -39,7 +39,7 @@ suites() {
     claude) echo "test_hook_sh.sh test_heartbeat_sh.sh" ;;
     cursor) echo "test_hook_sh_cursor.sh" ;;
     copilot) echo "test_hook_sh_copilot.sh" ;;
-    kiro) echo "test_hook_sh_kiro.sh" ;;
+    kiro) echo "test_hook_sh_kiro.sh test_heartbeat_sh.sh test_status_kiro_sh.sh" ;;
     antigravity) echo "test_hook_sh_antigravity.sh" ;;
     muse) echo "test_muse_sh.sh" ;;
     gemini) echo "test_hook_mjs.mjs" ;;
