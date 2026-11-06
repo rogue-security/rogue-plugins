@@ -80,6 +80,8 @@ function Set-Pin {
 # Runs PowerShell code in a fresh process with the sandbox HOME; returns stdout, stderr and exit code.
 function Invoke-Fresh {
     param([string]$Code, [string]$Stdin = '', [hashtable]$Env = @{})
+    # As in the hooks: otherwise Windows PowerShell writes module-loading progress to the redirected stderr.
+    $Code = "`$ProgressPreference = 'SilentlyContinue'; " + $Code
     $psi = New-Object System.Diagnostics.ProcessStartInfo $shell, ('-NoProfile -NonInteractive -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Code)))
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
