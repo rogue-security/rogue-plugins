@@ -21,7 +21,7 @@ import { HOME, IS_WIN } from "./shared.mjs";
 export function pinnedVersion(root) {
   try {
     const pin = fs.readFileSync(path.join(root, "rogue-hook.json"), "utf8");
-    return pin.match(/^\s*"version"\s*:\s*"([0-9][0-9A-Za-z.+-]*)"/m)?.[1] || "";
+    return pin.match(/^\s*"version"\s*:\s*"([0-9][0-9A-Za-z.-]*)"/m)?.[1] || "";
   } catch {
     return "";
   }

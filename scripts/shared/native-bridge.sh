@@ -24,7 +24,7 @@
 # NOTHING RUNS AT SOURCE TIME.
 
 rogue_native_pinned_version() { # <plugin-root>
-  sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9A-Za-z.+-]*\)".*/\1/p' \
+  sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9A-Za-z.-]*\)".*/\1/p' \
     "$1/rogue-hook.json" 2>/dev/null | head -n 1
 }
 

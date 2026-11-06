@@ -22,6 +22,15 @@ case "$(uname -s 2>/dev/null)" in
 esac
 
 . "$ROOT/scripts/native-bridge.sh" 2>/dev/null || exit 0
+# Same env file rule as the hooks, read first so ROGUE_NATIVE_BRIDGE_DIR resolves as theirs does: the first trusted file holding ROGUE_API_KEY is used alone.
+if [ -r "$ROOT/scripts/env-file.sh" ]; then
+  . "$ROOT/scripts/env-file.sh"
+  for _env_file in /etc/rogue/env "$ROOT/env" "$HOME/.rogue-env"; do
+    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
+      . "$_env_file"; break
+    fi
+  done
+fi
 VERSION="$(rogue_native_pinned_version "$ROOT")"
 [ -n "$VERSION" ] || exit 0
 DIR="$(rogue_native_dir)"
@@ -69,15 +78,6 @@ esac
 WANT="$(pinned "$PLATFORM")"
 [ -n "$WANT" ] || give_up "no pinned sha256 for $PLATFORM"
 
-# Same env file rule as the hooks: the first trusted file holding ROGUE_API_KEY is used alone.
-if [ -r "$ROOT/scripts/env-file.sh" ]; then
-  . "$ROOT/scripts/env-file.sh"
-  for _env_file in /etc/rogue/env "$ROOT/env" "$HOME/.rogue-env"; do
-    if rogue_env_is_trusted "$_env_file" && grep -Eq "^[[:space:]]*(export[[:space:]]+)?ROGUE_API_KEY=[\"']?[^\"'[:space:]]" "$_env_file"; then
-      . "$_env_file"; break
-    fi
-  done
-fi
 [ -n "${ROGUE_API_KEY:-}" ] || give_up "no ROGUE_API_KEY"
 command -v curl >/dev/null 2>&1 || give_up "no curl"
 

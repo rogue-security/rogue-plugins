@@ -13,7 +13,7 @@ function Get-RogueNativeVersion {
     param([string]$Root)
     $pin = Join-Path $Root 'rogue-hook.json'
     if (-not (Test-Path -LiteralPath $pin -PathType Leaf)) { return '' }
-    $m = [regex]::Match((Get-Content -Raw -LiteralPath $pin), '"version"\s*:\s*"([0-9][0-9A-Za-z.+-]*)"')
+    $m = [regex]::Match((Get-Content -Raw -LiteralPath $pin), '"version"\s*:\s*"([0-9][0-9A-Za-z.-]*)"')
     if ($m.Success) { return $m.Groups[1].Value }
     return ''
 }
@@ -84,10 +84,17 @@ function Invoke-RogueNativeHandoff {
     $stderr = [Console]::OpenStandardError()
     $copyOut = $proc.StandardOutput.BaseStream.CopyToAsync($stdout)
     $copyErr = $proc.StandardError.BaseStream.CopyToAsync($stderr)
-    $feed = [Console]::OpenStandardInput().CopyToAsync($proc.StandardInput.BaseStream)
-    # A child that exits without reading its input (e.g. unconfigured) breaks the pipe: that counts as fed.
+    # Heartbeats, log shipping and updates read no input, and run from a hidden window whose console
+    # stdin never ends: the child gets an empty stdin and as long as it needs (they are detached).
     $fed = $true
-    try { $fed = $feed.Wait($BudgetMs) } catch {}
+    if ($Arguments[0] -in 'heartbeat', 'ship-logs', 'update') {
+        $proc.StandardInput.Close()
+        $BudgetMs = [Math]::Max($BudgetMs, 600000)
+    } else {
+        $feed = [Console]::OpenStandardInput().CopyToAsync($proc.StandardInput.BaseStream)
+        # A child that exits without reading its input (e.g. unconfigured) breaks the pipe: that counts as fed.
+        try { $fed = $feed.Wait($BudgetMs) } catch {}
+    }
     if ($fed) { try { $proc.StandardInput.Close() } catch {} }
     $left = [int][Math]::Max(0, $BudgetMs - $clock.ElapsedMilliseconds)
     if (-not $fed -or -not $proc.WaitForExit($left)) {

@@ -24,10 +24,17 @@ function Say { param([string]$Msg) Add-Content -LiteralPath $logPath -Encoding U
 
 # One attempt at a time, and not again until the retry interval has passed.
 $lock = Join-Path $dir ".lock-$version"
-$lockItem = Get-Item -LiteralPath $lock -ErrorAction SilentlyContinue
-if ($lockItem -and $lockItem.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-10)) { exit 0 }
-Remove-Item -LiteralPath $lock -Force -Recurse -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
+# The lock is a file opened CreateNew, which fails atomically when it exists; one older than 10
+# minutes is a crashed attempt's and is broken once.
+function Lock-RogueInstall {
+    try { [System.IO.File]::Open($lock, 'CreateNew', 'Write').Dispose(); return $true } catch { return $false }
+}
+if (-not (Lock-RogueInstall)) {
+    $lockItem = Get-Item -LiteralPath $lock -ErrorAction SilentlyContinue
+    if ($lockItem -and $lockItem.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-10)) { exit 0 }
+    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+    if (-not (Lock-RogueInstall)) { exit 0 }
+}
 $tmp = ''
 try {
     $stamp = Join-Path $dir ".attempt-$version"
@@ -100,6 +107,6 @@ try {
     Say "installed ($platform)"
 } finally {
     if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $lock -Force -Recurse -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
 }
 exit 0
