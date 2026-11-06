@@ -31,9 +31,11 @@ T="$(mktemp -d "${TMPDIR:-/tmp}/rogue-shiptest.XXXXXX")" || exit 1
 # and then CONTINUES with the next statement, so a Ctrl-C would delete the fixtures
 # and let every remaining case run against a missing fake `curl` - a wall of
 # confusing failures instead of a stop.
-trap 'rm -rf "$T"' EXIT
-trap 'rm -rf "$T"; exit 130' INT
-trap 'rm -rf "$T"; exit 143' TERM
+. "$REPO/tests/lib/bridge.sh"
+bridge_start
+trap 'bridge_stop; rm -rf "$T"' EXIT
+trap 'bridge_stop; rm -rf "$T"; exit 130' INT
+trap 'bridge_stop; rm -rf "$T"; exit 143' TERM
 
 pass() { echo "  ok: $1"; }
 fail() { echo "FAIL: $1"; FAILS=$((FAILS + 1)); }
@@ -112,6 +114,7 @@ ship_as() { # <plugin> <slug|-> <version> <family> [VAR=val …]
     export ROGUE_LOG_FILE='' ROGUE_LOG_DIR='' ROGUE_SHIP_ALL=''
     export ROGUE_SHIP_MAX_BYTES='' ROGUE_SHIP_MAX_RUN_BYTES='' ROGUE_SHIP_MAX_LINE_BYTES=''
     for kv in "$@"; do export "${kv?}"; done
+    if bridge_native; then ROGUE_BASE_URL="$(bridge_capture "$CAP" "${FAKE_CODE:-200}")"; export ROGUE_BASE_URL; fi
     _root="${SHIP_ROOT:-$REPO/plugins/$_p}"
     if [ "$_s" = "-" ]; then "$SH" "$REPO/plugins/$_p/scripts/ship-logs.sh"
     else "$SH" "$REPO/plugins/$_p/scripts/ship-logs.sh" "$_root" "$_s" "$_v" "$_fam"; fi )
@@ -307,6 +310,10 @@ check "two requests, not a re-ship" "2" "$(bodies)"
 check "the second starts after the first line" "$(printf 'tiny provider=claude event=X outcome=allow\n' | wc -c | tr -d ' ')" "$(numf 1 offset)"
 
 echo
+# Script-only: the rotation is injected through a fake `tail`, which only the script shipper runs.
+# The native bridge re-checks the head before every upload the same way, but nothing outside the
+# process can rotate the file between its read and that check.
+if ! bridge_native; then
 echo "== rotation DURING a read is discarded, and the offset does not move"
 new_case toctou
 seed 1 4
@@ -315,6 +322,7 @@ check "nothing was sent" "0" "$(bodies)"
 check "no offset was persisted" "" "$(state offset)"
 
 echo
+fi
 echo "== chunks end on line boundaries and reassemble byte-exactly"
 new_case boundary
 seed 1 8

@@ -5,9 +5,8 @@
 # if newer, re-runs the one-line installer to upgrade in place. New version takes
 # effect on the next session.
 #
-# Opt-outs:
-#   ROGUE_AUTO_UPDATE=0       — disable entirely
-#   ROGUE_PLUGIN_VERSION=<release> — pinned, never updates
+# There is no opt-out: every install that this process can update stays current. A compiled
+# customer bundle (it carries its own env file) is replaced by its admin, never by this script.
 #
 # Runs at most once per 24h (cached in ~/.rogue/.auto-update-check).
 # Silent on every failure path. All activity logs to ~/.rogue/auto-update.log
@@ -28,7 +27,7 @@ exec >>"$LOG" 2>&1
 date "+%F %T --- auto-update tick ---"
 
 # Same env file rule as the hooks. The bundled ${CLAUDE_PLUGIN_ROOT}/env is where
-# compiled/managed plugins pin flags like ROGUE_AUTO_UPDATE=0 or ROGUE_PLUGIN_VERSION.
+# compiled/managed plugins carry their own settings.
 # The first trusted env file holding ROGUE_API_KEY is used alone: machine, bundled, user.
 _env_lib="$(dirname -- "$0")/env-file.sh"
 if [ -r "$_env_lib" ]; then
@@ -40,13 +39,15 @@ if [ -r "$_env_lib" ]; then
   done
 fi
 
-if [ "${ROGUE_AUTO_UPDATE:-1}" = "0" ]; then
-  echo "ROGUE_AUTO_UPDATE=0, skipping"
+if [ -f "${CLAUDE_PLUGIN_ROOT:-}/env" ]; then
+  echo "compiled bundle, updated by the admin; skipping"
   exit 0
 fi
-if [ -n "${ROGUE_PLUGIN_VERSION:-}" ]; then
-  echo "ROGUE_PLUGIN_VERSION=$ROGUE_PLUGIN_VERSION pinned, skipping"
-  exit 0
+
+# The pinned native bridge runs the same check once it is installed.
+if [ -r "${CLAUDE_PLUGIN_ROOT:-}/scripts/native-bridge.sh" ]; then
+  . "${CLAUDE_PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "${CLAUDE_PLUGIN_ROOT}" claude update claude
 fi
 
 # Rate-limit to once per day.
@@ -124,7 +125,7 @@ echo "upgrade available: $INSTALLED -> $LATEST, running installer"
 # Re-run the one-line installer in non-interactive mode. Creds already in env
 # from sourcing ~/.rogue-env above, so no prompts.
 INSTALLER_URL="${ROGUE_INSTALLER_URL:-https://raw.githubusercontent.com/rogue-security/rogue-plugins/main/install.sh}"
-unset ROGUE_BASE_URL
+unset ROGUE_BASE_URL ROGUE_PLUGIN_VERSION
 curl -fsSL --max-time 60 "$INSTALLER_URL" | ROGUE_NON_INTERACTIVE=1 bash
 RC=$?
 echo "installer exited rc=$RC"

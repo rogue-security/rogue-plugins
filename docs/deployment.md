@@ -128,9 +128,8 @@ or login name says.
 `scripts/mdm-provision-actor.sh` writes `/etc/rogue/env` on the target
 device with the org API key and the assigned user's identity. It is the first
 file the hooks look at, and once it holds `ROGUE_API_KEY` it is the only one
-read: nothing from the bundled `env` is merged, so the script also pins
-`ROGUE_AUTO_UPDATE=0` (pass `--mode block` if the bundle was compiled with
-it). A file without the key is skipped whole, which is why the script refuses
+read: nothing from the bundled `env` is merged (pass `--mode block` if the
+bundle was compiled with it). A file without the key is skipped whole, which is why the script refuses
 to write one.
 
 ### Kandji (Custom Script)
@@ -288,9 +287,10 @@ reached yet does not keep posting with the old key.
 
 When new plugin behavior ships (e.g. new hook events, schema changes),
 recompile with `--from vX.Y.Z` to pin a specific release, then upload the
-new zip to the Claude management UI. The compiled bundle sets
-`ROGUE_AUTO_UPDATE=0` so user devices never auto-pull from GitHub — every
-update is admin-controlled.
+new zip to the Claude management UI. The updater recognises a compiled bundle
+by its own `env` file and leaves it alone, so user devices never auto-pull from
+GitHub — every update to a compiled bundle is admin-controlled. Every other
+install updates itself; there is no opt-out.
 
 ### User reassignment / device transfer
 

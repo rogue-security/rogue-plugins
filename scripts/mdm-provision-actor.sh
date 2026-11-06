@@ -32,7 +32,6 @@
 # Optional flags / env vars:
 #   --mode         / ROGUE_PRETOOLUSE_ON_BLOCK   "ask" or "block" (hook default when unset)
 #   --base-url     / ROGUE_BASE_URL              custom Rogue endpoint
-#   --auto-update  / ROGUE_AUTO_UPDATE           0 (default; matches compiled bundles) or 1
 #
 # Must run as root (writes to /etc/rogue/env).
 
@@ -43,7 +42,6 @@ NAME="${ROGUE_ACTOR_NAME:-}"
 KEY="${ROGUE_API_KEY:-}"
 MODE="${ROGUE_PRETOOLUSE_ON_BLOCK:-}"
 BASE_URL="${ROGUE_BASE_URL:-}"
-AUTO_UPDATE="${ROGUE_AUTO_UPDATE:-0}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -52,9 +50,8 @@ while [ $# -gt 0 ]; do
     --key)      KEY="$2"; shift 2 ;;
     --mode)     MODE="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
-    --auto-update) AUTO_UPDATE="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,37p' "$0" 2>/dev/null
+      sed -n '2,36p' "$0" 2>/dev/null
       exit 0
       ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -68,10 +65,6 @@ done
 case "$MODE" in
   ""|ask|block) ;;
   *) echo "Bad --mode: $MODE (expected: ask|block)" >&2; exit 2 ;;
-esac
-case "$AUTO_UPDATE" in
-  0|1) ;;
-  *) echo "Bad --auto-update: $AUTO_UPDATE (expected: 0|1)" >&2; exit 2 ;;
 esac
 
 [ "$(id -u)" -eq 0 ] || {
@@ -90,7 +83,6 @@ trap 'rm -f "$TMP"' EXIT
   printf 'export ROGUE_ACTOR_NAME=%q\n'  "$NAME"
   [ -n "$MODE" ]     && printf 'export ROGUE_PRETOOLUSE_ON_BLOCK=%q\n' "$MODE"
   [ -n "$BASE_URL" ] && printf 'export ROGUE_BASE_URL=%q\n' "$BASE_URL"
-  printf 'export ROGUE_AUTO_UPDATE=%s\n' "$AUTO_UPDATE"
 } > "$TMP"
 
 # Root-owned, world-readable: the hooks run as each user and must read it. To

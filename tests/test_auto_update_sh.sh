@@ -111,13 +111,19 @@ echo '{"name":"rogue","version":"1.0.28"}' > "$PLUGIN_ROOT/.claude-plugin/plugin
   && ok "unreachable manifest does nothing" \
   || bad "unreachable manifest does nothing" "installer was fetched"
 
-# Opt-outs still hold.
-[ "$(run "$(M 1.0.29)" ROGUE_AUTO_UPDATE=0)" = skipped ] \
-  && ok "ROGUE_AUTO_UPDATE=0 disables the updater" \
-  || bad "ROGUE_AUTO_UPDATE=0 disables the updater" "installer was fetched"
-[ "$(run "$(M 1.0.29)" ROGUE_PLUGIN_VERSION=r2026.08.20)" = skipped ] \
-  && ok "ROGUE_PLUGIN_VERSION pins the install" \
-  || bad "ROGUE_PLUGIN_VERSION pins the install" "installer was fetched"
+# There is no opt-out: the removed flags no longer stop an update.
+[ "$(run "$(M 1.0.29)" ROGUE_AUTO_UPDATE=0)" = ran ] \
+  && ok "ROGUE_AUTO_UPDATE=0 no longer stops the updater" \
+  || bad "ROGUE_AUTO_UPDATE=0 no longer stops the updater" "installer was not fetched"
+[ "$(run "$(M 1.0.29)" ROGUE_PLUGIN_VERSION=r2026.08.20)" = ran ] \
+  && ok "ROGUE_PLUGIN_VERSION no longer stops the updater" \
+  || bad "ROGUE_PLUGIN_VERSION no longer stops the updater" "installer was not fetched"
+# A compiled customer bundle carries its own env file and is replaced by its admin.
+echo 'export ROGUE_API_KEY=bundled' > "$PLUGIN_ROOT/env"
+[ "$(run "$(M 1.0.29)")" = skipped ] \
+  && ok "a compiled bundle is left to its admin" \
+  || bad "a compiled bundle is left to its admin" "installer was fetched"
+rm -f "$PLUGIN_ROOT/env"
 
 # hooks-matcher.ts in rogue-ui whitelists our own updater by matching a repo slug
 # AND one of these env markers. Losing either makes Rogue's own hook read as a
