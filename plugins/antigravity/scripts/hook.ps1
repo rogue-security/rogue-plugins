@@ -281,6 +281,20 @@ function Assert-ApiKey {
     exit 0
 }
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it is
+# installed; until then this starts its download and carries on. See
+# scripts/native-bridge.ps1. The 25 s budget covers the binary's transcript waits and
+# its 15 s request, inside the 30 s hook timeout.
+function Invoke-NativeHandoff {
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) }
+    catch { return }
+    # hooks.json passes (Get-Location).Path; the hand-off needs it absolute.
+    $root = $PluginRoot
+    try { $root = (Resolve-Path -LiteralPath $PluginRoot -ErrorAction Stop).ProviderPath } catch {}
+    Invoke-RogueNativeHandoff -Root $root -Family antigravity -Arguments @('antigravity', $EventName) `
+        -Settings $creds -BudgetMs 25000 -FailOpen (Get-FailOpenDefault)
+}
+
 # URL: explicit ROGUE_API_URL wins, else base + path.
 function Resolve-Url {
     $script:url = $creds['ROGUE_API_URL']
@@ -955,6 +969,7 @@ function Invoke-Main {
     # machine records `outcome=unconfigured` before it exits.
     Import-Credentials
     Initialize-Logging $script:creds
+    Invoke-NativeHandoff   # exits through the native bridge when its pinned version is installed
     Assert-ApiKey          # exits before stdin is read when there is no key
     Resolve-Url
     Resolve-Actor
