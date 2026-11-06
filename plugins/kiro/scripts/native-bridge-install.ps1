@@ -3,7 +3,7 @@
 # that file for the contract.
 #
 # ONE COPY IS EDITABLE: scripts/shared/native-bridge-install.ps1 (see sync-shared-scripts.sh).
-param([string]$Root)
+param([string]$Root = '')
 
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
