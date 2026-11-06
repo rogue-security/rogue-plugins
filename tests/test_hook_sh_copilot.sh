@@ -70,8 +70,19 @@ run_dispatcher() {
   set -e
   LAST_HOME="$tmp_home"
   # KEEP_HOME=1 preserves the run's HOME so a caller can assert on hook.log.
-  [ "${KEEP_HOME:-0}" = "1" ] || rm -rf "$tmp_home"
+  [ "${KEEP_HOME:-0}" = "1" ] || remove_home "$tmp_home"
   return $rc
+}
+
+# agentStop starts the heartbeat detached, and it can still be writing ~/.rogue
+# while the HOME is removed: retry until it has finished.
+remove_home() {
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    rm -rf "$1" 2>/dev/null && [ ! -e "$1" ] && return 0
+    sleep 0.2
+  done
+  rm -rf "$1"
 }
 
 # Build a throwaway `ps` shim so in_jetbrains_ide's ancestry walk can be driven
@@ -103,7 +114,7 @@ posted_field() {
 }
 
 start_mock() {
-  MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" \
+  MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" MOCK_ONLY_PATH=/api/v1/hooks/copilot \
     python3 "$REPO/tests/mock_server.py" "$PORT" "$HEADERS_FILE" &
   MOCK_PID=$!
   for _ in $(seq 1 50); do

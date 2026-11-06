@@ -119,6 +119,15 @@ foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Joi
 # spawned DETACHED, so its process environment comes from Copilot.
 Initialize-RogueBeacon $creds
 
+# The pinned native bridge sends the beacon and ships the log itself once it is installed.
+if ($creds['ROGUE_API_KEY']) {
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+    if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+        Invoke-RogueNativeHandoff -Root $pluginRoot -Family copilot -Arguments @('heartbeat', 'copilot', $Trigger) `
+            -Settings $creds -BudgetMs 60000 -FailOpen ''
+    }
+}
+
 $apiKey = $creds['ROGUE_API_KEY']
 if (-not $apiKey) { Dbg 'not configured -> no-op'; exit 0 }
 
