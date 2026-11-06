@@ -209,6 +209,8 @@ mkdir -p "$STAGE/scripts"
 cp "$HOOK" "$STAGE/scripts/hook.sh"
 cp "$ACTOR" "$STAGE/scripts/actor.sh"
 cp "$INSTALL_ID" "$STAGE/scripts/install-id.sh"
+# The env-file trust check: without it the staged hook skips the env file and runs unconfigured.
+cp "$(dirname "$HOOK")/env-file.sh" "$STAGE/scripts/env-file.sh"
 MARKER="$STAGE/heartbeat-fired"
 # The stub records BOTH arguments: the heartbeat is told which surface fired it
 # (three products share one install and only the hook can tell them apart, from the
