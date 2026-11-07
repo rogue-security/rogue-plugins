@@ -39,13 +39,16 @@ function say(msg) {
   }
 }
 
-// Creates `dir` and its missing parents as 0755 whatever the umask: mkdirSync's mode is masked by it,
-// and the hand-off runs only a binary in directories nobody else can write.
+// Creates `dir` and its missing parents under umask 022, like the sh and PowerShell installers, so
+// no directory is ever group- or other-writable, not even between mkdir and a chmod.
 function makeDir(dir) {
-  const created = [];
-  for (let d = dir; !fs.existsSync(d) && d !== path.dirname(d); d = path.dirname(d)) created.push(d);
-  fs.mkdirSync(dir, { recursive: true });
-  if (!IS_WIN) for (const d of created) fs.chmodSync(d, 0o755);
+  if (IS_WIN) return void fs.mkdirSync(dir, { recursive: true });
+  const old = process.umask(0o022);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } finally {
+    process.umask(old);
+  }
 }
 
 function giveUp(why) {
