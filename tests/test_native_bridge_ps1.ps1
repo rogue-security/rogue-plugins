@@ -38,7 +38,8 @@ $server = Start-Process $python -ArgumentList @((Join-Path $repo 'tests/native_b
 $portFile = Join-Path $srv 'port'
 foreach ($i in 1..100) { if ((Test-Path -LiteralPath $portFile) -or $server.HasExited) { break }; Start-Sleep -Milliseconds 100 }
 if (-not (Test-Path -LiteralPath $portFile)) {
-    Write-Host 'FAIL: tests/native_bridge_server.py did not start'
+    if ($server.HasExited) { Write-Host "FAIL: mock server exited (code $($server.ExitCode)) before reporting its port" }
+    else { Write-Host 'FAIL: mock server did not report its port within 10s' }
     if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     Remove-Item -Recurse -Force -LiteralPath $work -ErrorAction SilentlyContinue
     exit 1
@@ -209,7 +210,7 @@ try {
     Write-Host 'inside the retry interval no installer is started'
     $probeRoot = Join-Path $work 'probe-plugin'
     New-Item -ItemType Directory -Force -Path (Join-Path $probeRoot 'scripts') | Out-Null
-    Copy-Item -LiteralPath (Join-Path $plugin 'scripts/native-bridge.ps1') -Destination (Join-Path $probeRoot 'scripts')
+    Copy-Item -LiteralPath (Join-Path $plugin 'scripts/native-bridge.ps1'), (Join-Path $plugin 'scripts/env-file.ps1') -Destination (Join-Path $probeRoot 'scripts')
     [IO.File]::WriteAllText((Join-Path $probeRoot 'rogue-hook.json'), "{`n  `"version`": `"0.9.0`"`n}`n")
     $started = Join-Path $work 'installer-started'
     [IO.File]::WriteAllText((Join-Path $probeRoot 'scripts/native-bridge-install.ps1'), "[IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'yes')")
@@ -220,6 +221,24 @@ try {
     Check 'kept' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ ROGUE_NATIVE_BRIDGE_RETRY = '0' } -Root $probeRoot).Out
     foreach ($i in 1..100) { if (Test-Path -LiteralPath $started) { break }; Start-Sleep -Milliseconds 100 }
     Check 'with no retry interval it is' $true (Test-Path -LiteralPath $started)
+
+    if (-not $onWindows) {
+        # On Windows the exe alone is held to the ACL rule; off Windows every directory above it too.
+        Write-Host 'an install root with a directory above it another user could replace: no exec, no installer'
+        $above = Join-Path (Join-Path $sbHome '.rogue') 'bin'
+        Set-Exposed $above $true
+        Check 'group-writable ancestor keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+        Set-Pin '0.6.0' (Get-Sha (Join-Path $srv 'blob'))
+        [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
+        Check 'a missing binary there keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+        Start-Sleep -Seconds 3
+        Check 'no installer was started' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
+        Invoke-Install
+        Check 'the installer refuses it too' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
+        Contains 'and logs why' "rogue-hook 0.6.0: $(Join-Path $binDir '0.6.0') is not protected from other users" (Get-Log)
+        Check 'nothing written for it' 0 @(Get-ChildItem -Force -LiteralPath $binDir | Where-Object { $_.Name -like '*0.6.0' }).Count
+        Set-Exposed $above $false
+    }
 
     Write-Host 'a download that does not match the pin is never installed'
     New-Stub '0.2.0'

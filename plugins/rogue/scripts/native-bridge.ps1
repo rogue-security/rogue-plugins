@@ -56,6 +56,13 @@ function Invoke-RogueNativeHandoff {
     if (-not $version) { return }
     $dir = Get-RogueNativeDir $Settings
     $bin = Join-Path (Join-Path $dir $version) (Get-RogueNativeExe)
+    # The binary gets the payload and the API key: it runs, or is installed, only where no other user
+    # can replace it. Off Windows that covers every directory above it; on Windows the ACL rule of
+    # env-file.ps1 applies to the exe.
+    if (-not (Get-Command Test-RogueDirChain -ErrorAction SilentlyContinue)) {
+        try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/env-file.ps1') -ErrorAction Stop))) } catch { return }
+    }
+    if (-not (Test-RogueDirChain (Split-Path -Parent $bin))) { return }
     if (-not (Test-Path -LiteralPath $bin -PathType Leaf)) {
         $installer = Join-Path $Root 'scripts/native-bridge-install.ps1'
         # Inside the retry interval the installer would stand down at once: do not start a PowerShell for it.
@@ -75,13 +82,7 @@ function Invoke-RogueNativeHandoff {
         }
         return
     }
-    # The binary gets the payload and the API key: it runs only if no other user can replace it
-    # (on Windows the ACL rule of env-file.ps1 applies to the exe; elsewhere its directory is held to it too).
-    if (-not (Get-Command Test-RogueProtectedPath -ErrorAction SilentlyContinue)) {
-        try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/env-file.ps1') -ErrorAction Stop))) } catch { return }
-    }
-    $onWindows = -not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)
-    if (-not (Test-RogueProtectedPath $bin) -or (-not $onWindows -and -not (Test-RogueProtectedPath (Split-Path -Parent $bin)))) { return }
+    if (-not (Test-RogueProtectedPath $bin)) { return }
 
     $quoted = ($Arguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
     $psi = New-Object System.Diagnostics.ProcessStartInfo $bin, $quoted

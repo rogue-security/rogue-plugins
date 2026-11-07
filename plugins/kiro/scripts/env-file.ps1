@@ -40,6 +40,43 @@ function Test-RogueProtectedPath {
     } catch { return $false }
 }
 
+# Test-RogueProtectedPath for every existing directory from $Path (or, if it does not exist yet, its
+# nearest existing parent) up to /, both as written and as its physical path, so no other user can
+# swap a component. A root-owned sticky directory (/tmp) also passes: nobody can rename or remove an
+# entry there that they do not own. Off Windows only; on Windows the exe alone is held to the ACL rule.
+function Test-RogueDirChain {
+    param([string]$Path)
+    if (-not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)) { return $true }
+    try {
+        if (-not $Path.StartsWith('/')) { return $false }
+        $up = $Path
+        while (-not (Test-Path -LiteralPath $up -PathType Container)) {
+            $i = $up.LastIndexOf('/'); $up = if ($i -le 0) { '/' } else { $up.Substring(0, $i) }
+        }
+        $phys = & /bin/sh -c 'cd -P -- "$1" && pwd -P' sh $up 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $phys) { return $false }
+        $list = New-Object System.Collections.Generic.List[string]
+        foreach ($p in @($up, [string]$phys)) {
+            while ($true) {
+                $list.Add($p)
+                if ($p -eq '/') { break }
+                $i = $p.LastIndexOf('/'); $p = if ($i -le 0) { '/' } else { $p.Substring(0, $i) }
+            }
+        }
+        $info = @(& stat -Lc '%u %a' $list 2>$null)
+        if ($LASTEXITCODE -ne 0) { $info = @(& stat -Lf '%u %p' $list 2>$null) }
+        if ($LASTEXITCODE -ne 0 -or $info.Count -ne $list.Count) { return $false }
+        $me = [string](& id -u)
+        foreach ($line in $info) {
+            if ($line -notmatch '^(\d+) ([0-7]+)$') { return $false }
+            $owner = $Matches[1]; $mode = [Convert]::ToInt32($Matches[2], 8)
+            if ($owner -eq '0' -and ($mode -band 512)) { continue }
+            if (($owner -ne '0' -and $owner -ne $me) -or ($mode -band 18)) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
 # A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty
 # value - the same test every reader makes before selecting it.
 function Test-RogueEnvFileHasKey {

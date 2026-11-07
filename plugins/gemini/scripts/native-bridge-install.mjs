@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { HOME, IS_WIN, loadEnvFiles } from "./shared.mjs";
+import { HOME, IS_WIN, loadEnvFiles, nativePathIsProtected } from "./shared.mjs";
 import { EXE, nativeDir, pinnedVersion } from "./native-bridge.mjs";
 
 const ROOT = process.argv[2] || "";
@@ -65,12 +65,22 @@ async function main() {
   const dir = nativeDir(env);
   const dest = path.join(dir, version, EXE);
   if (fs.existsSync(dest)) return;
+  // Same rule as the hand-off, before and after creating the install directory: another user must
+  // not be able to replace any directory above it. Created 0755 whatever the umask.
+  const versionDir = path.join(dir, version);
+  const unsafe = () => giveUp(`${versionDir} is not protected from other users`);
   try {
     fs.mkdirSync(path.join(HOME, ".rogue"), { recursive: true });
-    fs.mkdirSync(dir, { recursive: true });
   } catch {
     return;
   }
+  if (!nativePathIsProtected(dest)) unsafe();
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+  } catch {
+    return;
+  }
+  if (!nativePathIsProtected(dest)) unsafe();
 
   // One attempt at a time, and not again until the retry interval has passed.
   const lockDir = path.join(dir, `.lock-${version}`);
@@ -131,11 +141,11 @@ async function main() {
   if (typeof url !== "string" || !url) giveUp(`no download URL for ${key}`);
 
   try {
-    // The hand-off runs only a binary in a directory nobody else can write.
-    fs.mkdirSync(path.join(dir, version), { recursive: true, mode: 0o755 });
+    fs.mkdirSync(versionDir, { recursive: true, mode: 0o755 });
   } catch {
-    giveUp(`cannot create ${path.join(dir, version)}`);
+    giveUp(`cannot create ${versionDir}`);
   }
+  if (!nativePathIsProtected(dest)) unsafe();
   tmp = path.join(dir, version, `.rogue-hook.download.${process.pid}${IS_WIN ? ".exe" : ""}`);
   let data;
   try {

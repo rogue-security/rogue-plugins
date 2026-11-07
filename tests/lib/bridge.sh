@@ -21,7 +21,11 @@ bridge_start() {
     sleep 0.1
   done
   if [ ! -s "$BRIDGE_CTRL/port" ]; then
-    echo "FAIL: tests/capture_server.py did not start" >&2
+    if kill -0 "$BRIDGE_PID" 2>/dev/null; then
+      echo "FAIL: capture server did not report its port within 10s" >&2
+    else
+      echo "FAIL: capture server exited before reporting its port" >&2
+    fi
     bridge_stop
     exit 1
   fi

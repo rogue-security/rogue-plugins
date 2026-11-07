@@ -15,8 +15,9 @@
 # downloads, verifies against the pin, and installs it) and carries on doing the job itself, so
 # no event ever waits for a download and nothing changes until a verified binary is in place.
 #
-# No pin, managed hooks, a relative plugin root, a kill switch or a binary (or its directory) that
-# another user could replace all mean: stay on the script. The last never starts the installer.
+# No pin, managed hooks, a relative plugin root, a kill switch or a binary (or any directory above
+# it) that another user could replace all mean: stay on the script. The last never starts the
+# installer.
 #   ROGUE_NATIVE_BRIDGE=0           every family stays on its script bridge
 #   ROGUE_NATIVE_BRIDGE_<FAMILY>=0  one family does (CLAUDE, CODEX, CURSOR, COPILOT, ANTIGRAVITY,
 #                                   KIRO, MUSE, GEMINI)
@@ -57,13 +58,15 @@ rogue_native_handoff() {
   _rn_ver="$(rogue_native_pinned_version "$_rn_root")"
   [ -n "$_rn_ver" ] || return 0
   _rn_bin="$(rogue_native_dir)/$_rn_ver/rogue-hook"
+  # The binary gets the payload and the API key: it runs, or is installed, only where no other user
+  # can replace it or any directory above it (env-file.sh holds the rule).
+  if ! command -v rogue_nearest_dir_is_protected >/dev/null 2>&1; then
+    [ -r "$_rn_root/scripts/env-file.sh" ] || return 0
+    . "$_rn_root/scripts/env-file.sh"
+  fi
+  rogue_nearest_dir_is_protected "${_rn_bin%/*}" || return 0
   if [ -f "$_rn_bin" ] && [ -x "$_rn_bin" ]; then
-    # The binary gets the payload and the API key: it runs only if no other user can replace it.
-    if ! command -v rogue_path_is_protected >/dev/null 2>&1; then
-      [ -r "$_rn_root/scripts/env-file.sh" ] || return 0
-      . "$_rn_root/scripts/env-file.sh"
-    fi
-    rogue_path_is_protected "$_rn_bin" && rogue_path_is_protected "${_rn_bin%/*}" || return 0
+    rogue_path_is_protected "$_rn_bin" || return 0
     shift 2
     ROGUE_PLUGIN_ROOT="$_rn_root"; export ROGUE_PLUGIN_ROOT
     exec "$_rn_bin" "$@"

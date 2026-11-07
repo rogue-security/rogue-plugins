@@ -64,6 +64,75 @@ export function isProtected(st, rootOnly = false) {
   return (st.mode & 0o022) === 0;
 }
 
+// Whether the native bridge binary `file` may run or be installed: no other user may be able to
+// replace it or any directory above it.
+//   POSIX: dirChainIsProtected (the binary itself is held to isProtected by the hand-off).
+//   Windows: Node cannot read an ACL without starting a process per event, so only the per-user
+//   default root, which the profile's ACL protects, is accepted (inUserRoot); a custom
+//   ROGUE_NATIVE_BRIDGE_DIR keeps the event on the script.
+export function nativePathIsProtected(file) {
+  return IS_WIN
+    ? inUserRoot(file, process.env.USERPROFILE || "")
+    : dirChainIsProtected(path.dirname(file));
+}
+
+// `file` lies under <home>/.rogue/bin/rogue-hook (case-insensitive, at a separator boundary), and
+// no symlink or junction stands anywhere along it: the nearest existing part resolves to itself.
+export function inUserRoot(file, home) {
+  if (!home) return false;
+  const lower = (s) => s.toLowerCase();
+  const root = path.resolve(home, ".rogue", "bin", "rogue-hook");
+  const want = path.resolve(file);
+  if (!lower(want).startsWith(lower(root) + path.sep)) return false;
+  let up = want;
+  while (!fs.existsSync(up)) {
+    const parent = path.dirname(up);
+    if (parent === up) return false;
+    up = parent;
+  }
+  try {
+    return lower(fs.realpathSync.native(up)) === lower(up);
+  } catch {
+    return false;
+  }
+}
+
+// isProtected for every existing directory from `dir` (or, if it does not exist yet, its nearest
+// existing parent) up to /, both as written and as its physical path, so no other user can swap a
+// component. A root-owned sticky directory (/tmp) also passes: nobody can rename or remove an entry
+// there that they do not own. POSIX only (see nativePathIsProtected).
+export function dirChainIsProtected(dir) {
+  if (!path.isAbsolute(dir)) return false;
+  const isDir = (d) => {
+    try {
+      return fs.statSync(d).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  let up = dir;
+  while (!isDir(up)) up = path.dirname(up);
+  let phys;
+  try {
+    phys = fs.realpathSync(up);
+  } catch {
+    return false;
+  }
+  for (const start of [up, phys]) {
+    for (let d = start; ; d = path.dirname(d)) {
+      let st;
+      try {
+        st = fs.statSync(d);
+      } catch {
+        return false;
+      }
+      if (!(st.uid === 0 && st.mode & 0o1000) && !isProtected(st)) return false;
+      if (d === path.dirname(d)) break;
+    }
+  }
+  return true;
+}
+
 // A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty value.
 export function envFileHasKey(file) {
   try {

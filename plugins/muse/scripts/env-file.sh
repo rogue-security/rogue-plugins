@@ -19,6 +19,45 @@ rogue_path_is_protected() ( # <path> [1]
   [ "$((0$mode & 022))" = 0 ]
 )
 
+# The same rule for every existing directory from <dir> up to /, both as written and as its
+# physical path, so no other user can swap a component. A root-owned sticky directory (/tmp) also
+# passes: nobody can rename or remove an entry there that they do not own.
+rogue_dir_chain_is_protected() ( # <existing absolute dir>
+  case "$1" in /*) ;; *) exit 1 ;; esac
+  phys=$(cd -P -- "$1" 2>/dev/null && pwd -P) || exit 1
+  list=""
+  for p in "$1" "$phys"; do
+    while :; do
+      list="$list$p
+"
+      [ "$p" = / ] && break
+      p=${p%/*}; [ -n "$p" ] || p=/
+    done
+  done
+  IFS='
+'
+  set -f
+  # shellcheck disable=SC2086
+  set -- $list
+  info=$(stat -Lc '%u %a' "$@" 2>/dev/null) || info=$(stat -Lf '%u %p' "$@" 2>/dev/null) || exit 1
+  me=$(id -u)
+  [ "$(printf '%s\n' "$info" | wc -l | tr -d ' ')" = "$#" ] || exit 1
+  printf '%s\n' "$info" | while IFS=' ' read -r owner mode; do
+    case "$owner:$mode" in *[!0-9:]*|:*|*:) exit 1 ;; esac
+    [ "$owner" = 0 ] && [ "$((0$mode & 01000))" != 0 ] && continue
+    [ "$owner" = 0 ] || [ "$owner" = "$me" ] || exit 1
+    [ "$((0$mode & 022))" = 0 ] || exit 1
+  done
+)
+
+# rogue_dir_chain_is_protected for the nearest existing directory of <path>, which may not exist yet.
+rogue_nearest_dir_is_protected() ( # <absolute path>
+  up="$1"
+  case "$up" in /*) ;; *) exit 1 ;; esac
+  while [ ! -d "$up" ]; do up=${up%/*}; [ -n "$up" ] || up=/; done
+  rogue_dir_chain_is_protected "$up"
+)
+
 # A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty
 # value - the same test every reader makes before selecting it.
 rogue_env_has_key() { # rogue_env_has_key <file>

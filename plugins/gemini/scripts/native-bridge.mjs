@@ -8,8 +8,9 @@
 // process's stdin, and its stdout, stderr and exit code are relayed byte for byte. When it is not,
 // native-bridge-install.mjs is started detached to download it, and the caller carries on.
 //
-// No pin, managed hooks, a relative plugin root, a kill switch or a binary (or its directory) that
-// another user could replace all mean: stay on the script. The last never starts the installer.
+// No pin, managed hooks, a relative plugin root, a kill switch or a binary (or any directory above
+// it) that another user could replace all mean: stay on the script. The last never starts the
+// installer.
 //   ROGUE_NATIVE_BRIDGE=0         every family stays on its script bridge
 //   ROGUE_NATIVE_BRIDGE_GEMINI=0  Gemini does
 //   ROGUE_NATIVE_BRIDGE_DIR       install root instead of ~/.rogue/bin/rogue-hook
@@ -17,7 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { HOME, IS_WIN, isProtected } from "./shared.mjs";
+import { HOME, IS_WIN, isProtected, nativePathIsProtected } from "./shared.mjs";
 
 export function pinnedVersion(root) {
   try {
@@ -48,10 +49,9 @@ function runnable(file) {
   }
 }
 
-// The binary gets the payload and the API key: it runs only if no other user can replace it.
 function protectedBinary(file) {
   try {
-    return isProtected(fs.statSync(file)) && isProtected(fs.statSync(path.dirname(file)));
+    return isProtected(fs.statSync(file));
   } catch {
     return false;
   }
@@ -84,6 +84,9 @@ export function nativeHandoff(root, family, args, { settings = {}, budgetMs = 18
   const version = pinnedVersion(root);
   if (!version) return;
   const bin = path.join(nativeDir(settings), version, EXE);
+  // The binary gets the payload and the API key: it runs, or is installed, only where no other user
+  // can replace it or any directory above it (on Windows: only under the per-user default root).
+  if (!nativePathIsProtected(bin)) return;
 
   if (!runnable(bin)) {
     const installer = path.join(root, "scripts", "native-bridge-install.mjs");

@@ -36,10 +36,24 @@ $dir = Get-RogueNativeDir $creds
 $dest = Join-Path (Join-Path $dir $version) (Get-RogueNativeExe)
 if (Test-Path -LiteralPath $dest -PathType Leaf) { exit 0 }
 
+# The hand-off runs only a binary in directories nobody else can write, whatever the umask.
+function New-RogueDir {
+    param([string]$Path)
+    if ($onWindows) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
+    else { & /bin/sh -c 'umask 022; mkdir -p -- "$1"' sh $Path }
+}
 $rogueDir = Join-Path $home_ '.rogue'
-New-Item -ItemType Directory -Force -Path $rogueDir, $dir | Out-Null
+New-RogueDir $rogueDir
 $logPath = Join-Path $rogueDir 'hook-binary.log'
 function Say { param([string]$Msg) Add-Content -LiteralPath $logPath -Encoding UTF8 -Value "$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) rogue-hook ${version}: $Msg" }
+# Same rule as the hand-off, before and after creating the install directory: another user must not
+# be able to replace any directory above it.
+if (-not (Get-Command Test-RogueDirChain -ErrorAction SilentlyContinue)) { exit 0 }
+$versionDir = Join-Path $dir $version
+function Test-Unsafe { if (-not (Test-RogueDirChain $versionDir)) { Say "$versionDir is not protected from other users; the script bridge handles events"; exit 0 } }
+Test-Unsafe
+New-RogueDir $dir
+Test-Unsafe
 
 # One attempt at a time, and not again until the retry interval has passed.
 $lock = Join-Path $dir ".lock-$version"
@@ -95,9 +109,8 @@ try {
     } catch { Give-Up "no download URL for $platform" }
     if (-not $resp.url) { Give-Up "no download URL for $platform" }
 
-    New-Item -ItemType Directory -Force -Path (Join-Path $dir $version) | Out-Null
-    # The hand-off runs only a binary in a directory nobody else can write.
-    if (-not $onWindows) { & chmod 755 (Join-Path $dir $version) }
+    New-RogueDir $versionDir
+    if (-not (Test-RogueDirChain $versionDir)) { Give-Up "$versionDir is not protected from other users" }
     $tmp = Join-Path (Join-Path $dir $version) ".rogue-hook.download.$PID$(if ($onWindows) { '.exe' })"
     try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $resp.url -OutFile $tmp } catch { Give-Up 'download failed' }
     $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()

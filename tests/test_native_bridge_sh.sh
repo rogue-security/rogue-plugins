@@ -33,7 +33,11 @@ for _ in $(seq 1 100); do
   kill -0 "$MOCK_PID" 2>/dev/null || break
   sleep 0.1
 done
-[ -s "$SRV/port" ] || { echo "FAIL: tests/native_bridge_server.py did not start"; exit 1; }
+if [ ! -s "$SRV/port" ]; then
+  if kill -0 "$MOCK_PID" 2>/dev/null; then echo "FAIL: mock server did not report its port within 10s"
+  else echo "FAIL: mock server exited before reporting its port"; fi
+  exit 1
+fi
 PORT="$(cat "$SRV/port")"
 
 cat > "$HOME/.rogue-env" <<EOF2
@@ -117,6 +121,21 @@ chmod g+w "$BIN_DIR/0.1.0"
 check "group-writable directory keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
 chmod 755 "$BIN_DIR/0.1.0"
 check "a protected binary runs again" "{\"native\":\"claude PreToolUse root=$PLUGIN\",\"stdin\":{}}" "$(hook PreToolUse '{}')"
+
+echo "an install root with a directory above it another user could replace: no exec, no installer"
+chmod g+w "$HOME/.rogue/bin"
+check "group-writable ancestor keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+pin 0.6.0 "$(sha "$SRV/blob")"
+: > "$SRV/requests"
+check "a missing binary there keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+sleep 2
+check "no installer was started" "" "$(cat "$SRV/requests")"
+install
+check "the installer refuses it too" "" "$(cat "$SRV/requests")"
+contains "and logs why" "rogue-hook 0.6.0: $BIN_DIR/0.6.0 is not protected from other users" "$(log)"
+check "nothing written for it" "" "$(ls -A "$BIN_DIR" | grep 0.6.0)"
+chmod g-w "$HOME/.rogue/bin"
+pin 0.1.0 "$(sha "$SRV/blob")"
 
 echo "already installed: no download"
 install

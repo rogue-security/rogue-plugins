@@ -12,7 +12,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Real path: the scripts derive their root from import.meta.url, which resolves symlinks.
@@ -70,6 +70,7 @@ function pin(version, digest) {
     `{\n  "version": "${version}",\n  "sha256": {\n    "${PLATFORM}": "${digest}"\n  }\n}\n`,
   );
 }
+const EXE_NAME = process.platform === "win32" ? "rogue-hook.exe" : "rogue-hook";
 const installed = (v) => fs.existsSync(path.join(BIN_DIR, v, "rogue-hook"));
 const binaryLog = () => {
   try {
@@ -188,6 +189,27 @@ test("a binary another user could replace never runs", posix, async () => {
   assert.equal((await hook("BeforeTool", "{}")).out, native);
 });
 
+test("an install root with a directory above it another user could replace: no exec, no installer", posix, async () => {
+  const above = path.join(HOME, ".rogue", "bin");
+  fs.chmodSync(above, 0o775);
+  try {
+    assert.equal((await hook("BeforeTool", "{}", { ROGUE_API_KEY: "" })).out, "{}");
+    pin("0.6.0", sha(blob));
+    requests = [];
+    const r = await hook("BeforeTool", "{}", { ROGUE_API_KEY: "", ROGUE_NATIVE_BRIDGE_RETRY: "0" });
+    assert.equal(r.out, "{}", "a missing binary there keeps the script");
+    await new Promise((res) => setTimeout(res, 2000));
+    assert.deepEqual(requests, [], "no installer was started");
+    await install();
+    assert.deepEqual(requests, [], "the installer refuses it too");
+    assert.ok(binaryLog().includes(`0.6.0: ${path.join(BIN_DIR, "0.6.0")} is not protected from other users`));
+    assert.deepEqual(fs.readdirSync(BIN_DIR).filter((f) => f.includes("0.6.0")), [], "nothing written");
+  } finally {
+    fs.chmodSync(above, 0o755);
+    pin("0.1.0", sha(blob));
+  }
+});
+
 test("managed hooks, kill switches and a relative root keep the script", posix, async () => {
   const off = { ROGUE_API_KEY: "", HOME: EMPTY, ROGUE_NATIVE_BRIDGE_DIR: BIN_DIR };
   assert.equal((await hook("BeforeTool", "{}", { ...off, ROGUE_HOOK_SOURCE: "managed" })).out, "{}");
@@ -252,4 +274,33 @@ test("no API key installs nothing", posix, async () => {
   await install({ HOME: EMPTY });
   assert.equal(installed("0.4.0"), false);
   assert.deepEqual(requests, []);
+});
+
+// On Windows the hand-off accepts a binary only under the per-user default root (Node reads no ACL);
+// the decision is platform-neutral, so it runs here with this platform's paths.
+test("Windows rule: only the per-user default root, with no link along the way", async () => {
+  const { inUserRoot } = await import(pathToFileURL(path.join(PLUGIN, "scripts", "shared.mjs")).href);
+  const home = path.join(WORK, "win-home");
+  const root = path.join(home, ".rogue", "bin", "rogue-hook");
+  fs.mkdirSync(path.join(root, "0.1.0"), { recursive: true });
+  fs.writeFileSync(path.join(root, "0.1.0", EXE_NAME), "");
+  assert.equal(inUserRoot(path.join(root, "0.1.0", EXE_NAME), home), true, "installed binary");
+  assert.equal(inUserRoot(path.join(root, "0.9.0", EXE_NAME), home), true, "not installed yet");
+  assert.equal(
+    inUserRoot(path.join(home, ".ROGUE", "bin", "rogue-hook", "0.9.0", EXE_NAME), home),
+    true,
+    "compared case-insensitively",
+  );
+  assert.equal(inUserRoot(path.join(root, "0.1.0", EXE_NAME), ""), false, "no user profile");
+  assert.equal(inUserRoot(path.join(WORK, "custom", "0.1.0", EXE_NAME), home), false, "custom root");
+  assert.equal(
+    inUserRoot(path.join(`${root}-other`, "0.1.0", EXE_NAME), home),
+    false,
+    "a sibling that only shares the prefix",
+  );
+  if (process.platform !== "win32") {
+    fs.mkdirSync(path.join(WORK, "elsewhere"), { recursive: true });
+    fs.symlinkSync(path.join(WORK, "elsewhere"), path.join(root, "0.2.0"));
+    assert.equal(inUserRoot(path.join(root, "0.2.0", EXE_NAME), home), false, "a link along the way");
+  }
 });

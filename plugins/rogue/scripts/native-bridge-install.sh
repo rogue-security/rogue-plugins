@@ -39,9 +39,16 @@ DEST="$DIR/$VERSION/rogue-hook"
 
 # The hand-off runs only a binary in a directory nobody else can write.
 umask 022
-mkdir -p "$HOME/.rogue" "$DIR" 2>/dev/null || exit 0
+mkdir -p "$HOME/.rogue" 2>/dev/null || exit 0
 LOG="$HOME/.rogue/hook-binary.log"
 say() { printf '%s rogue-hook %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION" "$1" >> "$LOG" 2>/dev/null; }
+# Same rule as the hand-off, before and after creating the install directory: another user must not
+# be able to replace any directory above it.
+unsafe() { say "$DIR/$VERSION is not protected from other users; the script bridge handles events"; exit 0; }
+command -v rogue_nearest_dir_is_protected >/dev/null 2>&1 || exit 0
+rogue_nearest_dir_is_protected "$DIR/$VERSION" || unsafe
+mkdir -p "$DIR" 2>/dev/null || exit 0
+rogue_nearest_dir_is_protected "$DIR/$VERSION" || unsafe
 
 # One attempt at a time, and not again until the retry interval has passed.
 LOCK="$DIR/.lock-$VERSION"
@@ -90,6 +97,7 @@ URL="$(curl -fsS --max-time 15 -H "x-rogue-api-key: $ROGUE_API_KEY" \
 [ -n "$URL" ] || give_up "no download URL for $PLATFORM"
 
 mkdir -p "$DIR/$VERSION" 2>/dev/null || give_up "cannot create $DIR/$VERSION"
+rogue_nearest_dir_is_protected "$DIR/$VERSION" || give_up "$DIR/$VERSION is not protected from other users"
 TMP="$DIR/$VERSION/.rogue-hook.download.$$"
 curl -fsS --max-time 120 -o "$TMP" "$URL" 2>/dev/null || give_up "download failed"
 GOT="$(sha256 "$TMP")"
