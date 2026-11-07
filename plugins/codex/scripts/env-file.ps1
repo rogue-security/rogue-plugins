@@ -67,6 +67,11 @@ function Test-RogueDirChain {
         if ($LASTEXITCODE -ne 0) { $info = @(& stat -Lf '%u %p' $list 2>$null) }
         if ($LASTEXITCODE -ne 0 -or $info.Count -ne $list.Count) { return $false }
         $me = [string](& id -u)
+        # A symlink's own owner decides where it points, so it must be us or root too (stat without -L).
+        $links = @(& stat -c '%u' $list 2>$null)
+        if ($LASTEXITCODE -ne 0) { $links = @(& stat -f '%u' $list 2>$null) }
+        if ($LASTEXITCODE -ne 0 -or $links.Count -ne $list.Count) { return $false }
+        foreach ($o in $links) { if ($o -ne '0' -and $o -ne $me) { return $false } }
         foreach ($line in $info) {
             if ($line -notmatch '^(\d+) ([0-7]+)$') { return $false }
             $owner = $Matches[1]; $mode = [Convert]::ToInt32($Matches[2], 8)

@@ -41,6 +41,9 @@ rogue_dir_chain_is_protected() ( # <existing absolute dir>
   set -- $list
   info=$(stat -Lc '%u %a' "$@" 2>/dev/null) || info=$(stat -Lf '%u %p' "$@" 2>/dev/null) || exit 1
   me=$(id -u)
+  # A symlink's own owner decides where it points, so it must be us or root too (stat without -L).
+  owners=$(stat -c '%u' "$@" 2>/dev/null) || owners=$(stat -f '%u' "$@" 2>/dev/null) || exit 1
+  for o in $owners; do [ "$o" = 0 ] || [ "$o" = "$me" ] || exit 1; done
   # One stat line per directory; counted in the shell so the check needs only stat and id.
   n=$#
   # shellcheck disable=SC2086

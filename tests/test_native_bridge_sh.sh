@@ -137,6 +137,26 @@ check "nothing written for it" "" "$(ls -A "$BIN_DIR" | grep 0.6.0)"
 chmod g-w "$HOME/.rogue/bin"
 pin 0.1.0 "$(sha "$SRV/blob")"
 
+echo "an install root reached through another user's symlink: no exec"
+ln -s "$BIN_DIR" "$WORK/link"
+check "our own symlink is fine" "{\"native\":\"claude PreToolUse root=$PLUGIN\",\"stdin\":{}}" \
+  "$(hook PreToolUse '{}' ROGUE_NATIVE_BRIDGE_DIR="$WORK/link")"
+# Only root can chown a link, so a stat wrapper reports a foreign owner for it when asked without -L.
+mkdir -p "$WORK/foreign-stat"
+cat > "$WORK/foreign-stat/stat" <<EOF
+#!/bin/sh
+real=\$(PATH=/usr/bin:/bin command -v stat)
+case "\$1:\$2" in -c:%u|-f:%u) ;; *) exec "\$real" "\$@" ;; esac
+flag=\$1; shift 2
+for p; do
+  if [ "\$p" = "$WORK/link" ]; then echo 4242; else "\$real" "\$flag" '%u' "\$p" || exit 1; fi
+done
+EOF
+chmod 755 "$WORK/foreign-stat/stat"
+check "a foreign symlink keeps the script" '{}' \
+  "$(hook PreToolUse '{}' ROGUE_NATIVE_BRIDGE_DIR="$WORK/link" PATH="$WORK/foreign-stat:$PATH" ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+rm "$WORK/link"
+
 echo "already installed: no download"
 install
 check "no request" "" "$(cat "$SRV/requests")"

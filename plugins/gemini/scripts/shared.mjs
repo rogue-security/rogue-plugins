@@ -127,6 +127,14 @@ export function dirChainIsProtected(dir) {
         return false;
       }
       if (!(st.uid === 0 && st.mode & 0o1000) && !isProtected(st)) return false;
+      // A symlink's own owner decides where it points, so it must be us or root too.
+      let own;
+      try {
+        own = fs.lstatSync(d).uid;
+      } catch {
+        return false;
+      }
+      if (own !== 0 && own !== process.getuid()) return false;
       if (d === path.dirname(d)) break;
     }
   }
