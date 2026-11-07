@@ -275,6 +275,22 @@ try {
         Check 'a junction in the chain keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($junction.Replace("'", "''"))' }").Out
         # Removes the junction alone, never what it points at.
         [IO.Directory]::Delete($junction)
+        Write-Host 'Windows: the directories above the install root'
+        $parent = Split-Path -Parent $binDir
+        $everyone = New-Object System.Security.Principal.SecurityIdentifier 'S-1-1-0'
+        foreach ($case in @(@('DeleteSubdirectoriesAndFiles', 'kept', 'a parent another user can delete children of keeps the script'),
+                            @('CreateDirectories', "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}", 'a parent another user can only create in still hands off'))) {
+            $acl = Get-Acl -LiteralPath $parent
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule ($everyone, $case[0], 'Allow')
+            $acl.AddAccessRule($rule); Set-Acl -LiteralPath $parent -AclObject $acl
+            Check $case[2] $case[1] (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+            $acl = Get-Acl -LiteralPath $parent; [void]$acl.RemoveAccessRule($rule); Set-Acl -LiteralPath $parent -AclObject $acl
+        }
+        $above = Join-Path $work 'jparent'
+        New-Item -ItemType Junction -Path $above -Target $parent | Out-Null
+        $viaAbove = Join-Path $above (Split-Path -Leaf $binDir)
+        Check 'a junction above the install root keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($viaAbove.Replace("'", "''"))' }").Out
+        [IO.Directory]::Delete($above)
         Check 'the default path still hands off' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
     }
 
