@@ -39,6 +39,15 @@ function say(msg) {
   }
 }
 
+// Creates `dir` and its missing parents as 0755 whatever the umask: mkdirSync's mode is masked by it,
+// and the hand-off runs only a binary in directories nobody else can write.
+function makeDir(dir) {
+  const created = [];
+  for (let d = dir; !fs.existsSync(d) && d !== path.dirname(d); d = path.dirname(d)) created.push(d);
+  fs.mkdirSync(dir, { recursive: true });
+  if (!IS_WIN) for (const d of created) fs.chmodSync(d, 0o755);
+}
+
 function giveUp(why) {
   say(`${why}; the script bridge handles events`);
   process.exit(0);
@@ -66,17 +75,17 @@ async function main() {
   const dest = path.join(dir, version, EXE);
   if (fs.existsSync(dest)) return;
   // Same rule as the hand-off, before and after creating the install directory: another user must
-  // not be able to replace any directory above it. Created 0755 whatever the umask.
+  // not be able to replace any directory above it.
   const versionDir = path.join(dir, version);
   const unsafe = () => giveUp(`${versionDir} is not protected from other users`);
   try {
-    fs.mkdirSync(path.join(HOME, ".rogue"), { recursive: true });
+    makeDir(path.join(HOME, ".rogue"));
   } catch {
     return;
   }
   if (!nativePathIsProtected(dest)) unsafe();
   try {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+    makeDir(dir);
   } catch {
     return;
   }
@@ -141,7 +150,7 @@ async function main() {
   if (typeof url !== "string" || !url) giveUp(`no download URL for ${key}`);
 
   try {
-    fs.mkdirSync(versionDir, { recursive: true, mode: 0o755 });
+    makeDir(versionDir);
   } catch {
     giveUp(`cannot create ${versionDir}`);
   }

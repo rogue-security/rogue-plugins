@@ -210,6 +210,47 @@ test("an install root with a directory above it another user could replace: no e
   }
 });
 
+test("an install root reached through a symlink: only root's own link is followed", posix, async () => {
+  const link = path.join(WORK, "link");
+  fs.symlinkSync(BIN_DIR, link);
+  try {
+    const viaLink = { ROGUE_NATIVE_BRIDGE_DIR: link, ROGUE_API_KEY: "", ROGUE_NATIVE_BRIDGE_RETRY: "0" };
+    assert.equal((await hook("BeforeTool", "{}", viaLink)).out, "{}", "our own symlink keeps the script");
+    pin("0.7.0", sha(blob));
+    requests = [];
+    assert.equal((await hook("BeforeTool", "{}", viaLink)).out, "{}", "a missing binary under it too");
+    await new Promise((res) => setTimeout(res, 2000));
+    assert.deepEqual(requests, [], "and starts no installer");
+    assert.deepEqual(fs.readdirSync(BIN_DIR).filter((f) => f.includes("0.7.0")), [], "nothing written");
+    // Only root can chown a link: report root as this one's owner to the rule itself.
+    const { dirChainIsProtected } = await import(pathToFileURL(path.join(PLUGIN, "scripts", "shared.mjs")).href);
+    const lstat = fs.lstatSync;
+    fs.lstatSync = (p, ...rest) => {
+      const st = lstat(p, ...rest);
+      return p === link ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, { uid: 0 }) : st;
+    };
+    try {
+      assert.equal(dirChainIsProtected(path.join(link, "0.1.0")), true, "a root-owned symlink is followed");
+    } finally {
+      fs.lstatSync = lstat;
+    }
+    assert.equal(dirChainIsProtected(path.join(link, "0.1.0")), false);
+    // macOS keeps /var as a link root owns: the real thing, end to end.
+    if (process.platform === "darwin" && BIN_DIR.startsWith("/private/var/")) {
+      const viaVar = BIN_DIR.slice("/private".length);
+      pin("0.1.0", sha(blob));
+      assert.equal(
+        (await hook("BeforeTool", "{}", { ROGUE_NATIVE_BRIDGE_DIR: viaVar })).out,
+        `{"native":"gemini BeforeTool root=${PLUGIN}","stdin":{}}`,
+        "through /var",
+      );
+    }
+  } finally {
+    fs.rmSync(link);
+    pin("0.1.0", sha(blob));
+  }
+});
+
 test("managed hooks, kill switches and a relative root keep the script", posix, async () => {
   const off = { ROGUE_API_KEY: "", HOME: EMPTY, ROGUE_NATIVE_BRIDGE_DIR: BIN_DIR };
   assert.equal((await hook("BeforeTool", "{}", { ...off, ROGUE_HOOK_SOURCE: "managed" })).out, "{}");
@@ -303,4 +344,26 @@ test("Windows rule: only the per-user default root, with no link along the way",
     fs.symlinkSync(path.join(WORK, "elsewhere"), path.join(root, "0.2.0"));
     assert.equal(inUserRoot(path.join(root, "0.2.0", EXE_NAME), home), false, "a link along the way");
   }
+});
+
+test("under umask 002 the installer still creates directories the hand-off accepts", posix, async () => {
+  stub("0.1.0");
+  pin("0.1.0", sha(blob));
+  const home = path.join(WORK, "umask-home");
+  fs.mkdirSync(home, { recursive: true, mode: 0o755 });
+  fs.writeFileSync(path.join(home, ".rogue-env"), `export ROGUE_API_KEY=test-key\nexport ROGUE_BASE_URL=${BASE}\n`, {
+    mode: 0o600,
+  });
+  const env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ROGUE_NATIVE_BRIDGE_RETRY: "0" };
+  await new Promise((resolve) => {
+    const child = spawn("/bin/sh", ["-c", 'umask 002; exec "$0" "$@"', process.execPath, script("native-bridge-install.mjs"), PLUGIN], { env });
+    child.on("close", resolve);
+  });
+  const bin = path.join(home, ".rogue", "bin", "rogue-hook", "0.1.0", "rogue-hook");
+  assert.ok(fs.existsSync(bin), "installed");
+  for (let d = path.dirname(bin); d !== home; d = path.dirname(d)) {
+    assert.equal(fs.statSync(d).mode & 0o022, 0, `${d} is writable by group or other`);
+  }
+  const r = await hook("BeforeTool", "{}", { HOME: home, USERPROFILE: home });
+  assert.equal(r.out, `{"native":"gemini BeforeTool root=${PLUGIN}","stdin":{}}`);
 });

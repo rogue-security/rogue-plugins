@@ -33,6 +33,8 @@ function Test-RogueProtectedPath {
         if ($owner -notin $trusted -or ($System -and $owner -notin $admins)) { return $false }
         $write = [System.Security.AccessControl.FileSystemRights]'Write, Delete, ChangePermissions, TakeOwnership, DeleteSubdirectoriesAndFiles'
         foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+            # An inherit-only entry (a directory's CREATOR OWNER, say) grants nothing on the item itself.
+            if ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
             if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and
                 $rule.IdentityReference.Value -notin $writers) { return $false }
         }
@@ -40,14 +42,31 @@ function Test-RogueProtectedPath {
     } catch { return $false }
 }
 
-# Test-RogueProtectedPath for every existing directory from $Path (or, if it does not exist yet, its
-# nearest existing parent) up to /, both as written and as its physical path, so no other user can
-# swap a component. A root-owned sticky directory (/tmp) also passes: nobody can rename or remove an
-# entry there that they do not own. Off Windows only; on Windows the exe alone is held to the ACL rule.
+# Test-RogueProtectedPath for every existing directory above the native bridge, so no other user can
+# swap a component. $Path is its version directory, $Root the install root it lies in.
+#   Off Windows: every existing directory from $Path (or its nearest existing parent) up to /, both
+#   as written and as its physical path. A root-owned sticky directory (/tmp) also passes: nobody can
+#   rename or remove an entry there that they do not own. A component written as a symlink must be
+#   root's own link (not even ours): only then can no other user's link sit behind it.
+#   Windows: every existing directory from $Path up to and including $Root, none of them a junction
+#   or symlink. It stops at $Root: the drive root and C:\Users let any signed-in user create entries.
 function Test-RogueDirChain {
-    param([string]$Path)
-    if (-not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)) { return $true }
+    param([string]$Path, [string]$Root)
     try {
+        if (-not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)) {
+            $top = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+            $d = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+            if (-not ($d.Equals($top, 'OrdinalIgnoreCase') -or $d.StartsWith("$top\", 'OrdinalIgnoreCase'))) { return $false }
+            while ($true) {
+                $item = Get-Item -Force -LiteralPath $d -ErrorAction SilentlyContinue
+                if ($item) {
+                    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+                    if (-not (Test-RogueProtectedPath $d)) { return $false }
+                }
+                if ($d.Equals($top, 'OrdinalIgnoreCase')) { return $true }
+                $d = Split-Path -Parent $d
+            }
+        }
         if (-not $Path.StartsWith('/')) { return $false }
         $up = $Path
         while (-not (Test-Path -LiteralPath $up -PathType Container)) {
@@ -56,9 +75,12 @@ function Test-RogueDirChain {
         $phys = & /bin/sh -c 'cd -P -- "$1" && pwd -P' sh $up 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $phys) { return $false }
         $list = New-Object System.Collections.Generic.List[string]
+        $links = New-Object System.Collections.Generic.List[string]
         foreach ($p in @($up, [string]$phys)) {
             while ($true) {
                 $list.Add($p)
+                $item = Get-Item -Force -LiteralPath $p -ErrorAction SilentlyContinue
+                if ($item -and $item.LinkType) { $links.Add($p) }
                 if ($p -eq '/') { break }
                 $i = $p.LastIndexOf('/'); $p = if ($i -le 0) { '/' } else { $p.Substring(0, $i) }
             }
@@ -67,11 +89,12 @@ function Test-RogueDirChain {
         if ($LASTEXITCODE -ne 0) { $info = @(& stat -Lf '%u %p' $list 2>$null) }
         if ($LASTEXITCODE -ne 0 -or $info.Count -ne $list.Count) { return $false }
         $me = [string](& id -u)
-        # A symlink's own owner decides where it points, so it must be us or root too (stat without -L).
-        $links = @(& stat -c '%u' $list 2>$null)
-        if ($LASTEXITCODE -ne 0) { $links = @(& stat -f '%u' $list 2>$null) }
-        if ($LASTEXITCODE -ne 0 -or $links.Count -ne $list.Count) { return $false }
-        foreach ($o in $links) { if ($o -ne '0' -and $o -ne $me) { return $false } }
+        if ($links.Count) {
+            $owners = @(& stat -c '%u' $links 2>$null)
+            if ($LASTEXITCODE -ne 0) { $owners = @(& stat -f '%u' $links 2>$null) }
+            if ($LASTEXITCODE -ne 0 -or $owners.Count -ne $links.Count) { return $false }
+            foreach ($o in $owners) { if ($o -ne '0') { return $false } }
+        }
         foreach ($line in $info) {
             if ($line -notmatch '^(\d+) ([0-7]+)$') { return $false }
             $owner = $Matches[1]; $mode = [Convert]::ToInt32($Matches[2], 8)

@@ -238,6 +238,44 @@ try {
         Contains 'and logs why' "rogue-hook 0.6.0: $(Join-Path $binDir '0.6.0') is not protected from other users" (Get-Log)
         Check 'nothing written for it' 0 @(Get-ChildItem -Force -LiteralPath $binDir | Where-Object { $_.Name -like '*0.6.0' }).Count
         Set-Exposed $above $false
+
+        Write-Host "an install root reached through a symlink: only root's own link is followed"
+        $link = Join-Path $work 'link'
+        New-Item -ItemType SymbolicLink -Path $link -Target $binDir | Out-Null
+        $viaLink = "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($link.Replace("'", "''"))' }"
+        Check 'our own symlink keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} $viaLink).Out
+        Set-Pin '0.7.0' (Get-Sha (Join-Path $srv 'blob'))
+        [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
+        Check 'a missing binary under it keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} $viaLink).Out
+        Start-Sleep -Seconds 3
+        Check 'and starts no installer' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
+        Check 'nothing written under it' 0 @(Get-ChildItem -Force -LiteralPath $binDir | Where-Object { $_.Name -like '*0.7.0' }).Count
+        Set-Pin '0.1.0' (Get-Sha (Join-Path $srv 'blob'))
+        # Only root can chown a link, so a stat wrapper reports root as its owner when asked without -L.
+        # (On macOS every case here also runs through /var, a link root owns.)
+        $wrapDir = Join-Path $work 'root-stat'
+        New-Item -ItemType Directory -Force -Path $wrapDir | Out-Null
+        $wrap = "#!/bin/sh`nreal=`$(PATH=/usr/bin:/bin command -v stat)`n" +
+            "case `"`$1:`$2`" in -c:%u|-f:%u) ;; *) exec `"`$real`" `"`$@`" ;; esac`n" +
+            "flag=`$1; shift 2`nfor p; do`n" +
+            "  if [ `"`$p`" = '$link' ]; then echo 0; else `"`$real`" `"`$flag`" '%u' `"`$p`" || exit 1; fi`ndone`n"
+        [IO.File]::WriteAllText((Join-Path $wrapDir 'stat'), $wrap)
+        & chmod 755 (Join-Path $wrapDir 'stat')
+        $r = Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ PATH = "$wrapDir$([IO.Path]::PathSeparator)$env:PATH" } $viaLink
+        Check 'a root-owned symlink is followed' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" $r.Out
+        Remove-Item -LiteralPath $link -Force
+    } else {
+        Write-Host 'Windows: every directory from the version directory up to the install root'
+        $verDir = Join-Path $binDir '0.1.0'
+        Set-Exposed $verDir $true
+        Check 'a directory another user can write keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+        Set-Exposed $verDir $false
+        $junction = Join-Path $work 'jbin'
+        New-Item -ItemType Junction -Path $junction -Target $binDir | Out-Null
+        Check 'a junction in the chain keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($junction.Replace("'", "''"))' }").Out
+        # Removes the junction alone, never what it points at.
+        [IO.Directory]::Delete($junction)
+        Check 'the default path still hands off' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
     }
 
     Write-Host 'a download that does not match the pin is never installed'

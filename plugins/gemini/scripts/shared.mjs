@@ -100,7 +100,8 @@ export function inUserRoot(file, home) {
 // isProtected for every existing directory from `dir` (or, if it does not exist yet, its nearest
 // existing parent) up to /, both as written and as its physical path, so no other user can swap a
 // component. A root-owned sticky directory (/tmp) also passes: nobody can rename or remove an entry
-// there that they do not own. POSIX only (see nativePathIsProtected).
+// there that they do not own. A component written as a symlink must be root's own link (not even
+// ours): only then can no other user's link sit behind it. POSIX only (see nativePathIsProtected).
 export function dirChainIsProtected(dir) {
   if (!path.isAbsolute(dir)) return false;
   const isDir = (d) => {
@@ -127,14 +128,13 @@ export function dirChainIsProtected(dir) {
         return false;
       }
       if (!(st.uid === 0 && st.mode & 0o1000) && !isProtected(st)) return false;
-      // A symlink's own owner decides where it points, so it must be us or root too.
-      let own;
+      let link;
       try {
-        own = fs.lstatSync(d).uid;
+        link = fs.lstatSync(d);
       } catch {
         return false;
       }
-      if (own !== 0 && own !== process.getuid()) return false;
+      if (link.isSymbolicLink() && link.uid !== 0) return false;
       if (d === path.dirname(d)) break;
     }
   }

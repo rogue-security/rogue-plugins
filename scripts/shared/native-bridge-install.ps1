@@ -50,7 +50,7 @@ function Say { param([string]$Msg) Add-Content -LiteralPath $logPath -Encoding U
 # be able to replace any directory above it.
 if (-not (Get-Command Test-RogueDirChain -ErrorAction SilentlyContinue)) { exit 0 }
 $versionDir = Join-Path $dir $version
-function Test-Unsafe { if (-not (Test-RogueDirChain $versionDir)) { Say "$versionDir is not protected from other users; the script bridge handles events"; exit 0 } }
+function Test-Unsafe { if (-not (Test-RogueDirChain $versionDir $dir)) { Say "$versionDir is not protected from other users; the script bridge handles events"; exit 0 } }
 Test-Unsafe
 New-RogueDir $dir
 Test-Unsafe
@@ -110,7 +110,7 @@ try {
     if (-not $resp.url) { Give-Up "no download URL for $platform" }
 
     New-RogueDir $versionDir
-    if (-not (Test-RogueDirChain $versionDir)) { Give-Up "$versionDir is not protected from other users" }
+    if (-not (Test-RogueDirChain $versionDir $dir)) { Give-Up "$versionDir is not protected from other users" }
     $tmp = Join-Path (Join-Path $dir $version) ".rogue-hook.download.$PID$(if ($onWindows) { '.exe' })"
     try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $resp.url -OutFile $tmp } catch { Give-Up 'download failed' }
     $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
