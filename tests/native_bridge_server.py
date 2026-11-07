@@ -7,10 +7,18 @@ Usage: python3 native_bridge_server.py <port> <dir>
 Port 0 picks a free port; once listening, the server writes the port it got to <dir>/port.
 """
 import http.server
+import socketserver
 import os
 import sys
 
 srv = sys.argv[2]
+
+
+class Server(http.server.HTTPServer):
+    # HTTPServer looks up its own host name on bind, which can stall for seconds on macOS runners.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -40,7 +48,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
+server = Server(("127.0.0.1", int(sys.argv[1])), Handler)
 port = server.server_address[1]
 with open(os.path.join(srv, "port.tmp"), "w") as f:
     f.write(str(port))

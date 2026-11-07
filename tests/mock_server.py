@@ -14,6 +14,7 @@ Usage:
         python3 mock_server.py 9876 /tmp/mock-headers.json
 """
 import http.server
+import socketserver
 import json
 import os
 import sys
@@ -21,6 +22,13 @@ import time
 
 
 HEADERS_PATH = sys.argv[2] if len(sys.argv) > 2 else "/tmp/rogue-mock-headers.json"
+
+
+class Server(http.server.HTTPServer):
+    # HTTPServer looks up its own host name on bind, which can stall for seconds on macOS runners.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -62,4 +70,4 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1])
-    http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    Server(("127.0.0.1", port), Handler).serve_forever()

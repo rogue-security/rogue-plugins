@@ -12,6 +12,7 @@ run, and records exactly what the fake curl would have:
   ctrl/calls  if present, a file that gets one "POST <path>" line per request
 """
 import http.server
+import socketserver
 import os
 import sys
 
@@ -24,6 +25,13 @@ def setting(name, default=""):
             return f.read().strip() or default
     except OSError:
         return default
+
+
+class Server(http.server.ThreadingHTTPServer):
+    # HTTPServer looks up its own host name on bind, which can stall for seconds on macOS runners.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -60,7 +68,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+server = Server(("127.0.0.1", PORT), Handler)
 with open(os.path.join(CTRL, "port.tmp"), "w") as f:
     f.write(str(server.server_address[1]))
 os.replace(os.path.join(CTRL, "port.tmp"), os.path.join(CTRL, "port"))
