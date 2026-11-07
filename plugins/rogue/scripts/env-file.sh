@@ -41,7 +41,11 @@ rogue_dir_chain_is_protected() ( # <existing absolute dir>
   set -- $list
   info=$(stat -Lc '%u %a' "$@" 2>/dev/null) || info=$(stat -Lf '%u %p' "$@" 2>/dev/null) || exit 1
   me=$(id -u)
-  [ "$(printf '%s\n' "$info" | wc -l | tr -d ' ')" = "$#" ] || exit 1
+  # One stat line per directory; counted in the shell so the check needs only stat and id.
+  n=$#
+  # shellcheck disable=SC2086
+  set -- $info
+  [ "$#" = "$n" ] || exit 1
   printf '%s\n' "$info" | while IFS=' ' read -r owner mode; do
     case "$owner:$mode" in *[!0-9:]*|:*|*:) exit 1 ;; esac
     [ "$owner" = 0 ] && [ "$((0$mode & 01000))" != 0 ] && continue
