@@ -73,7 +73,9 @@ function Test-RogueDirChain {
                 [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
             $replace = [System.Security.AccessControl.FileSystemRights]'Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
             for ($d = Split-Path -Parent $top; $d; $d = Split-Path -Parent $d) {
-                $item = Get-Item -Force -LiteralPath $d -ErrorAction Stop
+                # Not created yet (the installer makes it, then checks again).
+                $item = Get-Item -Force -LiteralPath $d -ErrorAction SilentlyContinue
+                if (-not $item) { continue }
                 if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
                 $acl = Get-Acl -LiteralPath $d -ErrorAction Stop
                 if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $trusted) { return $false }
