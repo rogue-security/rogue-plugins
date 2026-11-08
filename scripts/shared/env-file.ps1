@@ -66,15 +66,18 @@ function Test-RogueDirChain {
                 if ($d.Equals($top, 'OrdinalIgnoreCase')) { break }
                 $d = Split-Path -Parent $d
             }
-            # Above the root, a parent lets whoever may delete its children rename or replace the root.
-            # Plain create rights (C:\ grants them to every signed-in user) don't.
+            # Above the root, a parent lets whoever may delete its children rename or replace the root,
+            # and its owner may always rewrite its ACL to grant that. Plain create rights (C:\ grants
+            # them to every signed-in user) don't.
             $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464',
                 [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
             $replace = [System.Security.AccessControl.FileSystemRights]'Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
             for ($d = Split-Path -Parent $top; $d; $d = Split-Path -Parent $d) {
                 $item = Get-Item -Force -LiteralPath $d -ErrorAction Stop
                 if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
-                foreach ($rule in (Get-Acl -LiteralPath $d -ErrorAction Stop).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+                $acl = Get-Acl -LiteralPath $d -ErrorAction Stop
+                if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $trusted) { return $false }
+                foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
                     if ($rule.AccessControlType -eq 'Allow' -and -not ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -and
                         ($rule.FileSystemRights -band $replace) -and $rule.IdentityReference.Value -notin $trusted) { return $false }
                 }

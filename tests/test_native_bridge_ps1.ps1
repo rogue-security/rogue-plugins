@@ -286,6 +286,11 @@ try {
             Check $case[2] $case[1] (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
             $acl = Get-Acl -LiteralPath $parent; [void]$acl.RemoveAccessRule($rule); Set-Acl -LiteralPath $parent -AclObject $acl
         }
+        # An owner may rewrite the ACL without any allow entry; icacls enables the restore privilege that
+        # setting another owner needs.
+        & icacls $parent /setowner '*S-1-5-32-545' | Out-Null
+        Check 'a parent owned by another identity keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+        & icacls $parent /setowner "*$([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)" | Out-Null
         $above = Join-Path $work 'jparent'
         New-Item -ItemType Junction -Path $above -Target $parent | Out-Null
         $viaAbove = Join-Path $above (Split-Path -Leaf $binDir)
