@@ -18,10 +18,13 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FIX="$REPO/tests/fixtures/kiro"
+. "$REPO/tests/lib/bridge.sh"
 SH="${TEST_SH:-sh}"
 
 PORT=$((RANDOM % 10000 + 30000))
 HEADERS_FILE="$(mktemp)"
+# Every request the mock does not record as the hook request (see start_mock).
+SIDE_FILE="$HEADERS_FILE.other"
 ENV_FILE="$(mktemp)"
 OUT_FILE="$(mktemp)"
 ERR_FILE="$(mktemp)"
@@ -41,9 +44,14 @@ HB_MARKER="$STAGE/heartbeat-fired"
 printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> "%s"\n' "$HB_MARKER" > "$STAGE/scripts/heartbeat.sh"
 chmod +x "$STAGE/scripts/heartbeat.sh"
 
+# Per-run HOMEs live under one parent: the native bridge's detached heartbeat can
+# still be writing into a HOME (beacon stamp, ship state) when a case removes it.
+HOMES="$(mktemp -d)"
+
 cleanup() {
   [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null || true
-  rm -f "$ENV_FILE" "$HEADERS_FILE" "$OUT_FILE" "$ERR_FILE"
+  rm -rf "$HOMES" 2>/dev/null || true
+  rm -f "$ENV_FILE" "$HEADERS_FILE" "$SIDE_FILE" "$OUT_FILE" "$ERR_FILE"
   rm -rf "$STAGE"
 }
 trap cleanup EXIT
@@ -63,7 +71,7 @@ EOF
 # around the call only: a nonzero exit is the expected result of half the cases.
 run_bridge() {
   local tmp_home
-  tmp_home="$(mktemp -d)"
+  tmp_home="$(mktemp -d "$HOMES/home.XXXXXX")"
   cp "$ENV_FILE" "$tmp_home/.rogue-env"
   set +e
   HOME="$tmp_home" \
@@ -71,13 +79,14 @@ run_bridge() {
     ROGUE_LOG_FILE="$tmp_home/kiro.log" \
     ROGUE_HOOK_TIMEOUT="${ROGUE_HOOK_TIMEOUT:-}" \
     KIRO_SESSION_ID="${KIRO_SID:-}" \
+    ROGUE_VERSIONS_URL="http://127.0.0.1:${PORT}/versions.json" \
     PATH="${TEST_PATH:-$PATH}" \
     "$SH" "$HOOK" "$1" "$2" < "$3" > "$OUT_FILE" 2> "$ERR_FILE"
   LAST_RC=$?
   set -e
   LAST_HOME="$tmp_home"
   # KEEP_HOME=1 preserves the run's HOME so a caller can assert on kiro.log.
-  [ "${KEEP_HOME:-0}" = "1" ] || rm -rf "$tmp_home"
+  [ "${KEEP_HOME:-0}" = "1" ] || rm -rf "$tmp_home" 2>/dev/null || true
 }
 
 # Build a PATH that has everything the bridge needs EXCEPT jq, so its concat
@@ -109,9 +118,11 @@ posted_header() {
 
 # Readiness is probed with curl, not nc: the bridge needs curl anyway, and nc is
 # not guaranteed on a CI runner (the Copilot suite's nc dependency is why that
-# suite is NOT in validate.yml; this one is).
+# suite is NOT in validate.yml; this one is). Only the hook route is recorded:
+# the native bridge spawns its own heartbeat, whose requests land in $SIDE_FILE.
 start_mock() {
-  MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" MOCK_DELAY="${3:-0}" \
+  MOCK_ONLY_PATH=/api/v1/hooks/kiro \
+    MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" MOCK_DELAY="${3:-0}" \
     python3 "$REPO/tests/mock_server.py" "$PORT" "$HEADERS_FILE" &
   MOCK_PID=$!
   # Not a job: the kill in cleanup/restart would otherwise print "Terminated".
@@ -145,6 +156,8 @@ assert_contains() {
   case "$1" in *"$2"*) echo "  ok: $3" ;; *) echo "FAIL [$3]: <$1> does not contain <$2>" >&2; exit 1 ;; esac
 }
 assert_header() { assert_eq "$(posted_header "$1")" "$2" "$3"; }
+# The log, less the bridge=native token the native bridge adds after event= (an allowed difference).
+log_of() { sed 's/ bridge=native / /' "$1/kiro.log"; }
 assert_header_present() {
   local actual
   actual=$(python3 -c 'import json,sys; print(bool(json.load(open(sys.argv[1]))["headers"].get(sys.argv[2])))' "$HEADERS_FILE" "$1")
@@ -156,7 +169,7 @@ assert_fail_open() {
   assert_eq "$(cat "$OUT_FILE")" "" "$1: empty stdout"
   assert_eq "$(cat "$ERR_FILE")" "" "$1: empty stderr"
   assert_eq "$(wc -l < "$LAST_HOME/kiro.log" | tr -d ' ')" "1" "$1: exactly one log line"
-  rm -rf "$LAST_HOME"
+  rm -rf "$LAST_HOME" 2>/dev/null || true
 }
 
 BLOCK='{"decision":"block","reason":"Coding Agent Security: DESTRUCTIVE_COMMAND"}'
@@ -208,8 +221,8 @@ run_bridge PreToolUse kiro_cli "$FIX/cli3-PreToolUse-execute_bash.json"
 assert_eq "$LAST_RC" "2" "PreToolUse block exits 2"
 assert_eq "$(cat "$OUT_FILE")" "" "PreToolUse block leaves stdout empty"
 assert_eq "$(cat "$ERR_FILE")" "Coding Agent Security: DESTRUCTIVE_COMMAND" "PreToolUse block puts the reason on stderr"
-assert_contains "$(cat "$LAST_HOME/kiro.log")" " provider=kiro surface=kiro_cli event=PreToolUse outcome=block" "block is logged"
-rm -rf "$LAST_HOME"
+assert_contains "$(log_of "$LAST_HOME")" " provider=kiro surface=kiro_cli event=PreToolUse outcome=block" "block is logged"
+rm -rf "$LAST_HOME" 2>/dev/null || true
 KEEP_HOME=0
 
 # 2.x dialect, same answer.
@@ -248,8 +261,8 @@ for pair in "Stop:cli3-Stop" "stop:cli2-stop" "Stop:ide-Stop"; do
   KEEP_HOME=1
   run_bridge "$ev" kiro_cli "$FIX/$fx.json"
   assert_eq "$LAST_RC:$(cat "$OUT_FILE")$(cat "$ERR_FILE")" "0:" "$fx: server block → exit 0, silent"
-  assert_contains "$(cat "$LAST_HOME/kiro.log")" "outcome=allow decision=block" "$fx: the ignored block is still logged"
-  rm -rf "$LAST_HOME"
+  assert_contains "$(log_of "$LAST_HOME")" "outcome=allow decision=block" "$fx: the ignored block is still logged"
+  rm -rf "$LAST_HOME" 2>/dev/null || true
   KEEP_HOME=0
 done
 
@@ -293,7 +306,7 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "unconfigured exits 0"
 assert_eq "$(cat "$OUT_FILE")$(cat "$ERR_FILE")" "" "unconfigured is silent (no SessionStart hint either)"
-assert_contains "$(cat "$TMP_HOME/kiro.log")" " provider=kiro surface=kiro_cli event=PreToolUse outcome=unconfigured" "unconfigured logs one line"
+assert_contains "$(log_of "$TMP_HOME")" " provider=kiro surface=kiro_cli event=PreToolUse outcome=unconfigured" "unconfigured logs one line"
 assert_eq "$(wc -l < "$TMP_HOME/kiro.log" | tr -d ' ')" "1" "unconfigured: exactly one log line"
 rm -rf "$TMP_HOME"
 
@@ -416,30 +429,46 @@ rm -rf "$PREC_ROOT" "$PREC_HOME"
 # as the per-event x-rogue-agent header (one roster row per install), and the
 # trigger is what lets the beacon library throttle the per-turn Stop. Spawned
 # detached, so the marker is polled. Nothing else spawns it.
-wait_marker() { # <expected line>
-  for _ in $(seq 1 20); do
-    grep -qx "$1" "$HB_MARKER" 2>/dev/null && return 0
+# The script spawns heartbeat.sh, which the stub records as "<surface>|<trigger>".
+# The native bridge spawns its own heartbeat instead (the stub never runs), so
+# there the observable is the status request it sends, which names the surface.
+heartbeat_seen() { # <surface> <trigger>
+  for _ in $(seq 1 50); do
+    if bridge_native; then
+      grep -F "POST /api/v1/hooks/status " "$SIDE_FILE" 2>/dev/null | grep -qF "\"agent\":\"$1\"" && return 0
+    else
+      grep -qx "$1|$2" "$HB_MARKER" 2>/dev/null && return 0
+    fi
     sleep 0.1
   done
   return 1
 }
-rm -f "$HB_MARKER"
+heartbeat_state() {
+  if [ -e "$HB_MARKER" ] || grep -qF "/api/v1/hooks/status" "$SIDE_FILE" 2>/dev/null; then echo fired; else echo silent; fi
+}
+# KEEP_HOME: the detached heartbeat reads the env file after the hook has returned.
+KEEP_HOME=1
+rm -f "$HB_MARKER" "$SIDE_FILE"
 run_bridge SessionStart kiro_ide "$FIX/ide-SessionStart.json"
-wait_marker "kiro_ide|SessionStart" || { echo "FAIL [heartbeat spawn]: SessionStart never launched heartbeat.sh" >&2; exit 1; }
-echo "  ok: SessionStart spawns heartbeat.sh with the surface and the SessionStart trigger"
-rm -f "$HB_MARKER"
+heartbeat_seen kiro_ide SessionStart || { echo "FAIL [heartbeat spawn]: SessionStart never launched the heartbeat" >&2; exit 1; }
+echo "  ok: SessionStart spawns the heartbeat with the surface and the SessionStart trigger"
+rm -rf "$LAST_HOME" 2>/dev/null || true
+rm -f "$HB_MARKER" "$SIDE_FILE"
 run_bridge agentSpawn kiro_cli "$FIX/cli2-agentSpawn.json"
-wait_marker "kiro_cli|SessionStart" || { echo "FAIL [heartbeat spawn]: 2.x agentSpawn never launched heartbeat.sh" >&2; exit 1; }
+heartbeat_seen kiro_cli SessionStart || { echo "FAIL [heartbeat spawn]: 2.x agentSpawn never launched the heartbeat" >&2; exit 1; }
 echo "  ok: 2.x agentSpawn spawns it with the canonical SessionStart trigger"
-rm -f "$HB_MARKER"
+rm -rf "$LAST_HOME" 2>/dev/null || true
+rm -f "$HB_MARKER" "$SIDE_FILE"
 run_bridge stop kiro_crew "$FIX/cli2-stop.json"
-wait_marker "kiro_crew|Stop" || { echo "FAIL [heartbeat spawn]: Stop never launched heartbeat.sh" >&2; exit 1; }
+heartbeat_seen kiro_crew Stop || { echo "FAIL [heartbeat spawn]: Stop never launched the heartbeat" >&2; exit 1; }
 echo "  ok: Stop spawns it with the Stop trigger (the throttled one)"
-rm -f "$HB_MARKER"
+rm -rf "$LAST_HOME" 2>/dev/null || true
+KEEP_HOME=0
+rm -f "$HB_MARKER" "$SIDE_FILE"
 run_bridge PreToolUse kiro_cli "$FIX/cli3-PreToolUse-execute_bash.json"
 run_bridge PostToolUse kiro_cli "$FIX/cli3-PostToolUse-execute_bash.json"
 sleep 0.3
-assert_eq "$([ -e "$HB_MARKER" ] && echo fired || echo silent)" "silent" "tool events spawn no heartbeat"
+assert_eq "$(heartbeat_state)" "silent" "tool events spawn no heartbeat"
 
 # ── Case 15: an unknown surface omits the log token and defaults the header ─
 KEEP_HOME=1
@@ -450,7 +479,7 @@ case "$line" in
   *" provider=kiro event=PreToolUse "*) echo "  ok: unrecognised surface omits the surface= token" ;;
   *) echo "FAIL [surface token]: <$line>" >&2; exit 1 ;;
 esac
-rm -rf "$LAST_HOME"
+rm -rf "$LAST_HOME" 2>/dev/null || true
 KEEP_HOME=0
 
 # ── Case 19: the 3.0 engine's agent-hook copy is dropped ────────────────────
@@ -464,13 +493,13 @@ KEEP_HOME=1
 run_bridge preToolUse kiro_cli "$FIX/cli3-PreToolUse-execute_bash.json"
 assert_eq "$LAST_RC:$(cat "$OUT_FILE")$(cat "$ERR_FILE")" "0:" "camelCase trigger + PascalCase body: exit 0, silent, even on a server block"
 assert_eq "$([ -e "$HEADERS_FILE" ] && echo posted || echo none)" "none" "...and nothing is posted"
-assert_contains "$(cat "$LAST_HOME/kiro.log")" " provider=kiro surface=kiro_cli event=PreToolUse outcome=duplicate" "...the drop is logged"
-rm -rf "$LAST_HOME"
+assert_contains "$(log_of "$LAST_HOME")" " provider=kiro surface=kiro_cli event=PreToolUse outcome=duplicate" "...the drop is logged"
+rm -rf "$LAST_HOME" 2>/dev/null || true
 KEEP_HOME=0
-rm -f "$HB_MARKER"
+rm -f "$HB_MARKER" "$SIDE_FILE"
 run_bridge agentSpawn kiro_cli "$FIX/cli3-SessionStart.json"
 sleep 0.3
-assert_eq "$([ -e "$HB_MARKER" ] && echo fired || echo silent)" "silent" "a dropped agentSpawn spawns no heartbeat"
+assert_eq "$(heartbeat_state)" "silent" "a dropped agentSpawn spawns no heartbeat"
 run_bridge PreToolUse kiro_ide "$FIX/cli3-PreToolUse-execute_bash.json"
 assert_eq "$LAST_RC" "2" "the hook-file copy (PascalCase trigger) of the same event still enforces"
 run_bridge preToolUse kiro_cli "$FIX/cli2-preToolUse-execute_bash.json"

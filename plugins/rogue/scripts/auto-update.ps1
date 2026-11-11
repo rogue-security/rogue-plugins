@@ -6,9 +6,7 @@
 # if newer, re-runs the PowerShell one-line installer to upgrade in place. New
 # version takes effect on the next session.
 #
-# Opt-outs:
-#   ROGUE_AUTO_UPDATE=0       - disable entirely
-#   ROGUE_PLUGIN_VERSION=<release> - pinned, never updates
+# There is no opt-out: every install this process can update stays current.
 #
 # Runs at most once per 24h (cached in %USERPROFILE%\.rogue\.auto-update-check).
 # Silent on every failure path. All activity logs to
@@ -81,8 +79,7 @@ function ReadEnvVar {
     param([string]$Key)
     # Same rule as the dispatcher: the first trusted env file holding ROGUE_API_KEY
     # is used alone (machine, bundled, user) and overrides the process env. The
-    # bundled ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed plugins pin flags
-    # like ROGUE_AUTO_UPDATE=0 / ROGUE_PLUGIN_VERSION.
+    # bundled ${CLAUDE_PLUGIN_ROOT}\env is where compiled/managed plugins keep their settings.
     # Fail open: a no-op reader stands in until the helper loads, so a missing or
     # unreadable one skips the env files instead of killing the whole lookup.
     function Read-RogueEnvFile { param([string]$Path) }
@@ -107,9 +104,22 @@ function ReadEnvVar {
     return [Environment]::GetEnvironmentVariable($Key)
 }
 
-if ((ReadEnvVar 'ROGUE_AUTO_UPDATE') -eq '0') { LogLine 'ROGUE_AUTO_UPDATE=0, skipping'; exit 0 }
-$pin = ReadEnvVar 'ROGUE_PLUGIN_VERSION'
-if ($pin) { LogLine "ROGUE_PLUGIN_VERSION=$pin pinned, skipping"; exit 0 }
+# No opt-out: every install this process can update stays current. A compiled customer bundle
+# (it carries its own env file) is replaced by its admin, never by this script.
+if ($env:CLAUDE_PLUGIN_ROOT -and (Test-Path -LiteralPath (Join-Path $env:CLAUDE_PLUGIN_ROOT 'env') -PathType Leaf)) {
+    LogLine 'compiled bundle, updated by the admin; skipping'; exit 0
+}
+
+# The pinned native bridge runs the same check once it is installed.
+if ($env:CLAUDE_PLUGIN_ROOT) {
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $env:CLAUDE_PLUGIN_ROOT 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+    if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+        $nativeSettings = @{}
+        foreach ($k in 'ROGUE_NATIVE_BRIDGE', 'ROGUE_NATIVE_BRIDGE_CLAUDE', 'ROGUE_NATIVE_BRIDGE_DIR') { $nativeSettings[$k] = ReadEnvVar $k }
+        Invoke-RogueNativeHandoff -Root $env:CLAUDE_PLUGIN_ROOT -Family claude -Arguments @('update', 'claude') `
+            -Settings $nativeSettings -BudgetMs 600000 -FailOpen ''
+    }
+}
 
 # Rate-limit to once per day.
 $cache = Join-Path $rogueDir '.auto-update-check'
@@ -151,6 +161,7 @@ if (-not $installerUrl) { $installerUrl = 'https://raw.githubusercontent.com/rog
 try {
     $script = (Invoke-WebRequest -Uri $installerUrl -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop).Content
     $env:ROGUE_NON_INTERACTIVE = '1'
+    Remove-Item Env:ROGUE_PLUGIN_VERSION -ErrorAction SilentlyContinue
     & ([scriptblock]::Create($script))
     LogLine "installer finished"
 } catch { LogLine "installer failed: $($_.Exception.Message)" }

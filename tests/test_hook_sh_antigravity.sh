@@ -13,15 +13,20 @@ HOOK="$REPO/plugins/antigravity/scripts/hook.sh"
 ACTOR="$REPO/plugins/antigravity/scripts/actor.sh"
 INSTALL_ID="$REPO/plugins/antigravity/scripts/install-id.sh"
 SH="${TEST_SH:-sh}"
+. "$REPO/tests/lib/bridge.sh"
 
 PORT=$((RANDOM % 10000 + 30000))
 HEADERS_FILE="$(mktemp)"
 ENV_FILE="$(mktemp)"
 OUT_FILE="$(mktemp)"
+# Per-run HOMEs live here and go at exit: a detached heartbeat can still be writing
+# into one (beacon stamp, log-shipper state) after its run returns.
+HOMES="$(mktemp -d)"
 
 cleanup() {
   [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null || true
   rm -f "$ENV_FILE" "$HEADERS_FILE" "$OUT_FILE"
+  rm -rf "$HOMES" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -38,7 +43,7 @@ EOF
 # substitution would otherwise hide it in a subshell).
 run_dispatcher() {
   local tmp_home rc
-  tmp_home="$(mktemp -d)"
+  tmp_home="$(mktemp -d "$HOMES/home.XXXXXX")"
   cp "$ENV_FILE" "$tmp_home/.rogue-env"
   set +e
   HOME="$tmp_home" \
@@ -52,13 +57,16 @@ run_dispatcher() {
     ROGUE_ANTIGRAVITY_DBPROMPT_DIR="${ROGUE_ANTIGRAVITY_DBPROMPT_DIR:-}" \
     "$SH" "$HOOK" "$1" <<< "$2" > "$OUT_FILE"
   rc=$?
+  rm -rf "$tmp_home" 2>/dev/null
   set -e
-  rm -rf "$tmp_home"
   return $rc
 }
 
+# Only the hook route is recorded: a new conversation's PreInvocation and every Stop
+# start a detached heartbeat that POSTs the beacon and the log to this same mock, and
+# the native bridge's is fast enough to land after the hook's own request.
 start_mock() {
-  MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" \
+  MOCK_ONLY_PATH=/api/v1/hooks/antigravity MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" \
     python3 "$REPO/tests/mock_server.py" "$PORT" "$HEADERS_FILE" &
   MOCK_PID=$!
   for _ in $(seq 1 50); do
@@ -201,6 +209,8 @@ mkdir -p "$STAGE/scripts"
 cp "$HOOK" "$STAGE/scripts/hook.sh"
 cp "$ACTOR" "$STAGE/scripts/actor.sh"
 cp "$INSTALL_ID" "$STAGE/scripts/install-id.sh"
+# The env-file trust check: without it the staged hook skips the env file and runs unconfigured.
+cp "$(dirname "$HOOK")/env-file.sh" "$STAGE/scripts/env-file.sh"
 MARKER="$STAGE/heartbeat-fired"
 # The stub records BOTH arguments: the heartbeat is told which surface fired it
 # (three products share one install and only the hook can tell them apart, from the
@@ -220,7 +230,7 @@ LAST_LOG="$(mktemp -d)/antigravity.log"
 
 run_staged() {
   local tmp_home rc
-  tmp_home="$(mktemp -d)"
+  tmp_home="$(mktemp -d "$HOMES/home.XXXXXX")"
   cp "$ENV_FILE" "$tmp_home/.rogue-env"
   : > "$LAST_LOG"
   set +e
@@ -229,8 +239,8 @@ run_staged() {
     ROGUE_LOG_FILE="$LAST_LOG" \
     "$SH" "$STAGE/scripts/hook.sh" "$1" <<< "$2" > "$OUT_FILE"
   rc=$?
+  rm -rf "$tmp_home" 2>/dev/null
   set -e
-  rm -rf "$tmp_home"
   return $rc
 }
 
@@ -646,7 +656,8 @@ if [ -z "$RUNTIME" ] && [ -d "$HOME/.gemini/antigravity-ide" ]; then
   RUNTIME=$(sh "$REPO/plugins/antigravity/scripts/resolve-runtime.sh" "$HOME/.gemini/antigravity-ide" 2>/dev/null || true)
 fi
 
-if [ -n "$RUNTIME" ]; then
+# The native bridge reads the store itself and needs no runtime.
+if [ -n "$RUNTIME" ] || bridge_native; then
   export ROGUE_ANTIGRAVITY_NODE="$RUNTIME"
   export ROGUE_ANTIGRAVITY_DBPROMPT_DIR="$DBT/cache"
 
@@ -784,6 +795,8 @@ print(env["kind"], " ".join(parts))')
   assert_eq "$(field_present rogueDbPromptMissed)" "True" "DB_PROMPT=log leaves Stop carrying the turn"
 
   # The reader's exit status is the signal the dispatcher branches on, so pin it.
+  # Script-only: these run db-prompt.mjs directly, which the native bridge does not use.
+  if ! bridge_native; then
   rm -rf "$DBT/cache"
   set +e
   printf '%s' "$IDE_BODY" | ELECTRON_RUN_AS_NODE=1 "$RUNTIME" --no-warnings --experimental-sqlite \
@@ -799,6 +812,7 @@ print(env["kind"], " ".join(parts))')
   assert_eq "$READER_RC" "0" "the reader exits 0 when it emits"
   assert_eq "$REPEAT_RC" "0" "the reader exits 0 when there is genuinely nothing new"
   assert_eq "$UNREAD_RC" "3" "the reader exits 3 when it could not read the store"
+  fi
 
   # ── A row with no message is not a failed read ────────────────────────────
   # Every tool the model picks produces a PLANNER_RESPONSE row with tool_calls and
@@ -832,6 +846,8 @@ PY
     printf '{"conversationId":"%s","transcriptPath":"%s","initialNumSteps":5,"invocationNum":1}' "$1" "$IDE_TP"
   }
   rm -rf "$DBT/cache"
+  # Script-only: the reader is run directly. The native drift case is end to end below.
+  if ! bridge_native; then
   set +e
   printf '%s' "$(toolonly_body TOOLONLY)" | ELECTRON_RUN_AS_NODE=1 "$RUNTIME" --no-warnings \
     --experimental-sqlite "$REPO/plugins/antigravity/scripts/db-prompt.mjs" steps >/dev/null 2>&1
@@ -842,6 +858,13 @@ PY
   set -e
   assert_eq "$TOOLONLY_RC" "0" "a tool-call-only planner row reads clean (nothing to deliver)"
   assert_eq "$DRIFT_RC" "3" "an unreadable step_format is still reported as drift"
+  else
+    restart_mock '{}'
+    set +e; run_dispatcher PostInvocation "$(toolonly_body DRIFT)"; LAST_RC=$?; set -e
+    restart_mock '{}'
+    set +e; run_dispatcher Stop "$(toolonly_body DRIFT)"; LAST_RC=$?; set -e
+    assert_eq "$(field_present rogueDbStepsMissed)" "True" "an unreadable step_format is reported as drift at Stop"
+  fi
 
   # …and end to end: such an invocation must leave Stop with nothing to rebuild.
   restart_mock '{}'
@@ -874,14 +897,17 @@ else
 fi
 
 # A runtime that exists but cannot do the job must fail open, not hang or error.
+# The native bridge reads the store without one, so ROGUE_ANTIGRAVITY_NODE does not
+# apply to it and the prompt still arrives.
+if bridge_native; then NO_RUNTIME_ATTACHES=True; else NO_RUNTIME_ATTACHES=False; fi
 restart_mock '{}'
 set +e; ROGUE_ANTIGRAVITY_NODE=/bin/sh run_dispatcher PreInvocation "$IDE_BODY"; LAST_RC=$?; set -e
 assert_eq "$LAST_RC" "0" "an unusable runtime still exits 0"
-assert_eq "$(field_present rogueDbPromptB64)" "False" "an unusable runtime attaches nothing"
+assert_eq "$(field_present rogueDbPromptB64)" "$NO_RUNTIME_ATTACHES" "an unusable runtime attaches nothing (native: reads anyway)"
 restart_mock '{}'
 set +e; ROGUE_ANTIGRAVITY_NODE=/nonexistent/node run_dispatcher PreInvocation "$IDE_BODY"; LAST_RC=$?; set -e
 assert_eq "$LAST_RC" "0" "a missing runtime still exits 0"
-assert_eq "$(field_present rogueDbPromptB64)" "False" "a missing runtime attaches nothing"
+assert_eq "$(field_present rogueDbPromptB64)" "$NO_RUNTIME_ATTACHES" "a missing runtime attaches nothing (native: reads anyway)"
 
 # ── Case 19: the other two surfaces are untouched ───────────────────────────
 # This is the regression guard for "IDE only". Their bodies must carry the

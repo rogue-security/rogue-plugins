@@ -95,6 +95,15 @@ if [ -r "$_env_lib" ]; then
   done
 fi
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# until then this starts its download and carries on. See scripts/native-bridge.sh.
+_rn_root=""
+[ -n "$PLUGIN_ROOT" ] && _rn_root="$(CDPATH= cd -- "$PLUGIN_ROOT" 2>/dev/null && pwd)"
+if [ -n "$_rn_root" ] && [ -r "$_rn_root/scripts/native-bridge.sh" ]; then
+  . "$_rn_root/scripts/native-bridge.sh"
+  rogue_native_handoff "$_rn_root" cursor cursor "$event"
+fi
+
 # ── hook log ───────────────────────────────────────────────────────────────
 # `dbg` above only writes to stderr under ROGUE_DEBUG, which Cursor keeps in its
 # own per-session log — useless for after-the-fact diagnosis and unavailable to

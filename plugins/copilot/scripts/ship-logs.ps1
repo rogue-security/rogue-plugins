@@ -924,6 +924,14 @@ function Invoke-Main {
 
     Initialize-Args
     Import-ShipEnv
+    # The pinned native bridge ships the same files with the same state once it is installed.
+    if ($script:shipAllLogs -ne 1) {
+        try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $script:PluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+        if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+            Invoke-RogueNativeHandoff -Root $script:PluginRoot -Family $script:ShipperSlug `
+                -Arguments @('ship-logs', $script:ShipperSlug, $script:ShipperVersion) -Settings $script:creds -BudgetMs 600000 -FailOpen ''
+        }
+    }
     Resolve-Knobs
     if (-not $script:apiKey) { Write-ShipDebug 'not configured -> no-op'; exit 0 }
     if (-not (Resolve-ShipActor)) {

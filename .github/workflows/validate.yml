@@ -116,11 +116,17 @@ jobs:
           # the shebang and checks it with bash -n, so dash is only covered here.
           TEST_SH=sh bash tests/test_auto_update_sh.sh
           TEST_SH=dash bash tests/test_auto_update_sh.sh
+          TEST_SH=sh bash tests/test_native_bridge_sh.sh
+          TEST_SH=dash bash tests/test_native_bridge_sh.sh
+          pwsh -NoProfile -File tests/test_native_bridge_ps1.ps1
           bash tests/test_gitignore_bundles.sh
+          bash tests/test_compile_customer_plugin.sh
           TEST_SH=dash bash tests/test_setup_env.sh
           TEST_SH=bash bash tests/test_setup_env.sh
           SH=bash bash tests/test_hook_sh_cursor.sh
           TEST_SH=dash bash tests/test_hook_sh_cursor.sh
+          TEST_SH=bash bash tests/test_hook_sh_codex.sh
+          TEST_SH=dash bash tests/test_hook_sh_codex.sh
           TEST_SH=dash bash tests/test_env_first_found.sh
           TEST_SH=bash bash tests/test_env_first_found.sh
           TEST_SH=dash bash tests/test_managed_hooks.sh
@@ -241,6 +247,7 @@ jobs:
         run: |
           node --test tests/test_hook_mjs.mjs
           node --test tests/test_env_first_found.mjs
+          node --test tests/test_native_bridge_mjs.mjs
 
       - name: Log-shipper contract (sh)
         # The shipper is a byte-offset state machine over a file another process is
@@ -366,6 +373,7 @@ jobs:
           pwsh -NoProfile -File tests/test_ship_logs.ps1
           pwsh -NoProfile -File tests/test_heartbeat_ps1.ps1
           pwsh -NoProfile -File tests/test_auto_update_ps1.ps1
+          pwsh -NoProfile -File tests/test_native_bridge_ps1.ps1
           pwsh -NoProfile -File tests/test_setup_env.ps1
           pwsh -NoProfile -File tests/test_env_file_trust.ps1
           pwsh -NoProfile -File tests/test_env_first_found.ps1
@@ -427,6 +435,8 @@ jobs:
           powershell -NoProfile -File tests/test_heartbeat_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_auto_update_ps1.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_native_bridge_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_setup_env.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }

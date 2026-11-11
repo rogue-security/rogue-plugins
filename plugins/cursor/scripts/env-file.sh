@@ -4,12 +4,70 @@
 # configuration must belong to root; neither group nor other may write it.
 rogue_env_is_trusted() (
   [ -f "$1" ] && [ -r "$1" ] || exit 1
+  case "$1:${2:-0}" in /etc/rogue/env:*|*:1) rogue_path_is_protected "$1" 1 ;; *) rogue_path_is_protected "$1" ;; esac
+)
+
+# The ownership rule itself, for a file or a directory: owned by the current user
+# or root (root only when the second argument is 1), and neither group nor other
+# may write it.
+rogue_path_is_protected() ( # <path> [1]
   info=$(stat -Lc '%u %a' "$1" 2>/dev/null) || info=$(stat -Lf '%u %Lp' "$1" 2>/dev/null) || exit 1
   owner=${info%% *}; mode=${info#* }
   case "$owner:$mode" in *[!0-9:]*|:*) exit 1 ;; esac
-  case "$1:${2:-0}" in /etc/rogue/env:*|*:1) [ "$owner" = 0 ] || exit 1 ;; esac
+  [ "${2:-0}" != 1 ] || [ "$owner" = 0 ] || exit 1
   [ "$owner" = 0 ] || [ "$owner" = "$(id -u)" ] || exit 1
   [ "$((0$mode & 022))" = 0 ]
+)
+
+# The same rule for every existing directory from <dir> up to /, both as written and as its
+# physical path, so no other user can swap a component. A root-owned sticky directory (/tmp) also
+# passes: nobody can rename or remove an entry there that they do not own. A component written as a
+# symlink must be root's own link (not even ours): only then can no other user's link sit behind it.
+rogue_dir_chain_is_protected() ( # <existing absolute dir>
+  case "$1" in /*) ;; *) exit 1 ;; esac
+  phys=$(cd -P -- "$1" 2>/dev/null && pwd -P) || exit 1
+  list=""; links=""
+  for p in "$1" "$phys"; do
+    while :; do
+      list="$list$p
+"
+      [ -L "$p" ] && links="$links$p
+"
+      [ "$p" = / ] && break
+      p=${p%/*}; [ -n "$p" ] || p=/
+    done
+  done
+  IFS='
+'
+  set -f
+  # shellcheck disable=SC2086
+  set -- $list
+  info=$(stat -Lc '%u %a' "$@" 2>/dev/null) || info=$(stat -Lf '%u %p' "$@" 2>/dev/null) || exit 1
+  me=$(id -u)
+  if [ -n "$links" ]; then
+    # shellcheck disable=SC2086
+    owners=$(stat -c '%u' $links 2>/dev/null) || owners=$(stat -f '%u' $links 2>/dev/null) || exit 1
+    for o in $owners; do [ "$o" = 0 ] || exit 1; done
+  fi
+  # One stat line per directory; counted in the shell so the check needs only stat and id.
+  n=$#
+  # shellcheck disable=SC2086
+  set -- $info
+  [ "$#" = "$n" ] || exit 1
+  printf '%s\n' "$info" | while IFS=' ' read -r owner mode; do
+    case "$owner:$mode" in *[!0-9:]*|:*|*:) exit 1 ;; esac
+    [ "$owner" = 0 ] && [ "$((0$mode & 01000))" != 0 ] && continue
+    [ "$owner" = 0 ] || [ "$owner" = "$me" ] || exit 1
+    [ "$((0$mode & 022))" = 0 ] || exit 1
+  done
+)
+
+# rogue_dir_chain_is_protected for the nearest existing directory of <path>, which may not exist yet.
+rogue_nearest_dir_is_protected() ( # <absolute path>
+  up="$1"
+  case "$up" in /*) ;; *) exit 1 ;; esac
+  while [ ! -d "$up" ]; do up=${up%/*}; [ -n "$up" ] || up=/; done
+  rogue_dir_chain_is_protected "$up"
 )
 
 # A candidate file "holds a key" when ROGUE_API_KEY is assigned a non-empty

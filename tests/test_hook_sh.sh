@@ -178,7 +178,7 @@ BLOCK_BODY='{"decision":"block","reason":"PII detected"}'
 SANDBOX_BIN="$(mktemp -d)"
 # "$SH" is in the list because TEST_SH=dash names an interpreter that is not
 # called `sh` — without it the sandboxed PATH cannot find the shell under test.
-for tool in "$SH" sh bash env curl date mkdir dirname tr grep sed head cat hostname whoami awk uname sleep; do
+for tool in "$SH" sh bash env curl date mkdir dirname tr grep sed head cat hostname whoami awk uname sleep stat id wc mv find rm; do
   src="$(command -v "$tool" 2>/dev/null)" || continue
   [ -n "$src" ] && ln -sf "$src" "$SANDBOX_BIN/$tool"
 done
@@ -205,7 +205,9 @@ run_alert_case() {
   # PATH is the stub dir plus SANDBOX_BIN, never /usr/bin — a dev Mac ships a real
   # /usr/bin/osascript, which would both defeat the `none` case and pop an actual
   # dialog on the tester's screen.
+  # env -i drops everything, so conformance's native-mode install dir is passed on explicitly.
   OUT=$(env -i HOME="$tmp_home" PATH="$stub:$SANDBOX_BIN" \
+    ${ROGUE_NATIVE_BRIDGE_DIR:+ROGUE_NATIVE_BRIDGE_DIR="$ROGUE_NATIVE_BRIDGE_DIR"} \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" ROGUE_LOG_FILE="$LOG_FILE" \
     CLAUDE_CODE_ENTRYPOINT=local-agent "$@" \
     "$SH" "$HOOK" "$event" <<< "$payload")

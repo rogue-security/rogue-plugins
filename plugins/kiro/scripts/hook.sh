@@ -56,6 +56,14 @@ load_env() {
   done
 }
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# until then this starts its download and carries on. See scripts/native-bridge.sh.
+handoff_native() {
+  [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0
+  . "${PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "$PLUGIN_ROOT" kiro kiro "$EVENT_ARG" "$SURFACE_ARG"
+}
+
 canonical_event() {
   case "$1" in
     agentSpawn|SessionStart)             echo SessionStart ;;
@@ -278,6 +286,7 @@ main() {
   SURFACE_ARG="${2:-}"
   locate_plugin_root
   load_env
+  handoff_native
   initialize_context
   require_api_key
   load_identity

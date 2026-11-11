@@ -610,6 +610,15 @@ reattribute_subagent() {
 
 # ── main's steps ───────────────────────────────────────────────────────────
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it
+# is installed; until then this starts its download and carries on. See
+# scripts/native-bridge.sh. PLUGIN_ROOT is absolute here (locate_plugin_root).
+handoff_to_native() {
+  [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0
+  . "${PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "$PLUGIN_ROOT" antigravity antigravity "$EVENT"
+}
+
 # Not configured: never POST without a key. Emit the per-event fail-open
 # default so PreToolUse still resolves to an explicit allow decision. Exits the
 # script, deliberately BEFORE stdin is read: there is nothing to do with it.
@@ -823,6 +832,7 @@ main() {
   stand_down_under_git_bash
   locate_plugin_root
   load_env               # sources the env files, then every default derived from them
+  handoff_to_native      # execs the native bridge when its pinned version is installed
   require_api_key        # exits before stdin is read when there is no key
   load_actor
   read_body
