@@ -1,0 +1,52 @@
+HOME(env)=C:\Users\alfonso HOMEDRIVE=C: HOMEPATH=\Users\alfonso PS_HOME=C:\Users\alfonso
+--- 1 powershell 5.1, tilde, from another cwd
+{}exit=0
+--- 2 git bash -c tilde
+{}exit=0
+gb
+--- 3 git bash -c HOME quoted
+{}exit=0
+--- 4 cmd percent
+{}exit=0
+--- 5 cmd tilde
+'~' is not recognized as an internal or external command,
+operable program or batch file.
+exit=1
+--- 6 powershell, cursor desktop wrapper
+{}exit=0
+--- 7 powershell, unix-only HOME quoted string (wrong-shell form)
+At line:1 char:7
++ $HOME/.rogue-spike-3012/bin/rogue-hook claude PS51-homequoted
++       ~
+You must provide a value expression following the '/' operator.
+At line:1 char:7
++ $HOME/.rogue-spike-3012/bin/rogue-hook claude PS51-homequoted
++       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Unexpected token '.rogue-spike-3012/bin/rogue-hook' in expression or statement.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : ExpectedValueExpression
+ 
+exit=1
+--- 8 git bash, percent form (wrong-shell form)
+/usr/bin/bash: line 1: fg: no job control
+exit=1
+--- 9 powershell, missing binary + ; exit 0
+~/.rogue-spike-3012/bin/missing : The term '~/.rogue-spike-3012/bin/missing' is not recognized as 
+the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, 
+or if a path was included, verify that the path is correct and try again.
+At line:1 char:1
++ ~/.rogue-spike-3012/bin/missing claude PS51-missing ; exit 0
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (~/.rogue-spike-3012/bin/missing:String) [], Comman 
+   dNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+exit=0
+--- 10 powershell, missing binary
+exit=1
+=== calls.log
+args=[claude][PS51-tilde] stdin_bytes=34 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "~/.rogue-spike-3012/bin/rogue-hook claude PS51-tilde"
+args=[claude][GB-tilde] stdin_bytes=34 parent="C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "~/.rogue-spike-3012/bin/rogue-hook claude GB-tilde"
+args=[claude][GB-home] stdin_bytes=34 parent="C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c ""$HOME/.rogue-spike-3012/bin/rogue-hook" claude GB-home"
+args=[claude][CMD-percent] stdin_bytes=34 parent="C:\WINDOWS\system32\cmd.exe" /d /s /c ""%USERPROFILE%\.rogue-spike-3012\bin\rogue-hook.exe" claude CMD-percent"
+args=[cursor][CursorWrap-tilde] stdin_bytes=34 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-Content -LiteralPath 'C:\Users\alfon

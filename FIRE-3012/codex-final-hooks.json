@@ -1,0 +1,89 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex SessionStart-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex SessionStart-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex SessionStart-M2-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex UserPromptSubmit-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex UserPromptSubmit-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex UserPromptSubmit-M2-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex PreToolUse-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex PreToolUse-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex PreToolUse-M2-guard ; exit 0",
+            "timeout": 15
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex Stop-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex Stop-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing codex Stop-M2-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-C1-tilde",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" claude SessionStart-C2-home",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude SessionStart-C3-wincmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "SessionStart-C4-exec-tilde"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "SessionStart-C5-exec-HOME"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude SessionStart-C6-pwsh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-C1-tilde",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" claude UserPromptSubmit-C2-home",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude UserPromptSubmit-C3-wincmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "UserPromptSubmit-C4-exec-tilde"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "UserPromptSubmit-C5-exec-HOME"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude UserPromptSubmit-C6-pwsh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-C1-tilde",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" claude PreToolUse-C2-home",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude PreToolUse-C3-wincmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "PreToolUse-C4-exec-tilde"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "PreToolUse-C5-exec-HOME"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude PreToolUse-C6-pwsh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude Stop-C1-tilde",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" claude Stop-C2-home",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude Stop-C3-wincmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "Stop-C4-exec-tilde"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.rogue-spike-3012/bin/rogue-hook",
+            "args": [
+              "claude",
+              "Stop-C5-exec-HOME"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude Stop-C6-pwsh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

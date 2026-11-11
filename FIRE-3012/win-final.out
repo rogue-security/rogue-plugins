@@ -1,0 +1,19 @@
+claude exit=0
+codex exit=0
+--- cursor desktop wrapper, final + missing
+cmd=[~/.rogue-spike-3012/bin/rogue-hook cursor preToolUse-K1-final] stdout=[{}] exit=0
+cmd=[~/.rogue-spike-3012/bin/missing cursor preToolUse-M1] stdout=[] exit=127
+=== calls.log
+args=[claude][SessionStart-F1-final] stdin_bytes=282 parent="C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-F1-final ; exit 0"
+args=[claude][SessionStart-F2-final-pwsh] stdin_bytes=282 parent=C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-F2-final-pwsh ; exit 0"
+args=[claude][UserPromptSubmit-F1-final] stdin_bytes=395 parent="C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-F1-final ; exit 0"
+args=[claude][UserPromptSubmit-F2-final-pwsh] stdin_bytes=395 parent=C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-F2-final-pwsh ; exit 0"
+args=[claude][PreToolUse-F1-final] stdin_bytes=500 parent="C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-F1-final ; exit 0"
+args=[claude][PreToolUse-F2-final-pwsh] stdin_bytes=500 parent=C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-F2-final-pwsh ; exit 0"
+args=[claude][Stop-F1-final] stdin_bytes=466 parent="C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "~/.rogue-spike-3012/bin/rogue-hook claude Stop-F1-final ; exit 0"
+args=[claude][Stop-F2-final-pwsh] stdin_bytes=466 parent=C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "~/.rogue-spike-3012/bin/rogue-hook claude Stop-F2-final-pwsh ; exit 0"
+args=[codex][SessionStart-F1-final] stdin_bytes=362 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "~/.rogue-spike-3012/bin/rogue-hook codex SessionStart-F1-final ; exit 0"
+args=[codex][UserPromptSubmit-F1-final] stdin_bytes=445 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "~/.rogue-spike-3012/bin/rogue-hook codex UserPromptSubmit-F1-final ; exit 0"
+args=[codex][PreToolUse-F1-final] stdin_bytes=509 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "~/.rogue-spike-3012/bin/rogue-hook codex PreToolUse-F1-final ; exit 0"
+args=[codex][Stop-F1-final] stdin_bytes=518 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "~/.rogue-spike-3012/bin/rogue-hook codex Stop-F1-final ; exit 0"
+args=[cursor][preToolUse-K1-final] stdin_bytes=34 parent="C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -c "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); try { $global:cursorHookConsoleInputEncoding =

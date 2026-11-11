@@ -1,0 +1,71 @@
+{
+  "session_id": "a54b9bd7-3da4-4007-b6d4-de99c0558c30",
+  "response": "`spike3012`",
+  "stats": {
+    "models": {
+      "gemini-3.6-flash": {
+        "api": {
+          "totalRequests": 2,
+          "totalErrors": 0,
+          "totalLatencyMs": 4418,
+          "errorsByType": {}
+        },
+        "tokens": {
+          "input": 15023,
+          "prompt": 25561,
+          "candidates": 48,
+          "total": 25946,
+          "cached": 10538,
+          "thoughts": 337,
+          "tool": 0
+        },
+        "roles": {
+          "main": {
+            "totalRequests": 2,
+            "totalErrors": 0,
+            "totalLatencyMs": 4418,
+            "tokens": {
+              "input": 15023,
+              "prompt": 25561,
+              "candidates": 48,
+              "total": 25946,
+              "cached": 10538,
+              "thoughts": 337,
+              "tool": 0
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "totalCalls": 1,
+      "totalSuccess": 1,
+      "totalFail": 0,
+      "totalDurationMs": 3660,
+      "totalDecisions": {
+        "accept": 1,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 0
+      },
+      "byName": {
+        "run_shell_command": {
+          "count": 1,
+          "success": 1,
+          "fail": 0,
+          "durationMs": 3660,
+          "decisions": {
+            "accept": 1,
+            "reject": 0,
+            "modify": 0,
+            "auto_accept": 0
+          }
+        }
+      }
+    },
+    "files": {
+      "totalLinesAdded": 0,
+      "totalLinesRemoved": 0
+    }
+  }
+}

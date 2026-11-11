@@ -1,0 +1,156 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-W1-tilde",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-W2-tilde-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude SessionStart-W3-percent",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude SessionStart-W4-envpwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${USERPROFILE}/.rogue-spike-3012/bin/rogue-hook.exe",
+            "args": [
+              "claude",
+              "SessionStart-W5-exec-userprofile"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-W1-tilde",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-W2-tilde-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude UserPromptSubmit-W3-percent",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude UserPromptSubmit-W4-envpwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${USERPROFILE}/.rogue-spike-3012/bin/rogue-hook.exe",
+            "args": [
+              "claude",
+              "UserPromptSubmit-W5-exec-userprofile"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-W1-tilde",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-W2-tilde-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude PreToolUse-W3-percent",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude PreToolUse-W4-envpwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${USERPROFILE}/.rogue-spike-3012/bin/rogue-hook.exe",
+            "args": [
+              "claude",
+              "PreToolUse-W5-exec-userprofile"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude Stop-W1-tilde",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude Stop-W2-tilde-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude Stop-W3-percent",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" claude Stop-W4-envpwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${USERPROFILE}/.rogue-spike-3012/bin/rogue-hook.exe",
+            "args": [
+              "claude",
+              "Stop-W5-exec-userprofile"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

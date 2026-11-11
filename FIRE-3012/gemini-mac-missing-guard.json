@@ -1,0 +1,58 @@
+{
+  "session_id": "6e60cdb6-8d0f-43ce-b0ad-f154a86c4005",
+  "response": "ok",
+  "stats": {
+    "models": {
+      "gemini-3.6-flash": {
+        "api": {
+          "totalRequests": 1,
+          "totalErrors": 0,
+          "totalLatencyMs": 1788,
+          "errorsByType": {}
+        },
+        "tokens": {
+          "input": 9505,
+          "prompt": 9505,
+          "candidates": 1,
+          "total": 9663,
+          "cached": 0,
+          "thoughts": 157,
+          "tool": 0
+        },
+        "roles": {
+          "main": {
+            "totalRequests": 1,
+            "totalErrors": 0,
+            "totalLatencyMs": 1788,
+            "tokens": {
+              "input": 9505,
+              "prompt": 9505,
+              "candidates": 1,
+              "total": 9663,
+              "cached": 0,
+              "thoughts": 157,
+              "tool": 0
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "totalCalls": 0,
+      "totalSuccess": 0,
+      "totalFail": 0,
+      "totalDurationMs": 0,
+      "totalDecisions": {
+        "accept": 0,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 0
+      },
+      "byName": {}
+    },
+    "files": {
+      "totalLinesAdded": 0,
+      "totalLinesRemoved": 0
+    }
+  }
+}

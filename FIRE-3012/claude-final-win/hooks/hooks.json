@@ -1,0 +1,164 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-F2-final-pwsh ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude SessionStart-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude SessionStart-M2-guard ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude SessionStart-M3-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude SessionStart-M4-pwsh-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-F2-final-pwsh ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude UserPromptSubmit-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude UserPromptSubmit-M2-guard ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude UserPromptSubmit-M3-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude UserPromptSubmit-M4-pwsh-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-F2-final-pwsh ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude PreToolUse-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude PreToolUse-M2-guard ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude PreToolUse-M3-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude PreToolUse-M4-pwsh-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude Stop-F1-final ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook claude Stop-F2-final-pwsh ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude Stop-M1",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/missing claude Stop-M2-guard ; exit 0",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude Stop-M3-pwsh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "~/.rogue-spike-3012/bin/missing claude Stop-M4-pwsh-guard ; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

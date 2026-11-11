@@ -1,0 +1,8 @@
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][SessionStart-C1-tilde] stdin_bytes=243 parent=/bin/sh -c ~/.rogue-spike-3012/bin/rogue-hook claude SessionStart-C1-tilde
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][SessionStart-C2-home] stdin_bytes=243 parent=/bin/sh -c "$HOME/.rogue-spike-3012/bin/rogue-hook" claude SessionStart-C2-home
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][UserPromptSubmit-C1-tilde] stdin_bytes=356 parent=/bin/sh -c ~/.rogue-spike-3012/bin/rogue-hook claude UserPromptSubmit-C1-tilde
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][UserPromptSubmit-C2-home] stdin_bytes=356 parent=/bin/sh -c "$HOME/.rogue-spike-3012/bin/rogue-hook" claude UserPromptSubmit-C2-home
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][PreToolUse-C1-tilde] stdin_bytes=478 parent=/bin/sh -c ~/.rogue-spike-3012/bin/rogue-hook claude PreToolUse-C1-tilde
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][PreToolUse-C2-home] stdin_bytes=478 parent=/bin/sh -c "$HOME/.rogue-spike-3012/bin/rogue-hook" claude PreToolUse-C2-home
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][Stop-C1-tilde] stdin_bytes=449 parent=/bin/sh -c ~/.rogue-spike-3012/bin/rogue-hook claude Stop-C1-tilde
+argv0=/home/tester/.rogue-spike-3012/bin/rogue-hook args=[claude][Stop-C2-home] stdin_bytes=449 parent=/bin/sh -c "$HOME/.rogue-spike-3012/bin/rogue-hook" claude Stop-C2-home

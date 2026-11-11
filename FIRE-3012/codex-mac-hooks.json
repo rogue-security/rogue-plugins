@@ -1,0 +1,97 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex SessionStart-X1-tilde",
+            "commandWindows": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex SessionStart-X1w-cmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" codex SessionStart-X2-home",
+            "commandWindows": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex SessionStart-X2w-pwsh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex SessionStart-X3-tilde-nowin",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex UserPromptSubmit-X1-tilde",
+            "commandWindows": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex UserPromptSubmit-X1w-cmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" codex UserPromptSubmit-X2-home",
+            "commandWindows": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex UserPromptSubmit-X2w-pwsh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex UserPromptSubmit-X3-tilde-nowin",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex PreToolUse-X1-tilde",
+            "commandWindows": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex PreToolUse-X1w-cmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" codex PreToolUse-X2-home",
+            "commandWindows": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex PreToolUse-X2w-pwsh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex PreToolUse-X3-tilde-nowin",
+            "timeout": 10
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex Stop-X1-tilde",
+            "commandWindows": "\"%USERPROFILE%\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex Stop-X1w-cmd",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.rogue-spike-3012/bin/rogue-hook\" codex Stop-X2-home",
+            "commandWindows": "& \"$env:USERPROFILE\\.rogue-spike-3012\\bin\\rogue-hook.exe\" codex Stop-X2w-pwsh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.rogue-spike-3012/bin/rogue-hook codex Stop-X3-tilde-nowin",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
