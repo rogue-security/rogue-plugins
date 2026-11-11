@@ -10,18 +10,13 @@
 #   * native Windows, no Git Bash -> `sh` is not found (clean fail-open); this
 #                                   script runs.
 #
-# hooks.json loads this WITHOUT -File so the PowerShell ExecutionPolicy never
-# applies (running a scriptblock built from a string is not subject to policy,
-# unlike invoking a .ps1 on disk - this also survives a GPO-enforced policy,
-# which -ExecutionPolicy Bypass does not):
+# hooks.json runs this with plain words, which the Claude plugin directory can read:
 #
-#   powershell -NoProfile -NonInteractive -Command \
-#     "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path (Get-Item Env:CLAUDE_PLUGIN_ROOT).Value 'scripts/hook.ps1')))) <Event>" ; exit 0
+#   powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/hook.ps1" <Event> ; exit 0
 #
-# CLAUDE_PLUGIN_ROOT is a process ENVIRONMENT VARIABLE, read dollar-free as
-# (Get-Item Env:CLAUDE_PLUGIN_ROOT).Value - on Windows-with-Git-Bash the whole
-# command string is parsed by bash first, which would expand and mangle a
-# double-quoted $env:CLAUDE_PLUGIN_ROOT.
+# Claude Code substitutes ${CLAUDE_PLUGIN_ROOT} before any shell sees it. A
+# GPO-enforced AllSigned policy still refuses an unsigned -File script, and the
+# hook then fails open.
 #
 # This script mirrors hook.sh stage-for-stage: collect creds, resolve actor,
 # POST stdin to /api/v1/hooks/claude, detect + log a block decision, relay the
