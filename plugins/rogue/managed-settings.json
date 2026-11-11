@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh -c '( nohup sh \"@ROGUE_BRIDGE_ROOT@/scripts/heartbeat.sh\" >/dev/null 2>&1 & )' ; exit 0",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/detach.sh\" \"@ROGUE_BRIDGE_ROOT@/scripts/heartbeat.sh\" ; exit 0",
             "timeout": 20
           }
         ]
@@ -98,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh -c '( nohup sh \"@ROGUE_BRIDGE_ROOT@/scripts/heartbeat.sh\" Stop >/dev/null 2>&1 & )' ; exit 0",
+            "command": "/usr/bin/env -u BASH_ENV -u ENV PATH=/usr/bin:/bin:/usr/sbin:/sbin CLAUDE_PLUGIN_ROOT='@ROGUE_BRIDGE_ROOT@' ROGUE_HOOK_SOURCE=managed /bin/sh \"@ROGUE_BRIDGE_ROOT@/scripts/detach.sh\" \"@ROGUE_BRIDGE_ROOT@/scripts/heartbeat.sh\" Stop ; exit 0",
             "timeout": 20
           }
         ]
