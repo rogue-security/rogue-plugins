@@ -9,7 +9,7 @@ You need a team admin on a Cursor Enterprise team and a Rogue API key from `http
 1. In the Cursor dashboard, open [Inference Hooks](https://cursor.com/dashboard/bot/inference-hooks) from the **Security & Compliance** section of the Grok Bot page.
 2. Click **Set Up Endpoint** and choose **Custom Endpoint**.
 3. Set **Endpoint URL** to `https://api.rogue.security/api/v1/hooks/grok-bot`.
-4. Add the custom header `X-Rogue-Api-Key` with your Rogue API key, then save. Rogue doesn't use the signing secret Cursor shows.
+4. Add the custom header `X-Rogue-Api-Key` (or `X-Api-Key`) with your Rogue API key, then save. Rogue doesn't use the signing secret Cursor shows.
 5. Click **Test Connection**. Rogue allows test requests without recording them.
 6. Turn on **Enforce Verdicts** and **Validate Tool Calls**. Start in **Shadow Mode**, then pick **Allow the Request** (fail open) or **Block the Request** (fail closed).
 
