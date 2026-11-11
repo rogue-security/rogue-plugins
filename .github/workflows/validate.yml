@@ -126,6 +126,7 @@ jobs:
           TEST_SH=dash bash tests/test_managed_hooks.sh
           TEST_SH=bash bash tests/test_managed_hooks.sh
           bash tests/test_install_env_sh.sh
+          bash tests/test_install_plugin_upgrade_sh.sh
       - name: Kiro installer (temp HOME, fake kiro-cli)
         # install.sh --kiro is the only installer that WRITES the vendor's hook
         # wiring itself (a hook file, Crew wrappers, a merge into every agent
@@ -371,6 +372,7 @@ jobs:
           pwsh -NoProfile -File tests/test_env_first_found.ps1
           pwsh -NoProfile -File tests/test_install_kiro_ps1.ps1
           pwsh -NoProfile -File tests/test_install_env_ps1.ps1
+          pwsh -NoProfile -File tests/test_install_plugin_upgrade_ps1.ps1
           pwsh -NoProfile -File tests/test_status_kiro_ps1.ps1
 
   windows:
@@ -437,6 +439,8 @@ jobs:
           powershell -NoProfile -File tests/test_install_kiro_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_install_env_ps1.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_install_plugin_upgrade_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_status_kiro_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
