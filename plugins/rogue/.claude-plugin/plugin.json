@@ -6,5 +6,6 @@
     "name": "Rogue Security",
     "url": "https://www.rogue.security"
   },
-  "homepage": "https://docs.rogue.security/integrations/claude-code"
+  "homepage": "https://docs.rogue.security/integrations/claude-code",
+  "icon": "./.claude-plugin/icon.png"
 }
