@@ -53,10 +53,12 @@ deny='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"
 start_mock "$deny"
 check "relays a native deny" '[ "$(hook PreToolUse)" = "$deny" ]'
 check "sends event and CLI surface" 'grep -q "PreToolUse" "$H/headers.json" && grep -q "cortex_code_cli" "$H/headers.json"'
-check "Desktop surface from its bundle ID" 'hook PreToolUse __CFBundleIdentifier=com.snowflake.coco >/dev/null && grep -q "cortex_code_desktop" "$H/headers.json"'
+check "a CLI in a Desktop terminal stays the CLI" 'hook PreToolUse CORTEX_CODE_CLIENT_SURFACE=coco_desktop >/dev/null && grep -q "cortex_code_cli" "$H/headers.json"'
 check "Desktop surface from its shared process" 'hook PreToolUse VSCODE_ESM_ENTRYPOINT=vs/code/electron-utility/sharedProcess/sharedProcessMain >/dev/null && grep -q "cortex_code_desktop" "$H/headers.json"'
 start_mock '{}'
 check "relays an allow" '[ "$(hook UserPromptSubmit)" = "{}" ]'
+start_mock '<html>proxy login</html>'
+check "fails open on a non-JSON 200" '[ "$(hook UserPromptSubmit)" = "{}" ] && grep -q "nonjson=1" "$H/.rogue/logs/cortex.log"'
 start_mock "$deny" 500
 check "fails open on a server error" '[ "$(hook PreToolUse)" = "{}" ]'
 kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null; MOCK_PID=""

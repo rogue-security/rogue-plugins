@@ -38,6 +38,11 @@ if [ "$RC" -ne 0 ] || [ "$CODE" != 200 ]; then
 fi
 RESP=$(printf '%s' "$RAW" | sed '$d')
 [ -n "$RESP" ] || RESP='{}'
+# Cortex adds non-JSON stdout to the model's context; a proxy page must never reach it.
+case "$RESP" in
+  \{*) ;;
+  *) log "outcome=fail-open http=$CODE rc=$RC nonjson=1"; echo '{}'; exit 0 ;;
+esac
 OUTCOME=allow
 [ "$RESP" = '{}' ] || OUTCOME=block
 log "outcome=$OUTCOME http=$CODE rc=$RC raw=$(printf '%s' "$RESP" | tr -d '\000-\037\177' | head -c 400)"

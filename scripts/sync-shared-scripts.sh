@@ -37,7 +37,7 @@ SRC="$REPO/scripts/shared"
 ROWS=(
   "ship-logs.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "ship-logs.ps1|rogue codex cursor copilot antigravity kiro muse"
-  "beacon.sh|rogue codex cursor copilot antigravity kiro muse cortex"
+  "beacon.sh|rogue codex cursor copilot antigravity kiro muse"
   "beacon.ps1|rogue codex cursor copilot antigravity kiro muse"
   "env-file.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "env-file.ps1|rogue codex cursor copilot antigravity kiro muse"

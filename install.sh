@@ -1216,9 +1216,9 @@ parse_args() {
 # Kiro ships no `kiro` binary on PATH: the CLI is `kiro-cli`, the IDE is an app
 # bundle on macOS, and both surfaces (Crew too) keep their state under ~/.kiro.
 kiro_detected() { have_cmd kiro-cli || [ -d /Applications/Kiro.app ] || [ -d "$HOME/.kiro" ]; }
-# Cortex Code's CLI installs to ~/.local/bin, which may not be on this shell's PATH;
-# the Desktop app is a bundle. Both keep their state under ~/.snowflake/cortex.
-cortex_detected() { have_cmd cortex || [ -x "$HOME/.local/bin/cortex" ] || [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ]; }
+# Other tools ship a `cortex` binary, so only Cortex Code's own state directory (the
+# CLI and Desktop share it) or the Desktop app bundle marks an install.
+cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ]; }
 
 # ── Dispatch: detect installed agents, install for each ───────────────────────
 main() {
@@ -1245,7 +1245,7 @@ main() {
           { have_cmd agy || [ -d "$HOME/.gemini/antigravity" ] || [ -d "$HOME/.gemini/antigravity-ide" ] || [ -d "$HOME/.gemini/antigravity-cli" ]; } \
             || die "--antigravity requested but no Antigravity install was detected (looked for: agy CLI, ~/.gemini/antigravity*). Install Google Antigravity first." ;;
         muse) have_cmd muse || die "Muse Code is not on PATH." ;;
-        cortex) cortex_detected || die "--cortex requested but no Cortex Code install was detected (looked for: cortex CLI, Cortex Code.app, ~/.snowflake/cortex)." ;;
+        cortex) cortex_detected || die "--cortex requested but no Cortex Code install was detected (looked for: Cortex Code.app, ~/.snowflake/cortex). Start Cortex Code once, then retry." ;;
         kiro)
           kiro_detected || die "--kiro requested but no Kiro install was detected (looked for: kiro-cli, /Applications/Kiro.app, ~/.kiro). Install Kiro (https://kiro.dev) first." ;;
       esac
@@ -1282,7 +1282,8 @@ main() {
       antigravity) install_antigravity ;;
       kiro)        install_kiro ;;
       muse)        install_muse || muse_failed=1 ;;
-      cortex)      install_cortex || cortex_failed=1 ;;
+      # Auto-detected, a failed Cortex install only warns; an explicit --cortex fails the run.
+      cortex)      install_cortex || { [ -n "$WANT" ] && cortex_failed=1; } ;;
     esac
   done
 
