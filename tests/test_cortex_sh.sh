@@ -64,8 +64,10 @@ start_mock '<html>proxy login</html>'
 check "fails open on a non-JSON 200" '[ "$(hook UserPromptSubmit)" = "{}" ] && grep -q "nonjson=1" "$H/.rogue/logs/cortex.log"'
 start_mock "  $deny"
 check "relays a deny with leading whitespace" '[ "$(hook PreToolUse)" = "  $deny" ]'
-start_mock '{not-json'
-check "fails open on a body that is not a whole object" '[ "$(hook UserPromptSubmit)" = "{}" ]'
+for junk in '{not-json' '{not-json}'; do
+  start_mock "$junk"
+  check "fails open on $junk" '[ "$(hook UserPromptSubmit)" = "{}" ]'
+done
 start_mock "$deny" 500
 check "fails open on a server error" '[ "$(hook PreToolUse)" = "{}" ]'
 kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null; MOCK_PID=""

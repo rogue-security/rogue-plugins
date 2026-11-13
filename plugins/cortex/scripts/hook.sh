@@ -45,10 +45,10 @@ if [ "$RC" -ne 0 ] || [ "$CODE" != 200 ]; then
 fi
 RESP=$(printf '%s' "$RAW" | sed '$d')
 [ -n "$RESP" ] || RESP='{}'
-# Cortex adds non-JSON stdout to the model's context; a proxy page must never reach it. The API
-# always answers with a JSON object, so anything that does not open and close one fails open.
+# Cortex adds stdout it cannot parse as JSON to the model's context; a proxy page must never reach
+# it. The API answers {} or an object with quoted keys, so anything else fails open.
 case "$(printf '%s' "$RESP" | tr -d '[:space:]')" in
-  \{*\}) ;;
+  '{}'|'{"'*\}) ;;
   *) log "outcome=fail-open http=$CODE rc=$RC nonjson=1"; echo '{}'; ship_logs; exit 0 ;;
 esac
 OUTCOME=allow
