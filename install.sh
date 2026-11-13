@@ -1221,9 +1221,11 @@ kiro_detected() { have_cmd kiro-cli || [ -d /Applications/Kiro.app ] || [ -d "$H
 # CLI and Desktop share it) or the Desktop app bundle marks an install.
 # Only Cortex Code's installer leaves cortex-version.txt beside the binary it links.
 cortex_cli_installed() {
-  local bin
+  local bin target
   bin="$(command -v cortex 2>/dev/null || echo "$HOME/.local/bin/cortex")"
-  [ -f "$(dirname "$(readlink "$bin" 2>/dev/null || echo "$bin")")/cortex-version.txt" ]
+  target="$(readlink "$bin" 2>/dev/null || echo "$bin")"
+  case "$target" in /*) ;; *) target="$(dirname "$bin")/$target" ;; esac
+  [ -f "$(dirname "$target")/cortex-version.txt" ]
 }
 cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ]; }
 
@@ -1272,7 +1274,7 @@ main() {
     kiro_detected && agents="$agents kiro"
     have_cmd muse && agents="$agents muse"
     cortex_detected && agents="$agents cortex"
-    [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
+    [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro, muse, cortex code). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
   fi
 
   # Credentials once — every plugin reads the machine env file, else the shared ~/.rogue-env.
