@@ -33,22 +33,27 @@ RAW=$(curl -sS -X POST "${ROGUE_BASE_URL:-https://api.rogue.security}/api/v1/hoo
   -H 'Content-Type: application/json' --data-binary @- --max-time 8 -w '\n%{http_code}' 2>/dev/null)
 RC=$?
 CODE=$(printf '%s' "$RAW" | tail -n1)
+# Ship this machine's hook log after session and turn boundaries, whatever the relay's outcome.
+ship_logs() {
+  case "$EVENT" in
+    SessionStart|Stop|SessionEnd)
+      ( nohup sh "$PLUGIN_ROOT/scripts/ship-logs.sh" "$PLUGIN_ROOT" cortex "$ROGUE_INSTALL_VERSION" cortex </dev/null >/dev/null 2>&1 & ) ;;
+  esac
+}
 if [ "$RC" -ne 0 ] || [ "$CODE" != 200 ]; then
-  log "outcome=fail-open http=$CODE rc=$RC ${ROGUE_INSTALL_ID_ERROR:+id_error=$ROGUE_INSTALL_ID_ERROR}"; echo '{}'; exit 0
+  log "outcome=fail-open http=$CODE rc=$RC ${ROGUE_INSTALL_ID_ERROR:+id_error=$ROGUE_INSTALL_ID_ERROR}"; echo '{}'; ship_logs; exit 0
 fi
 RESP=$(printf '%s' "$RAW" | sed '$d')
 [ -n "$RESP" ] || RESP='{}'
-# Cortex adds non-JSON stdout to the model's context; a proxy page must never reach it.
-case "$RESP" in
-  \{*) ;;
-  *) log "outcome=fail-open http=$CODE rc=$RC nonjson=1"; echo '{}'; exit 0 ;;
+# Cortex adds non-JSON stdout to the model's context; a proxy page must never reach it. The API
+# always answers with a JSON object, so anything that does not open and close one fails open.
+case "$(printf '%s' "$RESP" | tr -d '[:space:]')" in
+  \{*\}) ;;
+  *) log "outcome=fail-open http=$CODE rc=$RC nonjson=1"; echo '{}'; ship_logs; exit 0 ;;
 esac
 OUTCOME=allow
 [ "$RESP" = '{}' ] || OUTCOME=block
 log "outcome=$OUTCOME http=$CODE rc=$RC raw=$(printf '%s' "$RESP" | tr -d '\000-\037\177' | head -c 400)"
 printf '%s\n' "$RESP"
-case "$EVENT" in
-  SessionStart|Stop|SessionEnd)
-    ( nohup sh "$PLUGIN_ROOT/scripts/ship-logs.sh" "$PLUGIN_ROOT" cortex "$ROGUE_INSTALL_VERSION" cortex </dev/null >/dev/null 2>&1 & ) ;;
-esac
+ship_logs
 exit 0

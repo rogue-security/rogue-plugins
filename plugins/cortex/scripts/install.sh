@@ -39,13 +39,17 @@ SOURCE="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 [ "$SOURCE" != "$DEST" ] || { echo "Cortex Code hooks already installed in $DEST."; exit 0; }
 [ ! -e "$DEST" ] || [ -d "$DEST" ] || die "Refusing non-directory: $DEST"
 mkdir -p "$CORTEX_DIR/plugins" || die "Cannot create $CORTEX_DIR/plugins"
+# One installer at a time, so a concurrent run cannot lose the bridge's env file.
+LOCK="$CORTEX_DIR/plugins/.rogue-security.lock"
+mkdir "$LOCK" 2>/dev/null || die "Another Cortex Code installer is running, or a previous run was interrupted. If none is running, remove $LOCK and retry."
 # Stage beside the destination, then swap, so Cortex never loads a half-copied plugin.
 NEW="$CORTEX_DIR/plugins/.rogue-security.new-$$"
-trap 'rm -rf "$NEW" "$NEW.old"' EXIT
+trap 'rm -rf "$NEW" "$NEW.old" "$LOCK"' EXIT
 mkdir "$NEW" && cp -R "$SOURCE/.cortex-plugin" "$SOURCE/hooks" "$SOURCE/scripts" "$NEW/" || die "Cannot copy the bridge to $NEW"
 chmod -R go-w "$NEW"
 # An update keeps a credential file placed in the bridge folder.
 [ ! -f "$DEST/env" ] || cp -p "$DEST/env" "$NEW/env" || die "Cannot keep $DEST/env"
 if [ -d "$DEST" ]; then mv "$DEST" "$NEW.old" || die "Cannot replace $DEST"; fi
-mv "$NEW" "$DEST" || { [ -d "$NEW.old" ] && mv "$NEW.old" "$DEST"; die "Cannot install $DEST"; }
+# DEST is gone at this point, so the rename cannot nest NEW inside an existing folder.
+[ ! -e "$DEST" ] && mv "$NEW" "$DEST" || { [ -d "$NEW.old" ] && [ ! -e "$DEST" ] && mv "$NEW.old" "$DEST"; die "Cannot install $DEST"; }
 echo "Installed Rogue Cortex Code hooks in $DEST. Start a new Cortex Code session (CLI or Desktop)."

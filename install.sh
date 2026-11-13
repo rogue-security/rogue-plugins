@@ -1231,7 +1231,7 @@ cortex_cli_installed() {
   done
   return 1
 }
-cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ]; }
+cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ] || cortex_cli_installed; }
 
 # ── Dispatch: detect installed agents, install for each ───────────────────────
 main() {

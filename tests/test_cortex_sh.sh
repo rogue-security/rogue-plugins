@@ -25,7 +25,10 @@ printf "ROGUE_API_KEY=x\n" > "$DEST/env"; chmod 600 "$DEST/env"
 check "repeat install succeeds and keeps the bridge env file" 'run && run --status && [ "$(cat "$DEST/env")" = "ROGUE_API_KEY=x" ]'
 rm -f "$DEST/env"
 check "user hooks and other plugins untouched" 'cmp -s "$H/hooks.before" "$H/.snowflake/cortex/hooks.json" && [ "$(cat "$H/.snowflake/cortex/plugins/other/x")" = keep ]'
-check "no staging leftovers" '[ -z "$(ls -A "$H/.snowflake/cortex/plugins" | grep "^\.rogue")" ]'
+check "no staging leftovers or lock" '[ -z "$(ls -A "$H/.snowflake/cortex/plugins" | grep "^\.rogue")" ]'
+mkdir "$H/.snowflake/cortex/plugins/.rogue-security.lock"
+check "refuses while another install holds the lock" '! run && grep -q "remove .*lock and retry" "$H/err"'
+rmdir "$H/.snowflake/cortex/plugins/.rogue-security.lock"
 check "nine events relayed" '[ "$(grep -c "scripts/hook.sh" "$DEST/hooks/hooks.json")" = 9 ]'
 
 # The stored command, with Cortex's ${CORTEX_PLUGIN_ROOT} substituted, runs from a path holding a quote and a space.
@@ -59,6 +62,10 @@ start_mock '{}'
 check "relays an allow" '[ "$(hook UserPromptSubmit)" = "{}" ]'
 start_mock '<html>proxy login</html>'
 check "fails open on a non-JSON 200" '[ "$(hook UserPromptSubmit)" = "{}" ] && grep -q "nonjson=1" "$H/.rogue/logs/cortex.log"'
+start_mock "  $deny"
+check "relays a deny with leading whitespace" '[ "$(hook PreToolUse)" = "  $deny" ]'
+start_mock '{not-json'
+check "fails open on a body that is not a whole object" '[ "$(hook UserPromptSubmit)" = "{}" ]'
 start_mock "$deny" 500
 check "fails open on a server error" '[ "$(hook PreToolUse)" = "{}" ]'
 kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null; MOCK_PID=""
