@@ -1219,13 +1219,17 @@ parse_args() {
 kiro_detected() { have_cmd kiro-cli || [ -d /Applications/Kiro.app ] || [ -d "$HOME/.kiro" ]; }
 # Other tools ship a `cortex` binary, so only Cortex Code's own state directory (the
 # CLI and Desktop share it) or the Desktop app bundle marks an install.
-# Only Cortex Code's installer leaves cortex-version.txt beside the binary it links.
+# Only Cortex Code's installer leaves cortex-version.txt beside the binary it links. Another
+# tool's cortex can come first on PATH, so the installer's own link is checked too.
 cortex_cli_installed() {
   local bin target
-  bin="$(command -v cortex 2>/dev/null || echo "$HOME/.local/bin/cortex")"
-  target="$(readlink "$bin" 2>/dev/null || echo "$bin")"
-  case "$target" in /*) ;; *) target="$(dirname "$bin")/$target" ;; esac
-  [ -f "$(dirname "$target")/cortex-version.txt" ]
+  for bin in "$(command -v cortex 2>/dev/null)" "$HOME/.local/bin/cortex"; do
+    [ -n "$bin" ] || continue
+    target="$(readlink "$bin" 2>/dev/null || echo "$bin")"
+    case "$target" in /*) ;; *) target="$(dirname "$bin")/$target" ;; esac
+    [ -f "$(dirname "$target")/cortex-version.txt" ] && return 0
+  done
+  return 1
 }
 cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ]; }
 
