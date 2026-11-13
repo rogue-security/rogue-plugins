@@ -35,15 +35,15 @@ SRC="$REPO/scripts/shared"
 # plugins/rogue keeps its own (it ranks CLAUDE_CODE_USER_EMAIL above git and
 # screens the Cowork sandbox identity).
 ROWS=(
-  "ship-logs.sh|rogue codex cursor copilot antigravity kiro muse"
+  "ship-logs.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "ship-logs.ps1|rogue codex cursor copilot antigravity kiro muse"
-  "beacon.sh|rogue codex cursor copilot antigravity kiro muse"
+  "beacon.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "beacon.ps1|rogue codex cursor copilot antigravity kiro muse"
-  "env-file.sh|rogue codex cursor copilot antigravity kiro muse"
+  "env-file.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "env-file.ps1|rogue codex cursor copilot antigravity kiro muse"
-  "git-identity.sh|rogue codex cursor copilot antigravity kiro muse"
+  "git-identity.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "git-identity.ps1|rogue codex cursor copilot antigravity kiro muse"
-  "actor.sh|codex cursor copilot antigravity kiro muse"
+  "actor.sh|codex cursor copilot antigravity kiro muse cortex"
   "actor.ps1|codex cursor copilot antigravity kiro muse"
 )
 
