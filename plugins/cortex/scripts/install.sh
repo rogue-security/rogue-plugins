@@ -31,7 +31,7 @@ fi
 
 if [ "$MODE" = --uninstall ]; then
   rm -rf "$DEST" || die "Cannot remove $DEST"
-  echo "Removed Rogue Cortex Code hooks; credentials and other Cortex Code settings preserved."
+  echo "Removed Rogue Cortex Code hooks and their env file; ~/.rogue-env, /etc/rogue/env and Cortex Code settings preserved."
   exit 0
 fi
 
