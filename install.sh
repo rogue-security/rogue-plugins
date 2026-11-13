@@ -658,8 +658,8 @@ status_agent_ctx() { # sets SC_FAMILY / SC_AGENT from $agents
     gemini)  SC_FAMILY="gemini";  SC_AGENT="gemini_cli" ;;
     copilot) SC_FAMILY="copilot"; SC_AGENT="github_copilot" ;;
     muse)    SC_FAMILY="muse";    SC_AGENT="muse_code" ;;
-    cortex)  SC_FAMILY="cortex"; SC_AGENT="cortex_code_cli"
-             { have_cmd cortex || [ -x "$HOME/.local/bin/cortex" ]; } || SC_AGENT="cortex_code_desktop" ;;
+    cortex)  SC_FAMILY="cortex"; SC_AGENT="cortex_code_desktop"
+             cortex_cli_installed && SC_AGENT="cortex_code_cli" ;;
     kiro)    SC_FAMILY="kiro";    SC_AGENT="kiro_cli" ;;
     *)       SC_FAMILY="claude";  SC_AGENT="claude_code" ;;
   esac
@@ -1219,6 +1219,12 @@ parse_args() {
 kiro_detected() { have_cmd kiro-cli || [ -d /Applications/Kiro.app ] || [ -d "$HOME/.kiro" ]; }
 # Other tools ship a `cortex` binary, so only Cortex Code's own state directory (the
 # CLI and Desktop share it) or the Desktop app bundle marks an install.
+# Only Cortex Code's installer leaves cortex-version.txt beside the binary it links.
+cortex_cli_installed() {
+  local bin
+  bin="$(command -v cortex 2>/dev/null || echo "$HOME/.local/bin/cortex")"
+  [ -f "$(dirname "$(readlink "$bin" 2>/dev/null || echo "$bin")")/cortex-version.txt" ]
+}
 cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ]; }
 
 # ── Dispatch: detect installed agents, install for each ───────────────────────
