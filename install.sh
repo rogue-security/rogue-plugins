@@ -658,7 +658,8 @@ status_agent_ctx() { # sets SC_FAMILY / SC_AGENT from $agents
     gemini)  SC_FAMILY="gemini";  SC_AGENT="gemini_cli" ;;
     copilot) SC_FAMILY="copilot"; SC_AGENT="github_copilot" ;;
     muse)    SC_FAMILY="muse";    SC_AGENT="muse_code" ;;
-    cortex)  SC_FAMILY="cortex";  SC_AGENT="cortex_code_cli" ;;
+    cortex)  SC_FAMILY="cortex"; SC_AGENT="cortex_code_cli"
+             { have_cmd cortex || [ -x "$HOME/.local/bin/cortex" ]; } || SC_AGENT="cortex_code_desktop" ;;
     kiro)    SC_FAMILY="kiro";    SC_AGENT="kiro_cli" ;;
     *)       SC_FAMILY="claude";  SC_AGENT="claude_code" ;;
   esac
