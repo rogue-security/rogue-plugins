@@ -29,7 +29,8 @@ $env:ROGUE_API_KEY='rsk_xxx'; $env:ROGUE_ACTOR_EMAIL='you@co.com'; iwr -useb htt
 
 The one installer detects every supported coding agent and installs the matching
 Rogue plugin into each — **Claude Code**, **OpenAI Codex**, **Cursor**,
-**Gemini CLI**, **GitHub Copilot CLI**, **Google Antigravity**, and **Kiro** —
+**Gemini CLI**, **GitHub Copilot CLI**, **Google Antigravity**, **Kiro**, and
+**Snowflake Cortex Code** (macOS and Linux) —
 writing the shared `~/.rogue-env` (`%USERPROFILE%\.rogue-env` on
 Windows) once. On a machine whose `/etc/rogue/env` (`C:\ProgramData\rogue\env`)
 already holds `ROGUE_API_KEY` it prompts for nothing and writes no user file:
@@ -54,8 +55,9 @@ configures a `Rogue Security` status badge below the Claude prompt
 On macOS, Linux, and WSL, `install.sh` requires Node.js to merge Kiro CLI 2.x agent hooks. Without Node.js, the installer skips those hooks and CLI 2.x sessions are not covered. Install Node.js and re-run the installer. The Windows `install.ps1` merge uses PowerShell and does not require Node.js.
 
 To target specific agents instead of all detected ones, pass `--claude`, `--codex`,
-`--cursor`, `--gemini`, `--copilot`, `--antigravity` and/or `--kiro` (PowerShell:
-`-Claude` / `-Codex` / `-Cursor` / `-Gemini` / `-Copilot` / `-Antigravity` / `-Kiro`):
+`--cursor`, `--gemini`, `--copilot`, `--antigravity`, `--kiro` and/or `--cortex` (PowerShell:
+`-Claude` / `-Codex` / `-Cursor` / `-Gemini` / `-Copilot` / `-Antigravity` / `-Kiro`; Cortex Code
+has no Windows bridge):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/install.sh | bash -s -- --cursor
@@ -168,6 +170,14 @@ The Muse bridge needs only bash and curl on macOS or Linux, or Windows PowerShel
 Rogue's hooks live in a Rogue-owned managed hooks file, `~/.rogue/plugins/muse/hooks.json`. The installer adds a single `managed_hooks_path` line to Muse's `settings.json` and changes nothing else. It refuses to replace a managed hooks path another tool already set, rejects settings that are not a JSON object, keeps a private backup and refuses concurrent runs. Start a new Muse session afterward. Check the wiring with `install.sh --status`. To uninstall, run `bash ~/.rogue/plugins/muse/scripts/install.sh --uninstall`; it removes the hooks file and Rogue's pointer, and keeps credentials.
 
 Prompts, tool calls and permission requests can be denied. Post-tool denies stop further work after the tool has run. Stop and SubagentStop are audit-only. The HTTP bridge fails open after five seconds or on error responses, and Muse ignores output it cannot parse, all beneath Muse's six-second hook timeout. Native Muse 1.4.3 behavior was verified on macOS, and Muse 1.4.8 loaded the managed hooks file and enforced a prompt block. The Windows bridge is tested under PowerShell 7 on Linux; native Windows Muse and Linux native parity remain unverified. Logs are stored in `~/.rogue/logs/muse.log` and shipped through the existing hook-log transport.
+
+## Snowflake Cortex Code
+
+The Cortex Code bridge needs only bash and curl on macOS or Linux; native Windows is not supported yet. Install with `bash install.sh --cortex` after publishing the `rogue-plugin-cortex.tar.gz` asset. From a checkout, `bash plugins/cortex/scripts/install.sh` installs the local bundle; configure the existing trusted Rogue credential file first.
+
+One install covers the Cortex Code CLI and the Desktop app. Both auto-load every plugin under `~/.snowflake/cortex/plugins/` (or `$CORTEX_HOME`, then `$SNOWFLAKE_HOME/cortex`), so the installer copies the bridge to `plugins/rogue-security` there and edits no settings file. It swaps the folder in from a staged copy, keeps the bridge's `env` file across reinstalls and refuses concurrent runs. Start a new Cortex Code session afterward. Check the install with `install.sh --status`. To uninstall, run `bash ~/.snowflake/cortex/plugins/rogue-security/scripts/install.sh --uninstall`; it removes only the plugin folder, including a key stored in the bridge's own `env` file, and keeps `~/.rogue-env` and `/etc/rogue/env`.
+
+Cortex Code uses Claude Code's hook protocol, so events go to `/api/v1/hooks/cortex`. Prompts, tool calls (including Snowflake SQL) and permission requests can be denied. Post-tool denies end the turn after the tool has run. Stop and SubagentStop are audit-only. Each hook has a ten-second Cortex Code timeout; the bridge's request stops after eight seconds and fails open on errors and on responses that are not JSON objects. Cortex Code runs no hooks when `disableAllHooks` is set, and in sandbox mode it skips hooks outside the project directory. Cortex Code CLI 1.2.41 and Desktop 1.25.4 were verified on macOS for prompt blocks and session events; tool-call denies are covered by API tests but have not been tested in a live model turn. Logs are stored in `~/.rogue/logs/cortex.log` and shipped through the existing hook-log transport.
 
 ## Grok Bot
 
