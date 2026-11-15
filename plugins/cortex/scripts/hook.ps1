@@ -123,7 +123,7 @@ try {
         if (Test-Path -LiteralPath $ship) { try {
             $env:ROGUE_ACTOR_EMAIL = [string]$actor.Email; $env:ROGUE_ACTOR_NAME = [string]$actor.Name
             $env:ROGUE_SHIPPER_SCRIPT = $ship; $env:ROGUE_SHIPPER_ROOT = $PluginRoot; $env:ROGUE_SHIPPER_VERSION = $version
-            $inner = '& ([scriptblock]::Create((Get-Content -Raw -LiteralPath $env:ROGUE_SHIPPER_SCRIPT))) $env:ROGUE_SHIPPER_ROOT cortex $env:ROGUE_SHIPPER_VERSION cortex'
+            $inner = '. ([scriptblock]::Create((Get-Content -Raw -LiteralPath $env:ROGUE_SHIPPER_SCRIPT))) $env:ROGUE_SHIPPER_ROOT cortex $env:ROGUE_SHIPPER_VERSION cortex'
             $psExe = (Get-Process -Id $PID).Path; if (-not $psExe) { $psExe = 'powershell' }
             Start-Process -FilePath $psExe -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand',
                 ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))) -WindowStyle Hidden | Out-Null

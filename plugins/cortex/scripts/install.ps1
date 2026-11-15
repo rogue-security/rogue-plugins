@@ -46,7 +46,8 @@ try {
             $map[$event] = @([ordered]@{ matcher = '*'; hooks = @([ordered]@{ type = 'command'; command = (Get-HookCommand $event); timeout = 10 }) })
         }
         [IO.File]::WriteAllText([IO.Path]::Combine($New, 'hooks', 'hooks.json'), ([ordered]@{ hooks = $map } | ConvertTo-Json -Depth 10), $Utf8)
-        if (Test-Path -LiteralPath (Join-Path $Dest 'env')) { Copy-Item -LiteralPath (Join-Path $Dest 'env') -Destination $New }
+        $envSource = if (Test-Path -LiteralPath (Join-Path $Dest 'env')) { $Dest } else { $Source }
+        if (Test-Path -LiteralPath (Join-Path $envSource 'env')) { Copy-Item -LiteralPath (Join-Path $envSource 'env') -Destination $New }
         if (Test-Path -LiteralPath $Dest) { Move-Item -LiteralPath $Dest -Destination $Old }
         try { Move-Item -LiteralPath $New -Destination $Dest }
         catch {
