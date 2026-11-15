@@ -108,6 +108,25 @@ else { Bad 'keeps the ROGUE_PLUGIN_REPO marker' 'env var is gone' }
 if ($raw -match 'versions\.json') { Ok 'fetches versions.json' }
 else { Bad 'fetches versions.json' 'no reference found' }
 
+$installerOutput = Join-Path ([IO.Path]::GetTempPath()) ("rogue-installer-test-" + [guid]::NewGuid().ToString('N') + '.txt')
+$env:ROGUE_TEST_INSTALLER_OUTPUT = $installerOutput
+$fakeInstaller = @'
+$EnvFile = 'top-level-env-file'
+function Read-EnvFilePath { $script:EnvFile }
+Set-Content -LiteralPath $env:ROGUE_TEST_INSTALLER_OUTPUT -Value (Read-EnvFilePath)
+exit 7
+'@
+$rc = Invoke-RogueInstaller -Script $fakeInstaller
+$seen = if (Test-Path -LiteralPath $installerOutput) { (Get-Content -Raw -LiteralPath $installerOutput).Trim() } else { '' }
+Remove-Item -LiteralPath $installerOutput -Force -ErrorAction SilentlyContinue
+Remove-Item Env:ROGUE_TEST_INSTALLER_OUTPUT
+if ($seen -eq 'top-level-env-file') { Ok 'installer functions see its top-level variables through $script:' }
+else { Bad 'installer functions see its top-level variables through $script:' "got '$seen'" }
+if ($rc -eq 7) { Ok 'installer exit code is returned, not inherited by the updater' }
+else { Bad 'installer exit code is returned, not inherited by the updater' "got '$rc'" }
+if (-not $env:ROGUE_INSTALLER_SCRIPT) { Ok 'installer path variable is cleared' }
+else { Bad 'installer path variable is cleared' 'still set' }
+
 Write-Host ''
 if ($fails -eq 0) { Write-Host 'auto-update.ps1: all checks passed'; exit 0 }
 Write-Host "auto-update.ps1: $fails failure(s)"; exit 1
