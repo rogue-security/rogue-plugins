@@ -70,6 +70,7 @@ read_plain_version() { # <path-relative-to-root>
 }
 
 MUSE_V=$(read_json_version "plugins/muse/plugin.json")
+CORTEX_V=$(read_json_version "plugins/cortex/.cortex-plugin/plugin.json")
 CLAUDE_V=$(read_json_version "plugins/rogue/.claude-plugin/plugin.json")
 CODEX_V=$(read_json_version "plugins/codex/.codex-plugin/plugin.json")
 CURSOR_V=$(read_json_version "plugins/cursor/.cursor-plugin/plugin.json")
@@ -98,7 +99,8 @@ cat <<JSON
     "gemini": "$GEMINI_V",
     "antigravity": "$ANTIGRAVITY_V",
     "kiro": "$KIRO_V",
-    "muse": "$MUSE_V"
+    "muse": "$MUSE_V",
+    "cortex": "$CORTEX_V"
   }
 }
 JSON

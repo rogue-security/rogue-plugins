@@ -33,6 +33,7 @@
 #   --copilot              install only for GitHub Copilot CLI
 #   --antigravity          install only for Google Antigravity
 #   --muse                 install only for Muse Code
+#   --cortex               install only for Snowflake Cortex Code (CLI and Desktop)
 #   --kiro                 install only for Kiro (IDE, CLI on both engines, Crew)
 #                          (no agent flag = auto-detect and install for every agent found)
 #   --api-key=KEY          same as ROGUE_API_KEY
@@ -657,6 +658,8 @@ status_agent_ctx() { # sets SC_FAMILY / SC_AGENT from $agents
     gemini)  SC_FAMILY="gemini";  SC_AGENT="gemini_cli" ;;
     copilot) SC_FAMILY="copilot"; SC_AGENT="github_copilot" ;;
     muse)    SC_FAMILY="muse";    SC_AGENT="muse_code" ;;
+    cortex)  SC_FAMILY="cortex"; SC_AGENT="cortex_code_desktop"
+             cortex_cli_installed && SC_AGENT="cortex_code_cli" ;;
     kiro)    SC_FAMILY="kiro";    SC_AGENT="kiro_cli" ;;
     *)       SC_FAMILY="claude";  SC_AGENT="claude_code" ;;
   esac
@@ -1075,6 +1078,24 @@ install_muse() {
   [ "$rc" = 0 ] || { warn "Muse hook installation failed."; return 1; }
 }
 
+install_cortex() {
+  local tmp asset url
+  tmp="$(mktemp -d)" || return 1
+  asset="rogue-plugin-cortex.tar.gz"
+  if [ -n "${ROGUE_PLUGIN_VERSION:-}" ]; then
+    url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/download/${ROGUE_PLUGIN_VERSION}/${asset}"
+  else
+    url="https://github.com/${ROGUE_PLUGIN_REPO}/releases/latest/download/${asset}"
+  fi
+  if ! curl -fsSL --max-time 60 -o "$tmp/plugin.tar.gz" "$url"; then
+    rm -rf "$tmp"; warn "Cortex Code plugin download failed. Hooks were not installed."; return 1
+  fi
+  tar -xzf "$tmp/plugin.tar.gz" -C "$tmp" && bash "$tmp/rogue-plugin-cortex/scripts/install.sh"
+  local rc=$?
+  rm -rf "$tmp"
+  [ "$rc" = 0 ] || { warn "Cortex Code hook installation failed."; return 1; }
+}
+
 # ── CLI flags ─────────────────────────────────────────────────────────────────
 # Accepts `--flag=value` and `--flag value`. Sets the same globals the env knobs
 # do, so the rest of the script is flag-agnostic. CLI flags override env vars.
@@ -1181,6 +1202,7 @@ parse_args() {
       --copilot)         WANT="$WANT copilot" ;;
       --antigravity)     WANT="$WANT antigravity" ;;
       --muse)            WANT="$WANT muse" ;;
+      --cortex)          WANT="$WANT cortex" ;;
       --kiro)            WANT="$WANT kiro" ;;
       --non-interactive) NON_INTERACTIVE=1 ;;
       --no-statusline)   ROGUE_NO_STATUSLINE=1 ;;
@@ -1195,6 +1217,21 @@ parse_args() {
 # Kiro ships no `kiro` binary on PATH: the CLI is `kiro-cli`, the IDE is an app
 # bundle on macOS, and both surfaces (Crew too) keep their state under ~/.kiro.
 kiro_detected() { have_cmd kiro-cli || [ -d /Applications/Kiro.app ] || [ -d "$HOME/.kiro" ]; }
+# Other tools ship a `cortex` binary, so only Cortex Code's own state directory (the
+# CLI and Desktop share it) or the Desktop app bundle marks an install.
+# Only Cortex Code's installer leaves cortex-version.txt beside the binary it links. Another
+# tool's cortex can come first on PATH, so the installer's own link is checked too.
+cortex_cli_installed() {
+  local bin target
+  for bin in "$(command -v cortex 2>/dev/null)" "$HOME/.local/bin/cortex"; do
+    [ -n "$bin" ] || continue
+    target="$(readlink "$bin" 2>/dev/null || echo "$bin")"
+    case "$target" in /*) ;; *) target="$(dirname "$bin")/$target" ;; esac
+    [ -f "$(dirname "$target")/cortex-version.txt" ] && return 0
+  done
+  return 1
+}
+cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ] || cortex_cli_installed; }
 
 # ── Dispatch: detect installed agents, install for each ───────────────────────
 main() {
@@ -1221,6 +1258,7 @@ main() {
           { have_cmd agy || [ -d "$HOME/.gemini/antigravity" ] || [ -d "$HOME/.gemini/antigravity-ide" ] || [ -d "$HOME/.gemini/antigravity-cli" ]; } \
             || die "--antigravity requested but no Antigravity install was detected (looked for: agy CLI, ~/.gemini/antigravity*). Install Google Antigravity first." ;;
         muse) have_cmd muse || die "Muse Code is not on PATH." ;;
+        cortex) cortex_detected || die "--cortex requested but no Cortex Code install was detected (looked for: Cortex Code.app, ~/.snowflake/cortex). Start Cortex Code once, then retry." ;;
         kiro)
           kiro_detected || die "--kiro requested but no Kiro install was detected (looked for: kiro-cli, /Applications/Kiro.app, ~/.kiro). Install Kiro (https://kiro.dev) first." ;;
       esac
@@ -1239,13 +1277,14 @@ main() {
     { have_cmd agy || [ -d "$HOME/.gemini/antigravity" ] || [ -d "$HOME/.gemini/antigravity-ide" ] || [ -d "$HOME/.gemini/antigravity-cli" ]; } && agents="$agents antigravity"
     kiro_detected && agents="$agents kiro"
     have_cmd muse && agents="$agents muse"
-    [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
+    cortex_detected && agents="$agents cortex"
+    [ -n "$agents" ] || die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro, muse, cortex code). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, or Kiro (https://kiro.dev) first."
   fi
 
   # Credentials once — every plugin reads the machine env file, else the shared ~/.rogue-env.
   configure_credentials
 
-  local muse_failed=0
+  local muse_failed=0 cortex_failed=0
   for a in $agents; do
     case "$a" in
       claude)      install_claude ;;
@@ -1256,12 +1295,18 @@ main() {
       antigravity) install_antigravity ;;
       kiro)        install_kiro ;;
       muse)        install_muse || muse_failed=1 ;;
+      # Auto-detected, a failed Cortex install only warns; an explicit --cortex fails the run.
+      cortex)      install_cortex || { [ -n "$WANT" ] && cortex_failed=1; } ;;
     esac
   done
 
   printf '\n' >&2
   if [ "$muse_failed" = 1 ]; then
     warn "Muse hooks were not installed. Other selected agents were processed; fix the Muse error and retry --muse."
+    return 1
+  fi
+  if [ "$cortex_failed" = 1 ]; then
+    warn "Cortex Code hooks were not installed. Other selected agents were processed; fix the Cortex Code error and retry --cortex."
     return 1
   fi
   ok "Done. ${C_TEAL}Rogue Security${C_RESET} 🟢 (${agents# })"

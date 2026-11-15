@@ -204,6 +204,14 @@ cp LICENSE "$MUSE_STAGE/rogue-plugin-muse/"
 tar -czf "$DIST/rogue-plugin-muse.tar.gz" -C "$MUSE_STAGE" rogue-plugin-muse
 rm -rf "$MUSE_STAGE"
 
+# Cortex Code loads the bundle as a plugin; the archive root is the plugin folder.
+CORTEX_STAGE=$(mktemp -d)
+mkdir -p "$CORTEX_STAGE/rogue-plugin-cortex"
+cp -R plugins/cortex/. "$CORTEX_STAGE/rogue-plugin-cortex/"
+cp LICENSE "$CORTEX_STAGE/rogue-plugin-cortex/"
+tar -czf "$DIST/rogue-plugin-cortex.tar.gz" -C "$CORTEX_STAGE" rogue-plugin-cortex
+rm -rf "$CORTEX_STAGE"
+
 # ── Version manifest ────────────────────────────────────────────────────────
 # The backend resolves every surface's "latest version" from THIS file, fetched
 # from /releases/latest/download/versions.json. It is the reason a release name
