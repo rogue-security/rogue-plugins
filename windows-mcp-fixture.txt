@@ -1,0 +1,2 @@
+{"result":{"tools":[{"inputSchema":{"properties":{"text":{"type":"string"}},"type":"object"},"description":"Harmless FIRE-3075 QA echo","name":"echo"}]},"id":1,"jsonrpc":"2.0"}
+Created owned harmless rogue_probe MCP fixture in real Cortex config.

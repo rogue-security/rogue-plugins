@@ -1,0 +1,37 @@
+--- /Users/drorivry/.t3/worktrees/rogue-security/t3-64876d25/rogue-endpoint/src-tauri/src/lib.rs	2026-11-15 17:37:00
++++ /tmp/cortex-FIRE-3075/qa-endpoint/src/lib.rs	2026-11-15 20:06:27
+@@ -435,4 +435,22 @@
+             }
+             _ => {}
+         });
++}
++
++#[cfg(test)]
++mod cortex_native_qa {
++    #[tokio::test]
++    #[ignore]
++    async fn cortex_native_scan_upload() {
++        use std::sync::{Arc, Mutex};
++        let api_url = std::env::var("CORTEX_QA_API_URL").unwrap();
++        let api_key = std::fs::read_to_string(std::env::var("CORTEX_QA_KEY_FILE").unwrap()).unwrap();
++        let mut state = crate::scanners::ScannerState::new();
++        state.app_info = crate::models::AppInfo { name: "FIRE-3075 branch native scanner QA harness".into(), version: "1.0.0".into() };
++        state.settings.rogue_base_url = Some(api_url.clone());
++        state.settings.api_key = api_key.clone();
++        state.api_client = Some(crate::api_client::RogueAPIClient::new(&api_url, api_key).unwrap());
++        crate::scanners::scan(&Arc::new(Mutex::new(state))).await;
++        println!("NATIVE_SCAN_COMPLETED OS={} ARCH={}", std::env::consts::OS, std::env::consts::ARCH);
++    }
+ }
+
+--- /Users/drorivry/.t3/worktrees/rogue-security/t3-64876d25/rogue-endpoint/src-tauri/src/scanners/collect/cortex.rs	2026-11-15 18:12:25
++++ /tmp/cortex-FIRE-3075/qa-endpoint/src/scanners/collect/cortex.rs	2026-11-15 20:00:40
+@@ -142,7 +142,7 @@
+     async fn push_installed_cortex_into_local_env() {
+         let url = std::env::var("ROGUE_E2E_API_URL").expect("local API URL");
+         let parsed = url::Url::parse(&url).unwrap();
+-        assert!(matches!(parsed.host_str(), Some("localhost" | "127.0.0.1")));
++        assert!(matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "192.168.64.1")));
+         let key = std::env::var("ROGUE_E2E_API_KEY").expect("task-owned org API key");
+         let client = RogueAPIClient::new(&url, key).unwrap();
+         let payload = collect(&platform::scan_applications().await).await;

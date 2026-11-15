@@ -1,0 +1,28 @@
+
+running 4 tests
+test scanners::collect::cortex::live::push_installed_cortex_into_local_env ... ignored, requires installed Cortex Code and an isolated local API org
+test scanners::cortex::tests::empty_install_still_has_details_and_bad_files_are_ignored ... ok
+test scanners::cortex::tests::reads_mcps_hooks_skills_and_connection_without_exporting_secrets ... ok
+test scanners::collect::cortex::tests::windows_shim_resolves_only_the_installed_binary_with_a_version_marker ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 805 filtered out; finished in 0.05s
+
+
+running 1 test
+Cortex Code version=1.25.4 skills=0 mcps=0 hooks=0
+Cortex Code CLI version=1.2.45 skills=0 mcps=0 hooks=0
+Cortex Code stored through public API; scan_id=01a1e02a-ee9f-78b0-9038-fbd16000357d
+test scanners::collect::cortex::live::push_installed_cortex_into_local_env ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 808 filtered out; finished in 3.01s
+
+
+running 1 test
+Cortex Code version=1.25.4 skills=0 mcps=0 hooks=0
+Cortex Code CLI version=1.2.45 skills=0 mcps=0 hooks=0
+Cortex Code stored through public API; scan_id=01a1e02a-fb13-7c91-8801-c00b44b6c5ee
+test scanners::collect::cortex::live::push_installed_cortex_into_local_env ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 808 filtered out; finished in 3.59s
+
+PASS Windows scanner tests and two installed vendor inventory uploads

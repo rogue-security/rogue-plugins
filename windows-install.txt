@@ -1,0 +1,18 @@
+Cortex Code v1.2.45
+desktop_installer_exit=0
+
+Name           
+----           
+antigravity    
+Antigravity IDE
+Cortex Code    
+cursor         
+muse           
+               
+               
+               
+               
+               
+Vendor CLI and Desktop installed; plugin bundle extracted, not configured yet.
+
+

@@ -1,0 +1,30 @@
+2026-11-15T18:11:37.838393Z  INFO saved API key validated successfully
+2026-11-15T18:11:37.838884Z  INFO task scheduler started poll_secs=30 max_concurrent=4 exec_timeout_secs=120
+2026-11-15T18:11:37.847343Z  INFO no pending tasks
+2026-11-15T18:11:47.841325Z  INFO starting scan scan_id=01a1e068-8200-76d0-9da3-fe872389c636
+2026-11-15T18:11:47.909733Z  INFO CLI not found on PATH cli=claude
+2026-11-15T18:11:47.909905Z  INFO CLI not found on PATH cli=codex
+2026-11-15T18:11:47.909976Z  INFO CLI not found on PATH cli=cursor-agent
+2026-11-15T18:11:47.910040Z  INFO CLI not found on PATH cli=kiro-cli
+2026-11-15T18:11:47.910092Z  INFO CLI not found on PATH cli=kirocrew
+2026-11-15T18:11:47.910160Z  INFO CLI not found on PATH cli=opencode
+2026-11-15T18:11:47.910222Z  INFO CLI not found on PATH cli=muse
+2026-11-15T18:11:47.910291Z  INFO scanned applications count=505
+2026-11-15T18:11:47.953515Z  INFO classification succeeded
+2026-11-15T18:11:47.966512Z  INFO MCP servers left without tools servers=1
+2026-11-15T18:11:48.017730Z  INFO asset results stored
+2026-11-15T18:11:48.017829Z  INFO scan complete scan_id=01a1e068-8200-76d0-9da3-fe872389c636
+2026-11-15T18:11:57.840855Z  INFO starting scan scan_id=01a1e068-a910-78a0-ac08-9d89b4cb9ae8
+2026-11-15T18:11:57.914021Z  INFO CLI not found on PATH cli=claude
+2026-11-15T18:11:57.914123Z  INFO CLI not found on PATH cli=codex
+2026-11-15T18:11:57.914188Z  INFO CLI not found on PATH cli=cursor-agent
+2026-11-15T18:11:57.914250Z  INFO CLI not found on PATH cli=kiro-cli
+2026-11-15T18:11:57.914300Z  INFO CLI not found on PATH cli=kirocrew
+2026-11-15T18:11:57.914353Z  INFO CLI not found on PATH cli=opencode
+2026-11-15T18:11:57.914400Z  INFO CLI not found on PATH cli=muse
+2026-11-15T18:11:57.914475Z  INFO scanned applications count=505
+2026-11-15T18:11:57.964798Z  INFO classification succeeded
+2026-11-15T18:11:57.969119Z  INFO MCP servers left without tools servers=1
+2026-11-15T18:11:58.024695Z  INFO asset results stored
+2026-11-15T18:11:58.024806Z  INFO scan complete scan_id=01a1e068-a910-78a0-ac08-9d89b4cb9ae8
+2026-11-15T18:12:01.703864Z  INFO received termination signal; exiting signal="SIGTERM"

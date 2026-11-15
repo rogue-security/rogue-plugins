@@ -1,0 +1,10 @@
+2026-11-15T17:02:32Z provider=cortex surface=cortex_code_cli event=SessionStart outcome=fail-open http=000
+2026-11-15T17:02:36Z provider=cortex surface=cortex_code_cli event=UserPromptSubmit outcome=fail-open http=000
+2026-11-15T17:02:42Z provider=cortex surface=cortex_code_cli event=Stop outcome=fail-open http=000
+2026-11-15T17:02:42Z provider=cortex surface=cortex_code_cli event=SessionEnd outcome=fail-open http=000
+2026-11-15T17:05:31Z provider=cortex surface=cortex_code_cli event=SessionStart outcome=allow http=200 raw={}
+2026-11-15T17:05:33Z provider=cortex surface=cortex_code_cli event=PreToolUse outcome=block http=200 raw={"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"MCP Blocklist: MCP server \"rogue_probe\" is in the blocklist"}}
+2026-11-15T17:05:38Z provider=cortex surface=cortex_code_cli event=SessionStart outcome=allow http=200 raw={}
+2026-11-15T17:05:39Z provider=cortex surface=cortex_code_cli event=UserPromptSubmit outcome=allow http=200 raw={}
+2026-11-15T17:05:46Z provider=cortex surface=cortex_code_cli event=SessionEnd outcome=allow http=200 raw={}
+2026-11-15T17:05:46Z provider=cortex surface=cortex_code_cli event=Stop outcome=allow http=200 raw={}

@@ -1,0 +1,20 @@
+Installed Rogue Cortex Code hooks in C:\Users\test\.snowflake\cortex\plugins\rogue-security. Start a new CLI or Desktop session.
+Cortex Code hooks installed in C:\Users\test\.snowflake\cortex\plugins\rogue-security. Start a new session to verify live traffic.
+
+  cortex connections          Manage Snowflake connections (run "cortex
+                              connections --help" for details)
+  -c, --connection                          Snowflake connection name   [string]
+      --fips-status                         Print whether FIPS 140 mode is
+      --session-id                          Set the session ID for a new session
+                                            In --print or --input-format
+      --input-format                        Input format: 'stream-json' for JSON
+  -p, --print                               Print a series of chat response and
+      --config-file                         Path to Snowflake connection config
+                                            file (connections.toml or
+
+FullName       : C:\Users\test\AppData\Local\Programs\Cortex Code\Cortex Code.exe
+ProductVersion : 1.25.4
+
+Installed plugin uses private bundled fixture env. Existing machine/user Rogue config preserved.
+
+

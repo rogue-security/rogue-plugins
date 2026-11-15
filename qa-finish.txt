@@ -1,0 +1,32 @@
+# Rogue QA bb35cb1c-8ff5-42b9-a1c7-29a6a905d037
+Profile: affected; env 60; base origin/main
+- tooling: MISSING
+- focused-checks: PASS
+- setup: MISSING
+- auth-ui: MISSING
+- edge: MISSING
+- aidr-policy: MISSING
+- aidr-async-evaluation: MISSING
+- inventory-audit: MISSING
+- async-recovery: MISSING
+- appsec: MISSING
+- gateway: MISSING
+- integrations: MISSING
+- traces: MISSING
+- live-model: MISSING
+- native: BLOCKED
+- BLOCKER: tooling: MISSING
+- BLOCKER: setup: MISSING
+- BLOCKER: auth-ui: MISSING
+- BLOCKER: edge: MISSING
+- BLOCKER: aidr-policy: MISSING
+- BLOCKER: aidr-async-evaluation: MISSING
+- BLOCKER: inventory-audit: MISSING
+- BLOCKER: async-recovery: MISSING
+- BLOCKER: appsec: MISSING
+- BLOCKER: gateway: MISSING
+- BLOCKER: integrations: MISSING
+- BLOCKER: traces: MISSING
+- BLOCKER: live-model: MISSING
+- BLOCKER: native: BLOCKED
+

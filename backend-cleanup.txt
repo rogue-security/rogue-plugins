@@ -1,0 +1,4 @@
+Owned S3 prefix removed and verified hook-artifacts/kz1d1vqyt2rw4k1j8y8il941/ count 4
+Owned S3 prefix removed and verified skill-artifacts/kz1d1vqyt2rw4k1j8y8il941/ count 0
+Revoked fixture key status 401
+PASS fixture org/user/account/key/session removed; zero rows across 119 org-scoped tables; S3 prefixes empty.

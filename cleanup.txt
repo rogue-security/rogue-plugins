@@ -1,0 +1,14 @@
+FIRE-3075 cleanup verification, 2026-11-15
+PASS Windows Cortex plugin uninstalled and native Desktop uninstaller returned0; CLI/config/auth files removed; original .rogue-env SHA256 unchanged and user PATH restored. See windows-app-cleanup.txt.
+OPEN Windows OpenSSH final restoration: guest became unreachable before final cleanup could be launched. No execution or VM restart is confirmed.
+Exact guest script: C:\Windows\Temp\cortex-final-cleanup-FIRE-3075.ps1
+The script runs vendor uninstall-sshd.ps1; restores saved firewall and administrators_authorized_keys state; removes C:\Program Files\OpenSSH, its added machine PATH entry, guest QA/setup/credential files and task folders. It reports nonsecret verification to host43662.
+No final Windows cleanup JSON was received. /tmp/cortex-FIRE-3075/windows-ssh-status.txt remains the original setup status.
+Per final user instruction, leave transfer server PID44401 on192.168.64.1:43662 running for the parent thread and later guest callback. Do not mark OpenSSH restored.
+PASS Linux disposable container absent; --rm removed its filesystem and installed tools; ubuntu:24.04 image pulled by this run removed. No named volumes or task networks were created.
+PASS fixture org/user/account/session/key deleted, zero rows verified across119 organization-scoped tables,4 owned S3 hook objects deleted, skill prefix empty; revoked key returns401. See backend-cleanup.txt.
+PASS task MySQL/login/API relays on43660/43661/43663 stopped by verified PIDs22330/22670/61915. Shared services were not stopped.
+PASS Mac Desktop setup script removed.
+PASS env60 DB_PORT and MYSQL_PORT restored to3306. Full .env.local matches original backup: True
+Env60 processes remain running. Original host MySQL forwarding on127.0.0.1:3306 still resets connections, as before this QA; process-running is not database-health proof. No shared MySQL restart attempted.
+PASS both product checkouts remain clean with unchanged pushed code heads. No merge or watch calls.

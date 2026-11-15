@@ -1,0 +1,7 @@
+2026-11-15T18:03:40Z provider=cortex surface=cortex_code_cli event=SessionStart outcome=allow http=200 rc=0 raw={}
+2026-11-15T18:03:41Z provider=cortex event=ShipLogs outcome=fail file=cortex.log offset=0 bytes=115 http=500
+2026-11-15T18:03:42Z provider=cortex surface=cortex_code_cli event=UserPromptSubmit outcome=allow http=200 rc=0 raw={}
+2026-11-15T18:03:48Z provider=cortex surface=cortex_code_cli event=SessionEnd outcome=allow http=200 rc=0 raw={}
+2026-11-15T18:03:48Z provider=cortex surface=cortex_code_cli event=Stop outcome=allow http=200 rc=0 raw={}
+2026-11-15T18:05:32Z provider=cortex surface=cortex_code_cli event=/root/.snowflake/cortex/plugins/rogue-security outcome=allow http=200 rc=0 raw={}
+2026-11-15T18:05:32Z provider=cortex surface=cortex_code_cli event=/root/.snowflake/cortex/plugins/rogue-security outcome=allow http=200 rc=0 raw={}

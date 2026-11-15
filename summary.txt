@@ -1,0 +1,35 @@
+FIRE-3075 native QA continuation, 2026-11-15
+
+Windows 11 ARM64, native UTM guest
+PASS: real Cortex CLI 1.2.45 and Desktop 1.25.4 ARM64 user installer. PR70 PowerShell installer/status passed.
+PASS: native Windows scanner tests: 3 passed, 1 ignored by the normal filter. The installed-Cortex test was then run explicitly: both products discovered at the expected versions and uploaded twice through env60 public API.
+PASS: disposable full-scanner harness invoked the branch scan, including /classify and /assets, using the guest's real machine ID. Cortex CLI and Desktop are visible on the Windows host screenshot.
+PASS LIVE: vendor CLI emitted SessionStart, UserPromptSubmit, SessionEnd and Stop, HTTP200. Session cortex-windows-live2-FIRE-3075, event usqfh2fmgin7u6e7pn8ybkxx. Screenshot includes the submitted prompt.
+PASS NATIVE-BRIDGE REPLAY: installed hook.ps1 returned permissionDecision=deny for mcp__rogue_probe__echo. Session cortex-windows-native-replay-FIRE-3075, event bmvjxntj18d8186hr7s5uoye. Screenshot shows blocked MCP finding.
+Desktop is INVENTORY ONLY. No Desktop session/hook emission was driven over SSH; UTM UI remains contended.
+
+Linux container (Docker, Ubuntu 24.04 arm64), not a VM
+PASS: real Cortex CLI 1.2.45, PR70 bash installer/status and branch Linux headless endpoint. Host inventory screenshot shows Cortex Code CLI and Linux.
+PASS LIVE: vendor CLI emitted SessionStart, UserPromptSubmit, SessionEnd and Stop, HTTP200. Session cortex-linux-live-FIRE-3075, event agsjeeonei4fw19f0uh8rf0e. Screenshot includes the submitted prompt.
+PASS NATIVE-BRIDGE REPLAY: installed hook.sh returned permissionDecision=deny for mcp__rogue_probe__echo. Session cortex-linux-native-replay-FIRE-3075, event uihsjnulxok1pcy7c2lhwa97. Screenshot shows blocked MCP finding. The first manual replay passed an extra argument and produced two allow records; the corrected native invocation produced the deny. No pass is attributed to the failed attempt.
+
+Limits and observations
+Both CLIs rejected inference with "Cortex Code is not enabled or the usage limit has been reached". The visible CLI output did not expose code399530; do not infer that exact code. Live inference and a model-emitted tool deny are unverified. Deny proof is installed native bridge replay, not a live model tool call and not host replay. Prior host replay proof remains separate.
+Inventory screenshots include the owned harmless rogue_probe MCP fixture. Bare Cortex installs had persisted rows but were hidden by this local inventory read model because they lack a catalog match/components. Adding the fixture and rebuilding only this org's summary made the real discovered relationships visible; no inventory rows were fabricated.
+The Linux SessionStart background hook-log shipper received HTTP500. Core hook requests were HTTP200 with persisted sessions. Background log shipping is not a pass this round.
+No product code changes or new branch commits. Native executables are QA builds; signed installer/update behavior and Windows tray UI were not tested.
+
+Cleanup
+PASS Windows Cortex plugin uninstalled and native Desktop uninstaller returned0; CLI/config/auth files removed; original .rogue-env SHA256 unchanged and user PATH restored. See windows-app-cleanup.txt.
+OPEN Windows OpenSSH final restoration: guest became unreachable before final cleanup could be launched. No execution or VM restart is confirmed.
+Exact guest script: C:\Windows\Temp\cortex-final-cleanup-FIRE-3075.ps1
+The script runs vendor uninstall-sshd.ps1; restores saved firewall and administrators_authorized_keys state; removes C:\Program Files\OpenSSH, its added machine PATH entry, guest QA/setup/credential files and task folders. It reports nonsecret verification to host43662.
+No final Windows cleanup JSON was received. /tmp/cortex-FIRE-3075/windows-ssh-status.txt remains the original setup status.
+Per final user instruction, leave transfer server PID44401 on192.168.64.1:43662 running for the parent thread and later guest callback. Do not mark OpenSSH restored.
+PASS Linux disposable container absent; --rm removed its filesystem and installed tools; ubuntu:24.04 image pulled by this run removed. No named volumes or task networks were created.
+PASS fixture org/user/account/session/key deleted, zero rows verified across119 organization-scoped tables,4 owned S3 hook objects deleted, skill prefix empty; revoked key returns401. See backend-cleanup.txt.
+PASS task MySQL/login/API relays on43660/43661/43663 stopped by verified PIDs22330/22670/61915. Shared services were not stopped.
+PASS Mac Desktop setup script removed.
+PASS env60 DB_PORT and MYSQL_PORT restored to3306. Full .env.local matches original backup: True
+Env60 processes remain running. Original host MySQL forwarding on127.0.0.1:3306 still resets connections, as before this QA; process-running is not database-health proof. No shared MySQL restart attempted.
+PASS both product checkouts remain clean with unchanged pushed code heads. No merge or watch calls.

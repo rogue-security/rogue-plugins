@@ -1,0 +1,11 @@
+Removed Rogue Cortex Code hooks and bundled env; shared credentials and Cortex settings preserved.
+desktop_uninstaller_exit=0
+restored_absence=C:\Users\test\.snowflake
+restored_absence=C:\Users\test\.cortex
+restored_absence=C:\Users\test\AppData\Local\cortex
+restored_absence=C:\Users\test\AppData\Local\Programs\Cortex Code
+restored_absence=C:\Users\test\AppData\Roaming\Cortex Code
+existing_rogue_env_sha256_unchanged=True
+user_path_restored=True
+cortex_uninstall_registry_absent=True
+PASS Windows Cortex apps, plugin, connection credentials removed; original Rogue env and user Path preserved.

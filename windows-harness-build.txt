@@ -1,0 +1,42 @@
+   Compiling rogue-endpoint v1.0.0 (/tmp/cortex-FIRE-3075/qa-endpoint)
+warning: unused import: `shipper::spawn_log_shipper`
+ --> src/log_ship/mod.rs:9:9
+  |
+9 | pub use shipper::spawn_log_shipper;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `marker::clear_exit`
+  --> src/process_events/mod.rs:16:9
+   |
+16 | pub use marker::clear_exit;
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `mark_exit`
+  --> src/process_events/mod.rs:19:39
+   |
+19 | pub use marker::{install_exit_marker, mark_exit, mark_panic};
+   |                                       ^^^^^^^^^
+
+warning: unused imports: `AgentFiles`, `record_agent_start`, and `run_process_events`
+  --> src/process_events/mod.rs:24:16
+   |
+24 | pub use tray::{record_agent_start, run_process_events, AgentFiles};
+   |                ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `tray::run_tray_metrics`
+  --> src/self_metrics/mod.rs:34:16
+   |
+34 | pub(crate) use tray::run_tray_metrics;
+   |                ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `task_scheduler::schedule_tasks`
+  --> src/tasks/mod.rs:25:9
+   |
+25 | pub use task_scheduler::schedule_tasks;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `rogue-endpoint` (lib test) generated 6 warnings (run `cargo fix --lib -p rogue-endpoint --tests` to apply 6 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.20s
+  Executable unittests src/lib.rs (rogue-endpoint/src-tauri/target/aarch64-pc-windows-msvc/debug/deps/app_lib-9f8179207cfc380a.exe)

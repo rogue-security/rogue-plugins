@@ -1,0 +1,17 @@
+Security source: 39b9856e3fc6fba12e4af99070a278a6fd15fd4d (signed, unchanged this round)
+Plugin source: af26ddb677132f2b49c01a02abe943573244fcfb (unsigned fallback from prior round, unchanged this round)
+Windows: WIN-1HR62O80U4C, Windows 11 ARM64 build 26200, user test
+Windows guest clock is roughly one hour behind host; session IDs and machine IDs provide correlation.
+Linux container (Docker, Ubuntu 24.04 arm64), not a VM
+Docker image: ubuntu:24.04 sha256:50ec654248113cf5966e8fcbde7acd5a49a943c9ee9d92512f3a20b6be54b5d7
+Run-owned fixture org: kz1d1vqyt2rw4k1j8y8il941
+Windows full scanner uses disposable test glue invoking the unmodified branch scan function. Installed-Cortex integration test URL guard allowed only the lab host. No scanner implementation changes.
+Linux runs the unmodified branch headless binary, built inside Ubuntu; a disposable container-local loopback relay reaches host.docker.internal:26009 because endpoint connection requires HTTPS for non-loopback names.
+Artifacts:
+1d09aee9d142d04b6106fdcf8d2e973c5765be92140c7b1ada5b66e735599278 transfer/rogue-plugin-cortex.tar.gz
+99387575ecec3adf47809813e45b5ebe861bcd7b3dc4eadbc3b4b31daa86ec9f transfer/cortex-scanner-tests.exe
+74fa3c0de45bc9c71dc5ea039f302710260100c5066106c2fe746311872e8bc0 qa-endpoint/src/scanners/collect/cortex.rs
+42c24cf7e489a003d9f2fb970cbfaa4c4aeaec9ecec89a169789fa9c28fcc627 qa-endpoint/src/lib.rs
+fe49b845f357d2e4726ffc73154555b3fa179232abb8d7488ec59725562e8558 coco-1.2.45+061229.2a20c0482251-windows-arm64.tar.gz
+847a4f9fb81189755291e59277456228fd852b68cca42960e4510e9cf34e8bf8 coco-1.2.45+061229.2a20c0482251-linux-arm64.tar.gz
+4c9d635902c8c001286bd63447cd523154210f7f9605ae8d3f1f50b0f29e8b0e Cortex-Code-win32-arm64-user-setup.exe

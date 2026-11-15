@@ -1,0 +1,3 @@
+NATIVE_BRIDGE_REPLAY Windows ARM64 session=cortex-windows-native-replay-FIRE-3075 event=SessionStart response={}
+NATIVE_BRIDGE_REPLAY Windows ARM64 session=cortex-windows-native-replay-FIRE-3075 event=PreToolUse response={"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"MCP Blocklist: MCP server \"rogue_probe\" is in the blocklist"}}
+PASS installed Windows bridge returned native deny for rogue_probe; recorded payload, not model-emitted tool call.
