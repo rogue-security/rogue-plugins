@@ -55,6 +55,21 @@ function Test-RogueNewer {
     try { return ([version]$Latest -gt [version]$Installed) } catch { return $false }
 }
 
+function Invoke-RogueInstaller {
+    param([string]$Script)
+    $file = Join-Path ([IO.Path]::GetTempPath()) ("rogue-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    try {
+        Set-Content -LiteralPath $file -Value $Script -Encoding UTF8
+        $env:ROGUE_INSTALLER_SCRIPT = $file
+        & (Get-Process -Id $PID).Path -NoProfile -NonInteractive -Command `
+            '. ([scriptblock]::Create((Get-Content -Raw -LiteralPath $env:ROGUE_INSTALLER_SCRIPT)))' | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        Remove-Item Env:ROGUE_INSTALLER_SCRIPT -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if ($env:ROGUE_PS_LIB_ONLY) { return }
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -151,6 +166,6 @@ if (-not $installerUrl) { $installerUrl = 'https://raw.githubusercontent.com/rog
 try {
     $script = (Invoke-WebRequest -Uri $installerUrl -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop).Content
     $env:ROGUE_NON_INTERACTIVE = '1'
-    & ([scriptblock]::Create($script))
-    LogLine "installer finished"
+    $rc = Invoke-RogueInstaller -Script $script
+    LogLine "installer exited rc=$rc"
 } catch { LogLine "installer failed: $($_.Exception.Message)" }

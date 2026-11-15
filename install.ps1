@@ -569,6 +569,36 @@ function Configure-Credentials {
     Write-UserEnvFile
 }
 
+function Invoke-PluginCli {
+    param([string]$Cli, [string[]]$CliArgs)
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = (& $Cli @CliArgs 2>&1 | Out-String)
+        return @{ Output = $output; ExitCode = $LASTEXITCODE }
+    } catch {
+        return @{ Output = $_.Exception.Message; ExitCode = 1 }
+    }
+}
+
+function Add-AndRefreshMarketplace {
+    param([string]$Cli, [string]$RefreshCommand, [string]$Marketplace)
+    Log "Adding marketplace $PluginRepo"
+    Invoke-PluginCli $Cli @('plugin', 'marketplace', 'add', $PluginRepo) | Out-Null
+    $refresh = Invoke-PluginCli $Cli @('plugin', 'marketplace', $RefreshCommand, $Marketplace)
+    if ($refresh.ExitCode -eq 0) { Ok 'Marketplace up to date' }
+    else { Warn2 "Could not refresh the $Cli marketplace - the plugin may stay at its current version." }
+}
+
+function Update-OrInstallPlugin {
+    param([string]$Cli, [string]$PluginSlug)
+    $listing = Invoke-PluginCli $Cli @('plugin', 'list')
+    if ($listing.ExitCode -ne 0) { Die "$Cli plugin list failed. Run '$Cli plugin list' to see the error." }
+    $command = if ($listing.Output.Contains($PluginSlug)) { 'update' } else { 'install' }
+    $result = Invoke-PluginCli $Cli @('plugin', $command, $PluginSlug)
+    if ($result.ExitCode -ne 0) { Die "$Cli plugin $command failed. Run '$Cli plugin $command $PluginSlug' to see the error." }
+    if ($command -eq 'update') { Ok 'Plugin updated' } else { Ok 'Plugin installed' }
+}
+
 
 # Test seam: load only the functions above (tests/test_install_kiro_ps1.ps1,
 # tests/test_install_env_ps1.ps1).
@@ -647,42 +677,18 @@ Configure-Credentials
 if ($hasClaude) {
     Write-Host ""
     Write-Host "Rogue Security - Claude Code" -ForegroundColor Cyan
-    Log "Adding marketplace $PluginRepo"
-    $mktOk = $false
-    try { & claude plugin marketplace add $PluginRepo 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $mktOk = $true } } catch {}
-    if ($mktOk) { Ok 'Marketplace added' }
-    else {
-        try { & claude plugin marketplace update $MarketplaceName 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $mktOk = $true } } catch {}
-        if ($mktOk) { Ok 'Marketplace updated' }
-        else { Warn2 'Could not add or update marketplace (continuing - it may already be present).' }
-    }
+    Add-AndRefreshMarketplace -Cli 'claude' -RefreshCommand 'update' -Marketplace $MarketplaceName
     Log "Installing plugin $PluginName@$MarketplaceName"
-    $installed = $false
-    try { & claude plugin install "$PluginName@$MarketplaceName" 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $installed = $true } } catch {}
-    if (-not $installed) {
-        try { & claude plugin update $PluginName 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $installed = $true } } catch {}
-    }
-    if (-not $installed) { Die "claude plugin install failed. Run 'claude plugin install $PluginName@$MarketplaceName' to see the error." }
-    Ok 'Plugin installed'
+    Update-OrInstallPlugin -Cli 'claude' -PluginSlug "$PluginName@$MarketplaceName"
 }
 
 if ($hasCodex) {
     Write-Host ""
     Write-Host "Rogue Security - OpenAI Codex" -ForegroundColor Cyan
-    Log "Adding marketplace $PluginRepo"
-    $mktOk = $false
-    try { & codex plugin marketplace add $PluginRepo 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $mktOk = $true } } catch {}
-    if ($mktOk) { Ok 'Marketplace added' }
-    else {
-        try { & codex plugin marketplace upgrade $MarketplaceName 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $mktOk = $true } } catch {}
-        if ($mktOk) { Ok 'Marketplace updated' }
-        else { Warn2 'Could not add or update Codex marketplace (continuing - it may already be present).' }
-    }
+    Add-AndRefreshMarketplace -Cli 'codex' -RefreshCommand 'upgrade' -Marketplace $MarketplaceName
     Log "Installing plugin $PluginName@$MarketplaceName"
-    # Codex uses `plugin add` (not `install`); idempotent re-add is fine.
-    $installed = $false
-    try { & codex plugin add "$PluginName@$MarketplaceName" 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $installed = $true } } catch {}
-    if (-not $installed) { Die "codex plugin add failed. Run 'codex plugin add $PluginName@$MarketplaceName' to see the error." }
+    $codexAdd = Invoke-PluginCli 'codex' @('plugin', 'add', "$PluginName@$MarketplaceName")
+    if ($codexAdd.ExitCode -ne 0) { Die "codex plugin add failed. Run 'codex plugin add $PluginName@$MarketplaceName' to see the error." }
     Ok 'Plugin installed'
     Warn2 'Codex skips untrusted hooks - open /hooks in Codex and trust the Rogue entries once.'
 }
@@ -932,23 +938,9 @@ if ($hasMuse) {
 if ($hasCopilot) {
     Write-Host ""
     Write-Host "Rogue Security - GitHub Copilot CLI" -ForegroundColor Cyan
-    Log "Adding marketplace $PluginRepo"
-    $mktOk = $false
-    try { & copilot plugin marketplace add $PluginRepo 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $mktOk = $true } } catch {}
-    if ($mktOk) { Ok 'Marketplace added' }
-    else {
-        try { & copilot plugin marketplace update $CopilotMarketplaceName 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $mktOk = $true } } catch {}
-        if ($mktOk) { Ok 'Marketplace updated' }
-        else { Warn2 'Could not add or update Copilot marketplace (continuing - it may already be present).' }
-    }
+    Add-AndRefreshMarketplace -Cli 'copilot' -RefreshCommand 'update' -Marketplace $CopilotMarketplaceName
     Log "Installing plugin $PluginName@$CopilotMarketplaceName"
-    $installed = $false
-    try { & copilot plugin install "$PluginName@$CopilotMarketplaceName" 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $installed = $true } } catch {}
-    if (-not $installed) {
-        try { & copilot plugin update $PluginName 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $installed = $true } } catch {}
-    }
-    if (-not $installed) { Die "copilot plugin install failed. Run 'copilot plugin install $PluginName@$CopilotMarketplaceName' to see the error." }
-    Ok 'Plugin installed'
+    Update-OrInstallPlugin -Cli 'copilot' -PluginSlug "$PluginName@$CopilotMarketplaceName"
     Warn2 'Copilot skips untrusted hooks - open /hooks in Copilot CLI and trust the Rogue entries once.'
     # Mirrors install.sh: Rogue reaches JetBrains only through Copilot's
     # CLI/Agent provider. The IDE's built-in "Local" agent runs its own hook
