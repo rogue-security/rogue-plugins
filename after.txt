@@ -1,0 +1,32 @@
+ok   Cortex lookup is isolated from PATH
+ok   unmarked cortex is not detected
+ok   official shim detected without a PATH refresh
+ok   fresh install into CORTEX_HOME
+ok   fresh install retains source env
+ok   hooks file has nine events
+ok   status passes
+ok   repeat install preserves bundled env
+ok   concurrent install fails without losing plugin
+ok   uninstall preserves settings and other plugins
+ok   status fails after uninstall
+ok   hook credential reader skips even a trusted machine env before reading
+ok   unconfigured hook allows
+ok   relays a native deny
+ok   relays an allow
+ok   shipper is ASCII for Windows PowerShell 5.1 without a BOM
+ok   SessionStart shipper selects Cortex only with Cursor log present
+shipper probe: {"files":["/var/folders/07/p797lchd5fqbxrcqpxft1gcc0000gn/T/cortex-ps1 ' home-5pylpujj.baz/.rogue/logs/cortex.log"],"slug":"cortex","email":"resolved@example.test","name":"Resolved Actor"}
+ok   empty env actor fields preserve resolved hook identity
+ok   nonempty file actor cannot replace inherited hook identity
+ok   standalone shipper still accepts file identity
+ok   fails open on <html>proxy</html>
+ok   fails open on {not-json}
+ok   fails open on []
+ok   fails open on null
+ok   fails open on "text"
+ok   relays a whitespace-prefixed deny
+ok   Desktop marker is recognized
+ok   fails open on a server error
+ok   fails open when unreachable
+ok   logs every outcome
+all Cortex Code PowerShell tests passed

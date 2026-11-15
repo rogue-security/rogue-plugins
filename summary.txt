@@ -1,0 +1,14 @@
+FIRE-3075 review regression proof
+Source before: ec019f3fecc8265066444a5e2e82a6fc9909f1aa
+Source after: af26ddb677132f2b49c01a02abe943573244fcfb
+Engine: PowerShell 7.7 on macOS ARM64, /tmp/pwsh/pwsh
+
+before.txt runs the final regression test file against an archive of the original source. It reproduces dropped source env, slug=unknown with both cursor.log and cortex.log selected, and actor=anon with blank name.
+after.txt runs the same regression tests against the fixed source. Only cortex.log is selected and resolved@example.test / Resolved Actor survive the empty env overlay. Nonempty file actor values also cannot replace inherited identity; standalone file identity still works.
+The child-command probe uses the production SessionStart encoded command and real shipper initialization/selection helpers, replacing only the final network drain with diagnostic output. This is local regression evidence, not a live Cortex client or native guest claim.
+Windows CI additionally invokes a real SessionStart hook with a mock HTTP receiver and asserts exactly one Cortex log upload and matching hook/upload actors. Native UTM Windows/Linux inventory, vendor-emitted traffic, and enforcement remain pending.
+Tests copy the plugin into a temporary bundle and reject machine env reads before touching the file. CLI detection mocks command lookup. No real endpoint credentials are used.
+
+The full local CI manifests sequence was executed: 15 steps passed, 2 steps failed on pre-existing host-sensitive shell tests. The unchanged original head reproduces Muse's stored-hook failure and install-env's two identity expectations. Focused Cortex and all PowerShell unit tests passed. CI supplies Linux and Windows PowerShell 5.1 coverage.
+
+The pre-commit hook ran sync, Cortex shell, Cortex PowerShell, and plugin-version tests successfully. SSH signing failed: 1Password: failed to fill whole buffer. Authorized unsigned fallback commit: af26ddb677132f2b49c01a02abe943573244fcfb. Persistent signing configuration is unchanged.

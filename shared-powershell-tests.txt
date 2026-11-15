@@ -1,0 +1,92 @@
+
+== the seam loads the helpers without running the shipper
+  ok: Get-TrailingFragmentLength is defined
+  ok: Get-FirstLineFingerprint is defined
+  ok: Find-LineEnd is defined
+  ok: Read-Range is defined
+  ok: Get-NormalizedPath is defined
+  ok: Get-NumberOrDefault is defined
+  ok: Get-StateKeyForPath is defined
+  ok: ConvertFrom-ShellQuoted is defined
+  ok: Read-ShipState is defined
+  ok: Write-ShipState is defined
+
+== a chunk never ends mid-line
+  ok: ends on a newline -> 0
+  ok: no newline at all -> length
+  ok: partial last line -> its size
+  ok: empty input -> 0
+
+== the head fingerprint is the first line INCLUDING its newline
+  ok: base64 of line 1 with its \n
+  ok: appending does not change it
+  ok: a file with no newline -> unknown
+
+== path= is NORMALIZED, so all three implementations name a file identically
+  ok: a doubled separator collapses
+  ok: a dot segment collapses
+  ok: a parent segment resolves
+
+== a typo in a knob must never disable shipping or blow a cap
+  ok: non-numeric -> default
+  ok: empty -> default
+  ok: negative -> default
+  ok: zero with allowZero -> zero
+  ok: zero without allowZero -> default
+  ok: a real value is kept
+  ok: unrepresentable -> default
+  ok: no ROGUE_SHIP_LOGS in SHIP_ENV_VARS
+  ok: Test-FlagEnabled is gone
+  ok: Test-ValueIsZero is gone
+  ok: no shipDisabledByFile plumbing
+  ok: Invoke-Main gates only on the API key, after the knobs
+
+== state is keyed by the log basename
+  ok: claude.log -> claude
+  ok: a name without .log is kept as-is
+
+== ranged reads are exact, and a short read is not an error
+  ok: offset 0
+  ok: a mid-file offset
+  ok: past EOF is short, not an error
+  ok: a zero count is an EMPTY array, not @(@())
+
+== the line-end search spans windows and STALLS rather than land mid-line
+  ok: the newline is found across windows
+  ok: and it is not reported as EOF
+  ok: an unterminated tail reports EOF
+  ok: and reports no line length
+  ok: the exhausted scan logs outcome=stall
+  ok: and never advances by a whole window
+
+== state survives a round trip, and a moved file resets it
+True
+  ok: offset round-trips
+  ok: head round-trips
+  ok: size round-trips
+  ok: a different path resets the offset
+  ok: and drops the stored head
+  ok: the state file has no UTF-8 BOM
+  ok: and uses LF, not CRLF
+
+== an empty actor email canonicalises to anon, exactly as sh and Node do
+  ok: an empty email -> anon
+  ok: …and the value is anon
+  ok: a whitespace-only email -> anon
+  ok: …and the value is anon
+  ok: a real email -> a@b.c
+  ok: …and the value is a@b.c
+  ok: no actor key at all still skips
+
+== a transport failure logs http=000, matching curl
+  ok: zero formats as 000
+  ok: a real status is unchanged
+  ok: Send-ChunkRequest formats it
+
+== every logged outcome also reaches the debug stream
+  ok: Write-ShipLog debugs before the log-file gate
+
+== a marker-less lock is a LIVE lock, not a stale one
+  ok: a fresh lock with no ts marker blocks
+
+All log-shipper PowerShell tests passed.
