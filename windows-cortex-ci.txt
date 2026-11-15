@@ -1,0 +1,42 @@
+Head: af26ddb677132f2b49c01a02abe943573244fcfb
+Job: https://github.com/rogue-security/rogue-plugins/actions/runs/43736817085/job/132881129904
+Windows runner, PowerShell 5.1. Mock HTTP API, real background shipper. Not vendor-emitted UTM guest traffic.
+
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:42:59.3715504Z ok   Cortex lookup is isolated from PATH
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:42:59.3937476Z ok   unmarked cortex is not detected
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:42:59.3977267Z ok   official shim detected without a PATH refresh
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:42:59.8650454Z ok   fresh install into CORTEX_HOME
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:42:59.8688321Z ok   fresh install retains source env
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:42:59.8917719Z ok   hooks file has nine events
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:00.3509584Z ok   status passes
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:00.8138429Z ok   repeat install preserves bundled env
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:01.6998085Z ok   concurrent install fails without losing plugin
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:02.1202340Z ok   uninstall preserves settings and other plugins
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:02.5707422Z ok   status fails after uninstall
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:03.0515107Z ok   hook credential reader skips even a trusted machine env before reading
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:03.5640992Z ok   unconfigured hook allows
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:05.0581707Z ok   relays a native deny
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:06.5061765Z ok   relays an allow
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:07.1859297Z ok   SessionStart allows while starting its real background shipper
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:07.9849470Z ok   SessionStart uploads Cortex logs only, never the present Cursor log
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:07.9918351Z ok   actual upload actor matches the hook despite empty file identity
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:08.0013853Z ok   shipper is ASCII for Windows PowerShell 5.1 without a BOM
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:08.2657137Z #< CLIXML
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:08.5543292Z ok   SessionStart shipper selects Cortex only with Cursor log present
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:08.5578280Z shipper probe: {"email":"resolved@example.test","name":"Resolved Actor","files":["C:\\Users\\runneradmin\\AppData\\Local\\Temp\\cortex-ps1 \u0027 home-jbyohslc.03n\\.rogue\\logs\\cortex.log"],"slug":"cortex"}
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:08.5590372Z ok   empty env actor fields preserve resolved hook identity
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:08.8186264Z <Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>#< CLIXML
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:09.1057828Z ok   nonempty file actor cannot replace inherited hook identity
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:09.3569040Z <Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>#< CLIXML
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:09.6468717Z ok   standalone shipper still accepts file identity
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:11.0527219Z ok   fails open on <html>proxy</html>
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:12.4999479Z ok   fails open on {not-json}
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:13.9302307Z ok   fails open on []
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:15.3775199Z ok   fails open on null
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:16.8232090Z ok   fails open on "text"
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:18.2666969Z ok   relays a whitespace-prefixed deny
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:18.9087840Z ok   Desktop marker is recognized
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:20.3104358Z ok   fails open on a server error
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:25.1060075Z ok   fails open when unreachable
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:25.1086436Z ok   logs every outcome
+windows	PowerShell unit tests under Windows PowerShell 5.1	2026-11-15T16:43:25.1931688Z all Cortex Code PowerShell tests passed
