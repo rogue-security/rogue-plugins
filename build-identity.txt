@@ -15,3 +15,4 @@ Artifacts:
 fe49b845f357d2e4726ffc73154555b3fa179232abb8d7488ec59725562e8558 coco-1.2.45+061229.2a20c0482251-windows-arm64.tar.gz
 847a4f9fb81189755291e59277456228fd852b68cca42960e4510e9cf34e8bf8 coco-1.2.45+061229.2a20c0482251-linux-arm64.tar.gz
 4c9d635902c8c001286bd63447cd523154210f7f9605ae8d3f1f50b0f29e8b0e Cortex-Code-win32-arm64-user-setup.exe
+CLI installation method: verified vendor tarballs staged in native Cortex install paths. Windows launcher .cmd target parsing is covered by the native Rust test fixture; the vendor CLI installer script itself was not run. Desktop used the real ARM64 user installer.

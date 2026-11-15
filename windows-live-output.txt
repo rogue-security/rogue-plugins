@@ -1,0 +1,4 @@
+Windows CLI first live invocation, captured transcript excerpt:
+cortex.exe : Error: Cortex Code is not enabled or the usage limit has been reached. Please upgrade your account to
+
+The excerpt ends at the PowerShell-wrapped line. Both live attempts exited1. The second attempt's full stdout/stderr file was copied before the process finished and was empty; the guest file was subsequently removed during cleanup. A full raw Windows CLI error log is unavailable. No numeric399530 claim is made. The installed hook log and console screenshot independently show the successful live SessionStart/UserPromptSubmit/SessionEnd/Stop delivery for cortex-windows-live2-FIRE-3075.
