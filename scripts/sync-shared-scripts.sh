@@ -36,15 +36,15 @@ SRC="$REPO/scripts/shared"
 # screens the Cowork sandbox identity).
 ROWS=(
   "ship-logs.sh|rogue codex cursor copilot antigravity kiro muse cortex"
-  "ship-logs.ps1|rogue codex cursor copilot antigravity kiro muse"
+  "ship-logs.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
   "beacon.sh|rogue codex cursor copilot antigravity kiro muse"
   "beacon.ps1|rogue codex cursor copilot antigravity kiro muse"
   "env-file.sh|rogue codex cursor copilot antigravity kiro muse cortex"
-  "env-file.ps1|rogue codex cursor copilot antigravity kiro muse"
+  "env-file.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
   "git-identity.sh|rogue codex cursor copilot antigravity kiro muse cortex"
-  "git-identity.ps1|rogue codex cursor copilot antigravity kiro muse"
+  "git-identity.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
   "actor.sh|codex cursor copilot antigravity kiro muse cortex"
-  "actor.ps1|codex cursor copilot antigravity kiro muse"
+  "actor.ps1|codex cursor copilot antigravity kiro muse cortex"
 )
 
 # An unrecognized argument is an ERROR, not a silent write: the two modes have

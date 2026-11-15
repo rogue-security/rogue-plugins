@@ -47,6 +47,8 @@
     Install only for Google Antigravity.
 .PARAMETER Kiro
     Install only for Kiro (IDE, CLI on both engines). With no agent switch, every detected agent is installed.
+.PARAMETER Cortex
+    Install only for Snowflake Cortex Code CLI and Desktop.
 .PARAMETER Muse
     Install only for Muse Code.
 #>
@@ -65,7 +67,8 @@ param(
     [switch]$Copilot,
     [switch]$Antigravity,
     [switch]$Kiro,
-    [switch]$Muse
+    [switch]$Muse,
+    [switch]$Cortex
 )
 
 $ErrorActionPreference = 'Stop'
@@ -463,6 +466,7 @@ function Register-ApiKey {
         elseif ($hasCopilot) { $scFamily = 'copilot'; $scAgent = 'github_copilot' }
         elseif ($hasKiro)    { $scFamily = 'kiro';    $scAgent = 'kiro_cli' }
         elseif ($hasMuse)    { $scFamily = 'muse';    $scAgent = 'muse_code' }
+        elseif ($hasCortex)  { $scFamily = 'cortex'; $scAgent = if (Test-CortexCliInstalled) { 'cortex_code_cli' } else { 'cortex_code_desktop' } }
         $body = @{ agent_family = $scFamily; agent = $scAgent; host = $hostName; actor_email = $ActorEmail } | ConvertTo-Json -Compress
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
         $resp = Invoke-WebRequest -Uri "$($Url.TrimEnd('/'))/api/v1/hooks/status" -Method Post `
@@ -570,6 +574,26 @@ function Configure-Credentials {
 }
 
 
+function Test-CortexCliInstalled {
+    $paths = @((Get-Command cortex -ErrorAction SilentlyContinue).Source)
+    if ($env:LOCALAPPDATA) { $paths += [IO.Path]::Combine($env:LOCALAPPDATA, 'cortex', 'bin', 'cortex.cmd') }
+    foreach ($path in $paths) {
+        if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        if ([IO.Path]::GetExtension($path) -eq '.cmd') {
+            $text = [IO.File]::ReadAllText($path).Trim()
+            if ($text -notmatch '^@"([^"\r\n]+[\\/]cortex\.exe)" %\*$') { continue }
+            $path = $Matches[1]
+        }
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path (Split-Path $path) 'cortex-version.txt') -PathType Leaf)) { return $true }
+    }
+    return $false
+}
+
+function Test-CortexInstalled {
+    $config = if ($env:CORTEX_HOME) { $env:CORTEX_HOME } elseif ($env:SNOWFLAKE_HOME) { Join-Path $env:SNOWFLAKE_HOME 'cortex' } else { [IO.Path]::Combine($env:USERPROFILE, '.snowflake', 'cortex') }
+    return (Test-Path -LiteralPath $config -PathType Container) -or (Test-CortexCliInstalled)
+}
+
 # Test seam: load only the functions above (tests/test_install_kiro_ps1.ps1,
 # tests/test_install_env_ps1.ps1).
 if ($env:ROGUE_INSTALL_LIB_ONLY) { return }
@@ -588,7 +612,7 @@ Write-Host "Rogue Security (Windows)" -ForegroundColor Cyan
 # agent still needs its binary; Cursor is a plain file copy, so it installs regardless.
 # Antigravity has no `antigravity` binary on PATH — detect the `agy` CLI or its data
 # dirs under %USERPROFILE%\.gemini (IDE and/or manual-CLI installs).
-$explicit = $Claude -or $Codex -or $Cursor -or $Gemini -or $Copilot -or $Antigravity -or $Kiro -or $Muse
+$explicit = $Claude -or $Codex -or $Cursor -or $Gemini -or $Copilot -or $Antigravity -or $Kiro -or $Muse -or $Cortex
 if ($explicit) {
     $hasClaude      = [bool]$Claude
     $hasCodex       = [bool]$Codex
@@ -598,6 +622,8 @@ if ($explicit) {
     $hasAntigravity = [bool]$Antigravity
     $hasKiro        = [bool]$Kiro
     $hasMuse        = [bool]$Muse
+    $hasCortex      = [bool]$Cortex
+    if ($hasCortex -and -not (Test-CortexInstalled)) { Die "-Cortex requested but no Cortex Code install was detected. Start Cortex Code once, then retry." }
     if ($hasClaude -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Die "-Claude requested but the 'claude' CLI is not on PATH. Install Claude Code (https://claude.com/code) first."
     }
@@ -628,8 +654,9 @@ if ($explicit) {
     $hasAntigravity = [bool](Get-Command agy -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $env:USERPROFILE '.gemini\antigravity*'))
     $hasKiro        = Test-KiroInstalled
     $hasMuse        = [bool](Get-Command muse -ErrorAction SilentlyContinue)
-    if (-not ($hasClaude -or $hasCodex -or $hasCursor -or $hasGemini -or $hasCopilot -or $hasAntigravity -or $hasKiro -or $hasMuse)) {
-        Die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro, muse). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, Kiro (https://kiro.dev), or Muse Code first."
+    $hasCortex      = Test-CortexInstalled
+    if (-not ($hasClaude -or $hasCodex -or $hasCursor -or $hasGemini -or $hasCopilot -or $hasAntigravity -or $hasKiro -or $hasMuse -or $hasCortex)) {
+        Die "No supported coding agent found (looked for: claude, codex, cursor, gemini, copilot, antigravity, kiro, muse, cortex). Install Claude Code (https://claude.com/code), OpenAI Codex, Cursor (https://cursor.com), Gemini CLI (https://geminicli.com), GitHub Copilot CLI (https://github.com/github/copilot-cli), Google Antigravity, Kiro (https://kiro.dev), or Muse Code first."
     }
 }
 # Claude shells out to git to clone the marketplace; git is required only for it.
@@ -919,6 +946,37 @@ if ($hasMuse) {
         Log "Verify with: powershell -NoProfile -ExecutionPolicy Bypass -File `"$env:USERPROFILE\.rogue\plugins\muse\scripts\install.ps1`" -Status"
     } catch {
         Warn2 "Muse hooks not installed ($($_.Exception.Message)). If the asset isn't published yet, re-run the installer once it is."
+    } finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+# Cortex Code auto-loads the plugin; its installer chooses Windows hook commands.
+if ($hasCortex) {
+    Write-Host ""
+    Write-Host "Rogue Security - Cortex Code" -ForegroundColor Cyan
+    $asset = 'rogue-plugin-cortex.tar.gz'
+    if ($env:ROGUE_PLUGIN_VERSION) {
+        $url = "https://github.com/$PluginRepo/releases/download/$($env:ROGUE_PLUGIN_VERSION)/$asset"
+    } else {
+        $url = "https://github.com/$PluginRepo/releases/latest/download/$asset"
+    }
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("rogue-cortex-" + [System.IO.Path]::GetRandomFileName())
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        Log "Downloading plugin $asset"
+        $tarball = Join-Path $tmp 'p.tar.gz'
+        Invoke-WebRequest -Uri $url -OutFile $tarball -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        & tar -xzf $tarball -C $tmp
+        if ($LASTEXITCODE -ne 0) { throw "Could not extract the Cortex Code plugin tarball (is 'tar' available?)." }
+        $cortexInstaller = [System.IO.Path]::Combine($tmp, 'rogue-plugin-cortex', 'scripts', 'install.ps1')
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $cortexInstaller
+        if ($LASTEXITCODE -ne 0) { throw 'the Cortex Code hook installer failed' }
+        Ok 'Cortex Code hooks installed'
+        Log 'Start a new Cortex Code CLI or Desktop session to verify hooks.'
+    } catch {
+        if ($Cortex) { throw }
+        Warn2 "Cortex Code hooks not installed ($($_.Exception.Message)). If the asset isn't published yet, re-run the installer once it is."
     } finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }

@@ -30,7 +30,7 @@ $env:ROGUE_API_KEY='rsk_xxx'; $env:ROGUE_ACTOR_EMAIL='you@co.com'; iwr -useb htt
 The one installer detects every supported coding agent and installs the matching
 Rogue plugin into each — **Claude Code**, **OpenAI Codex**, **Cursor**,
 **Gemini CLI**, **GitHub Copilot CLI**, **Google Antigravity**, **Kiro**, and
-**Snowflake Cortex Code** (macOS and Linux) —
+**Snowflake Cortex Code** (CLI on macOS, Linux and Windows; Desktop on macOS and Windows) —
 writing the shared `~/.rogue-env` (`%USERPROFILE%\.rogue-env` on
 Windows) once. On a machine whose `/etc/rogue/env` (`C:\ProgramData\rogue\env`)
 already holds `ROGUE_API_KEY` it prompts for nothing and writes no user file:
@@ -56,8 +56,7 @@ On macOS, Linux, and WSL, `install.sh` requires Node.js to merge Kiro CLI 2.x ag
 
 To target specific agents instead of all detected ones, pass `--claude`, `--codex`,
 `--cursor`, `--gemini`, `--copilot`, `--antigravity`, `--kiro` and/or `--cortex` (PowerShell:
-`-Claude` / `-Codex` / `-Cursor` / `-Gemini` / `-Copilot` / `-Antigravity` / `-Kiro`; Cortex Code
-has no Windows bridge):
+`-Claude` / `-Codex` / `-Cursor` / `-Gemini` / `-Copilot` / `-Antigravity` / `-Kiro` / `-Cortex`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/qualifire-dev/rogue-plugins/main/install.sh | bash -s -- --cursor
@@ -173,9 +172,9 @@ Prompts, tool calls and permission requests can be denied. Post-tool denies stop
 
 ## Snowflake Cortex Code
 
-The Cortex Code bridge needs only bash and curl on macOS or Linux; native Windows is not supported yet. Install with `bash install.sh --cortex` after publishing the `rogue-plugin-cortex.tar.gz` asset. From a checkout, `bash plugins/cortex/scripts/install.sh` installs the local bundle; configure the existing trusted Rogue credential file first.
+The Cortex Code bridge needs bash and curl on macOS or Linux, or built-in Windows PowerShell 5.1 on native Windows. Install with `bash install.sh --cortex` or `powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Cortex` after publishing the `rogue-plugin-cortex.tar.gz` asset. From a checkout, `bash plugins/cortex/scripts/install.sh` or `powershell -NoProfile -ExecutionPolicy Bypass -File plugins/cortex/scripts/install.ps1` installs the local bundle; configure the existing trusted Rogue credential file first.
 
-One install covers the Cortex Code CLI and the Desktop app. Both auto-load every plugin under `~/.snowflake/cortex/plugins/` (or `$CORTEX_HOME`, then `$SNOWFLAKE_HOME/cortex`), so the installer copies the bridge to `plugins/rogue-security` there and edits no settings file. It swaps the folder in from a staged copy, keeps the bridge's `env` file across reinstalls and refuses concurrent runs. Start a new Cortex Code session afterward. Check the install with `install.sh --status`. To uninstall, run `bash ~/.snowflake/cortex/plugins/rogue-security/scripts/install.sh --uninstall`; it removes only the plugin folder, including a key stored in the bridge's own `env` file, and keeps `~/.rogue-env` and `/etc/rogue/env`.
+One install covers the Cortex Code CLI and the Desktop app. Snowflake offers Desktop on macOS and Windows only. Both auto-load every plugin under `~/.snowflake/cortex/plugins/` (or `$CORTEX_HOME`, then `$SNOWFLAKE_HOME/cortex`), so the installer copies the bridge to `plugins/rogue-security` there and edits no settings file. It swaps the folder in from a staged copy, keeps the bridge's `env` file across reinstalls and refuses concurrent runs. On Windows the default is `%USERPROFILE%\.snowflake\cortex\plugins\rogue-security`; the machine credential file is `C:\ProgramData\rogue\env`. The Windows installer generates PowerShell hook commands in the installed plugin. Start a new Cortex Code session afterward. Check the install with `install.sh --status` or `install.ps1 -Status`. To uninstall, run `bash ~/.snowflake/cortex/plugins/rogue-security/scripts/install.sh --uninstall`; on Windows run the installed `scripts/install.ps1 -Uninstall`. It removes only the plugin folder, including a key stored in the bridge's own `env` file, and keeps `~/.rogue-env` and `/etc/rogue/env`.
 
 Cortex Code uses Claude Code's hook protocol, so events go to `/api/v1/hooks/cortex`. Prompts, tool calls (including Snowflake SQL) and permission requests can be denied. Post-tool denies end the turn after the tool has run. Stop and SubagentStop are audit-only. Each hook has a ten-second Cortex Code timeout; the bridge's request stops after eight seconds and fails open on errors and on responses that are not JSON objects. Cortex Code runs no hooks when `disableAllHooks` is set, and in sandbox mode it skips hooks outside the project directory. Cortex Code CLI 1.2.41 and Desktop 1.25.4 were verified on macOS for prompt blocks and session events; tool-call denies are covered by API tests but have not been tested in a live model turn. Logs are stored in `~/.rogue/logs/cortex.log` and shipped through the existing hook-log transport.
 
