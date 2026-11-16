@@ -436,14 +436,13 @@ rm -rf "$PREC_ROOT" "$PREC_HOME"
 # trigger is what lets the beacon library throttle the per-turn Stop. Spawned
 # detached, so the marker is polled. Nothing else spawns it.
 # The script spawns heartbeat.sh, which the stub records as "<surface>|<trigger>".
-# The native bridge spawns its own heartbeat instead (the stub never runs) and
-# posts no /hooks/status: presence rides on every event's x-rogue-* headers. Its
-# session-start heartbeat is the update check, so that is the observable there,
-# and it never runs one on Stop (only the log shipper runs on a turn).
+# The native bridge never runs the stub and posts no /hooks/status: presence rides
+# on every event's x-rogue-* headers, and hook events start its update check. What
+# a session start or a turn leaves there is the log upload of its shipper.
 heartbeat_seen() { # <surface> <trigger>
   for _ in $(seq 1 50); do
     if bridge_native; then
-      grep -qF -- "--- auto-update tick (kiro) ---" "$LAST_HOME/.rogue/auto-update.log" 2>/dev/null && return 0
+      grep -qF "POST /api/v1/hooks/logs " "$SIDE_FILE" 2>/dev/null && return 0
     else
       grep -qx "$1|$2" "$HB_MARKER" 2>/dev/null && return 0
     fi
@@ -474,13 +473,9 @@ no_native_status "...which posts no /hooks/status from the native bridge"
 rm -rf "$LAST_HOME" 2>/dev/null || true
 rm -f "$HB_MARKER" "$SIDE_FILE"
 run_bridge stop kiro_crew "$FIX/cli2-stop.json"
-if bridge_native; then
-  assert_eq "$(heartbeat_seen kiro_crew Stop && echo ran || echo none)" "none" "Stop runs no update check on the native bridge"
-  no_native_status "...and posts no /hooks/status"
-else
-  heartbeat_seen kiro_crew Stop || { echo "FAIL [heartbeat spawn]: Stop never launched the heartbeat" >&2; exit 1; }
-  echo "  ok: Stop spawns it with the Stop trigger (the throttled one)"
-fi
+heartbeat_seen kiro_crew Stop || { echo "FAIL [heartbeat spawn]: Stop never launched the heartbeat" >&2; exit 1; }
+echo "  ok: Stop spawns it with the Stop trigger (the throttled one)"
+no_native_status "...which posts no /hooks/status from the native bridge"
 rm -rf "$LAST_HOME" 2>/dev/null || true
 KEEP_HOME=0
 rm -f "$HB_MARKER" "$SIDE_FILE"
