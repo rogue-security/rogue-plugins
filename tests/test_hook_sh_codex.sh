@@ -168,10 +168,16 @@ echo "== Stop starts the per-turn heartbeat without waiting for it"
 start_mock '{}'
 run Stop '{"session_id":"s-1","hook_event_name":"Stop"}'
 stdout_is "Stop relays the answer" "%s" '{}'
-for _ in $(seq 1 50); do grep -q '^/api/v1/hooks/status ' "$CALLS" 2>/dev/null && break; sleep 0.1; done
-status="$(sed -n 's|^/api/v1/hooks/status ||p' "$CALLS" 2>/dev/null | head -1)"
-check "the heartbeat posts the openai family and the surface" "openai codex_cli $VERSION" \
-  "$(printf '%s' "$status" | python3 -c 'import json,sys; b=json.load(sys.stdin); print(b["agent_family"], b["agent"], b["version"])' 2>/dev/null)"
+if bridge_native; then
+  # The native bridge posts no /hooks/status: presence rides on every event's x-rogue-* headers.
+  sleep 1
+  check "the native bridge posts no /hooks/status" "" "$(grep '^/api/v1/hooks/status ' "$CALLS" 2>/dev/null)"
+else
+  for _ in $(seq 1 50); do grep -q '^/api/v1/hooks/status ' "$CALLS" 2>/dev/null && break; sleep 0.1; done
+  status="$(sed -n 's|^/api/v1/hooks/status ||p' "$CALLS" 2>/dev/null | head -1)"
+  check "the heartbeat posts the openai family and the surface" "openai codex_cli $VERSION" \
+    "$(printf '%s' "$status" | python3 -c 'import json,sys; b=json.load(sys.stdin); print(b["agent_family"], b["agent"], b["version"])' 2>/dev/null)"
+fi
 start_mock '{}'
 run PreToolUse "$PRE"
 sleep 1

@@ -68,6 +68,19 @@ beacons() {
 set_stamp() { mkdir -p "${STAMP%/*}"; printf '%s\n' "$1" > "$STAMP"; }
 clear_stamp() { rm -rf "${STAMP%/*}"; }
 
+# The native bridge has no beacon: presence rides on every hook event's x-rogue-* headers, so its
+# heartbeat (the log shipper, and the update check at session start) never posts /hooks/status and
+# keeps no beacon stamp. Scripts running without it still post the beacon, throttled as above.
+if bridge_native; then
+echo "── the native heartbeat posts no /hooks/status ────────────────────────"
+clear_stamp
+for t in SessionStart Stop; do
+  beacons "$t" 0 >/dev/null
+  check "a native $t heartbeat posts no /hooks/status" "0" \
+    "$(grep -c '/api/v1/hooks/status' "$TMPROOT/calls")"
+done
+check "and leaves no beacon stamp" "no" "$([ -e "$STAMP" ] && echo yes || echo no)"
+else
 echo "── SessionStart is NEVER throttled ───────────────────────────────────"
 # The existing trigger must behave exactly as it did before the throttle existed.
 # A new session is precisely when the roster wants an update: a re-install with a
@@ -130,6 +143,8 @@ check "the stamp holds an epoch-seconds integer" "yes" "$(stamp_is_integer)"
 check "the stamp directory is owner-only" "700" \
   "$(ls -ld "${STAMP%/*}" | awk '{print substr($1,2,9)}' \
      | sed 's/rwx/7/;s/r-x/5/;s/---/0/g' | tr -d '-')"
+
+fi
 
 echo "── the unconfigured and no-session paths still short-circuit ─────────"
 clear_stamp
@@ -285,6 +300,12 @@ kiro_beacon() {
   cat "$TMPROOT/kiro-cap"/body.* 2>/dev/null
 }
 has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+if bridge_native; then
+  for t in SessionStart Stop; do
+    check "a native kiro $t heartbeat posts no /hooks/status" "no" \
+      "$(has "$(kiro_beacon kiro_cli "$t")" /api/v1/hooks/status)"
+  done
+else
 out="$(kiro_beacon kiro_ide SessionStart)"
 check "SessionStart posts /hooks/status" "yes" "$(has "$out" "/api/v1/hooks/status")"
 check "the body names family kiro" "yes" "$(has "$out" '"agent_family":"kiro"')"
@@ -322,6 +343,7 @@ rm -rf "${KIRO_STAMP%/*}"
 out="$(KIRO_FAKE_DEFAULT=rogue kiro_beacon kiro_crew SessionStart)"
 check "kiro_crew reports the CLI version (Crew drives kiro-cli)" "yes" "$(has "$out" '"agent_version":"2.21.0"')"
 check "kiro_crew reports no default agent" "no" "$(has "$out" 'default_agent')"
+fi
 rm -f "$KIRO_HOME/.rogue-env"
 check "unconfigured is a no-op" "" "$(kiro_beacon kiro_cli SessionStart)"
 
