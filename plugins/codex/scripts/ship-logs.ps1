@@ -15,7 +15,7 @@
 # tests/test_ship_logs.ps1 + `--check` in CI. An edit made here is silently reverted
 # by the next sync. (The copies exist, and are committed rather than generated at
 # release time, because each plugin installs as a self-contained directory and three
-# of them install straight from a git clone with no build step — see the header of
+# of them install straight from a git clone with no build step - see the header of
 # scripts/sync-shared-scripts.sh.)
 #
 # Every per-plugin difference is an ARGUMENT; never reference a plugin-specific env
@@ -53,7 +53,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 # (always true here), can slow a call 10-50x or effectively hang it.
 $ProgressPreference = 'SilentlyContinue'
 
-# ── constants ──────────────────────────────────────────────────────────────
+# -- constants --------------------------------------------------------------
 $SHIP_ENDPOINT_PATH = '/api/v1/hooks/logs'
 $KNOWN_LOG_SLUGS = @('claude', 'codex', 'cursor', 'gemini', 'copilot', 'antigravity', 'kiro', 'muse', 'cortex')
 # Bytes scanned when fingerprinting a log's first line. NOT 200: a real log line is
@@ -69,8 +69,8 @@ $LOCK_STALE_SECONDS = 600
 $MAX_CHUNKS_PER_DRAIN = 64
 $HTTP_TIMEOUT = 15
 
-# ── script state (assignments from functions MUST be $script:-qualified, or the
-# write lands in a function-local copy and vanishes with no error) ──────────
+# -- script state (assignments from functions MUST be $script:-qualified, or the
+# write lands in a function-local copy and vanishes with no error) ----------
 $script:shipAllLogs = 0
 $script:exactLogFile = ''
 $script:logDir = ''
@@ -286,18 +286,18 @@ function Get-FirstLineFingerprint {
     return [Convert]::ToBase64String($firstLine)
 }
 
-# ── stage 1: stand down on non-Windows ─────────────────────────────────────
+# -- stage 1: stand down on non-Windows -------------------------------------
 # ship-logs.sh owns macOS/Linux/WSL; this owns native Windows. Exactly one runs.
 function Test-ShouldStandDown {
     if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { return $true }
     return $false
 }
 
-# ── stage 2: arguments ─────────────────────────────────────────────────────
+# -- stage 2: arguments -----------------------------------------------------
 function Initialize-Args {
     # param() variables live in the SCRIPT scope, so $script:ShipperSlug and
     # $ShipperSlug are the same variable - which is why these writes must be
-    # $script:-qualified. A bare `$ShipperSlug = …` inside a function creates a
+    # $script:-qualified. A bare `$ShipperSlug = ...` inside a function creates a
     # function-local copy that vanishes on return, with no error and no symptom
     # until every envelope reports the wrong slug.
     if (-not $script:PluginRoot) {
@@ -319,9 +319,9 @@ function Initialize-Args {
     $script:AgentFamily = ([string]$script:AgentFamily).Trim()
 }
 
-# ── stage 3: env files + knobs ─────────────────────────────────────────────
+# -- stage 3: env files + knobs ---------------------------------------------
 # Same rule as every dispatcher: the first trusted env file holding ROGUE_API_KEY
-# is used alone, and its values override the process env:
+# is used alone; credentials override process env, inherited identity is preserved:
 #   C:\ProgramData\rogue\env (machine, MDM)  ->  <plugin-root>\env  ->  %USERPROFILE%\.rogue-env
 $SHIP_ENV_VARS = @(
     'ROGUE_API_KEY', 'ROGUE_BASE_URL', 'ROGUE_ACTOR_EMAIL', 'ROGUE_ACTOR_NAME',
@@ -354,7 +354,11 @@ function Import-ShipEnv {
             }
         }
         if (-not ([string]$fileVals['ROGUE_API_KEY']).Trim()) { continue }
-        foreach ($varName in $fileVals.Keys) { $resolved[$varName] = $fileVals[$varName] }
+        foreach ($varName in $fileVals.Keys) {
+            # The dispatcher already resolved identity; credential files must not replace it.
+            if ($varName -in 'ROGUE_ACTOR_EMAIL', 'ROGUE_ACTOR_NAME' -and $resolved.ContainsKey($varName)) { continue }
+            $resolved[$varName] = $fileVals[$varName]
+        }
         break
     }
     $script:creds = $resolved
@@ -426,7 +430,7 @@ function Resolve-Knobs {
     $script:shipUrl = $baseUrl.TrimEnd('/') + $SHIP_ENDPOINT_PATH
 }
 
-# ── stage 4: identity ──────────────────────────────────────────────────────
+# -- stage 4: identity ------------------------------------------------------
 # The actor is INHERITED, never re-resolved. The shipper deliberately carries NO
 # cascade of its own: the six plugins' cascades are not the same (actor.sh falls
 # back to `hostname`, Cursor's hook.sh to "$USER@$(hostname)"), so an independent
@@ -463,7 +467,7 @@ function Resolve-ShipActor {
     return $true
 }
 
-# ── stage 5: which files ───────────────────────────────────────────────────
+# -- stage 5: which files ---------------------------------------------------
 # Each plugin's shipper uploads only ITS OWN agent's log; ROGUE_SHIP_ALL=1 restores
 # the collect-everything behaviour for support.
 function Get-TargetLogFiles {
@@ -495,7 +499,7 @@ function Get-FamilyForFile {
     return [string]$AgentFamily
 }
 
-# ── stage 6: throttle, lock ────────────────────────────────────────────────
+# -- stage 6: throttle, lock ------------------------------------------------
 function Get-StateKeyForPath {
     param([string]$Path)
     $baseName = Split-Path $Path -Leaf
@@ -600,7 +604,7 @@ function Unlock-StateKey {
     $script:heldLockDir = ''
 }
 
-# ── stage 7: state ─────────────────────────────────────────────────────────
+# -- stage 7: state ---------------------------------------------------------
 function Read-ShipState {
     param([string]$Key, [string]$NormalizedPath)
     $script:offset = 0; $script:stateHead = ''; $script:stateSize = 0; $script:statePath = ''
@@ -610,7 +614,7 @@ function Read-ShipState {
         foreach ($line in (Get-Content -LiteralPath $stateFile)) {
             # CAPTURE BEFORE THE SECOND -match. $Matches is a single automatic
             # variable that every -match overwrites, and '^[0-9]+$' has no capture
-            # group, so testing `$Matches[1] -match …` and THEN reading $Matches[1]
+            # group, so testing `$Matches[1] -match ...` and THEN reading $Matches[1]
             # reads the inner match's group 1, which does not exist. That is not
             # theoretical: it made offset and size parse as 0 on every run, so
             # Windows re-shipped each log from byte 0 forever - unbounded duplicate
@@ -657,13 +661,13 @@ function Write-ShipState {
     }
 }
 
-# ── stage 8: chunks ────────────────────────────────────────────────────────
+# -- stage 8: chunks --------------------------------------------------------
 # Bytes from Offset through the first newline at/after it. Sets lineLength (0 = not
 # found) and lineSearchHitEof (1 = the search reached end of file).
 #
 # THE SEARCH SPANS WINDOWS, and that is load-bearing. An earlier version probed a
 # single maxLineBytes window and, on a miss, advanced the offset by maxLineBytes and
-# probed again — which lands the offset MID-LINE, so the next probe finds the newline
+# probed again - which lands the offset MID-LINE, so the next probe finds the newline
 # a few bytes ahead and ships the TAIL of the over-long line as if it were a short
 # line. Verified on the sh side: a 406-byte line against ROGUE_SHIP_MAX_LINE_BYTES=100
 # shipped its last 6 bytes as a chunk. Any advance that does not land exactly after
@@ -834,7 +838,7 @@ function Send-ChunkRequest {
     return $false
 }
 
-# ── stage 9: one log file ──────────────────────────────────────────────────
+# -- stage 9: one log file --------------------------------------------------
 function Invoke-DrainFile {
     param([string]$Path, [int64]$FileBytes, [int]$Rotated, [string]$ExpectedHead,
           [string]$PersistHead, [int64]$PersistSize, [string]$NormalizedPath)
@@ -914,7 +918,7 @@ function Ship-LogFile {
     }
 }
 
-# ── main ───────────────────────────────────────────────────────────────────
+# -- main -------------------------------------------------------------------
 function Invoke-Main {
     if (Test-ShouldStandDown) { exit 0 }
     try {
