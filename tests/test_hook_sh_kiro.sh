@@ -163,12 +163,18 @@ assert_header_present() {
   actual=$(python3 -c 'import json,sys; print(bool(json.load(open(sys.argv[1]))["headers"].get(sys.argv[2])))' "$HEADERS_FILE" "$1")
   assert_eq "$actual" "True" "$2"
 }
+# The event's own log lines. The native bridge starts its log shipper from the event, and a failed
+# upload logs a line of its own, so that one is not the event's.
+event_lines() {
+  if bridge_native; then grep -vc ' event=ShipLogs ' "$1/kiro.log" || true
+  else wc -l < "$1/kiro.log" | tr -d ' '; fi
+}
 # assert_fail_open <label>: exit 0, empty stdout, empty stderr, exactly one log line.
 assert_fail_open() {
   assert_eq "$LAST_RC" "0" "$1: exit 0"
   assert_eq "$(cat "$OUT_FILE")" "" "$1: empty stdout"
   assert_eq "$(cat "$ERR_FILE")" "" "$1: empty stderr"
-  assert_eq "$(wc -l < "$LAST_HOME/kiro.log" | tr -d ' ')" "1" "$1: exactly one log line"
+  assert_eq "$(event_lines "$LAST_HOME")" "1" "$1: exactly one log line"
   rm -rf "$LAST_HOME" 2>/dev/null || true
 }
 

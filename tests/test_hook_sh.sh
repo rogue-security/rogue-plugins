@@ -41,7 +41,8 @@ run_dispatcher() {
   HOME="$tmp_home" CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" \
     ROGUE_API_KEY='' ROGUE_ACTOR_EMAIL='' ROGUE_ACTOR_NAME='' ROGUE_BASE_URL='' \
     "$SH" "$HOOK" "$1" <<< "$2"
-  rm -rf "$tmp_home"
+  # The native bridge's detached log shipper can still be writing ~/.rogue when the HOME goes.
+  rm -rf "$tmp_home" 2>/dev/null || true
 }
 
 start_mock() {
@@ -150,7 +151,7 @@ out=$(HOME="$TMP_HOME" CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$PLUGIN_RO
   CLAUDE_CODE_USER_EMAIL='real.user@corp.com' \
   ROGUE_API_KEY='' ROGUE_ACTOR_EMAIL='' ROGUE_ACTOR_NAME='' ROGUE_BASE_URL='' \
   "$SH" "$HOOK" PreToolUse <<< '{}')
-rm -rf "$TMP_HOME"
+rm -rf "$TMP_HOME" 2>/dev/null || true
 assert_eq "$out" "{}" "poisoned-actor run still relays the response"
 assert_header "x-rogue-actor-email" "real.user@corp.com" "synthetic ROGUE_ACTOR_EMAIL replaced by CLAUDE_CODE_USER_EMAIL"
 assert_header "x-rogue-actor-name"  "real.user"          "synthetic ROGUE_ACTOR_NAME replaced by its local-part"
@@ -214,7 +215,7 @@ run_alert_case() {
   ALERT_STUB="$stub"; ALERT_HOME="$tmp_home"
 }
 
-cleanup_alert_case() { rm -rf "$ALERT_STUB" "$ALERT_HOME"; }
+cleanup_alert_case() { rm -rf "$ALERT_STUB" "$ALERT_HOME" 2>/dev/null || true; }
 
 # Wait (briefly) for the backgrounded alert subshell to append its alert_rc line.
 wait_for_log() {

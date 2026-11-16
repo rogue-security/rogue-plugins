@@ -7,7 +7,9 @@ MOCK_CALLS, if set, is a file that gets one "<path> <body>" line per request.
 MOCK_ONLY_PATH, when set, limits all of that to requests for that path: any other
 request is answered {} at once and appended to <headers-file>.other as one
 "<METHOD> <path> <body>" line, so a detached heartbeat cannot overwrite the
-recorded hook request.
+recorded hook request. A log upload (/api/v1/hooks/logs) is always handled that
+way unless MOCK_ONLY_PATH names it: the native bridge starts its shipper from
+every hook event, so the upload races the request under test.
 
 Usage:
     MOCK_RESPONSE='{"hookSpecificOutput":{"permissionDecision":"deny"}}' \
@@ -22,6 +24,7 @@ import time
 
 
 HEADERS_PATH = sys.argv[2] if len(sys.argv) > 2 else "/tmp/rogue-mock-headers.json"
+LOGS_PATH = "/api/v1/hooks/logs"
 
 
 class Server(http.server.HTTPServer):
@@ -36,7 +39,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body_in = self.rfile.read(length)
         only = os.environ.get("MOCK_ONLY_PATH")
-        if only and self.path != only:
+        if (only and self.path != only) or (not only and self.path == LOGS_PATH):
             with open(HEADERS_PATH + ".other", "a") as f:
                 f.write(f"{self.command} {self.path} {body_in.decode('utf-8', errors='replace')}\n")
             self.send_response(200)

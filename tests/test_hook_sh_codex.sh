@@ -64,6 +64,8 @@ run() {
     "$SH" "$HOOK" "$event" > "$OUT_FILE" 2>/dev/null
   RC=$?
   LOG="$(sed -E 's/^[^ ]+ //; s/ bridge=native//' "$home/.rogue/logs/codex.log" 2>/dev/null)"
+  # The native bridge starts its log shipper from the event, and a failed upload logs its own line.
+  if bridge_native; then LOG="$(printf '%s\n' "$LOG" | grep -v ' event=ShipLogs ')"; fi
 }
 
 stdout_is() { # <label> <printf format> [args...] — the exact bytes expected on stdout
