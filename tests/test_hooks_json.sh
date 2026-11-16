@@ -65,20 +65,20 @@ for event, groups in hooks.items():
         if "(" in bare or ")" in bare:
             fail(f"{where} bare parens outside quotes (PS 5.1 parse error)", cmd)
 
-        # PS-side entries must contain no $ at all: under Git Bash the whole
-        # command is parsed by bash, which expands $env/$var inside double
-        # quotes and mangles the path. Use (Get-Item Env:NAME).Value instead.
+        # The plugin directory refuses commands it cannot read as plain words:
+        # every entry names its interpreter and a script by a literal
+        # ${CLAUDE_PLUGIN_ROOT} path, with no other variable, no `sh -c` and no
+        # PowerShell `& (...)`, scriptblock or Invoke-Expression.
+        plain = cmd.replace("${CLAUDE_PLUGIN_ROOT}", "")
+        if "$" in plain:
+            fail(f"{where} variable other than ${{CLAUDE_PLUGIN_ROOT}}", cmd)
         if cmd.startswith("powershell"):
-            if "$" in cmd:
-                fail(f"{where} '$' in a powershell entry gets mangled by Git Bash", cmd)
-            if "-File" in cmd:
-                fail(f"{where} -File is blocked by ExecutionPolicy/GPO; use scriptblock load", cmd)
-
-        # sh-side single-quoted wrappers must use $CLAUDE_PLUGIN_ROOT (env var),
-        # not the ${CLAUDE_PLUGIN_ROOT} placeholder (sh won't expand it there).
-        for m in re.finditer(r"'[^']*'", cmd):
-            if "${CLAUDE_PLUGIN_ROOT}" in m.group(0):
-                fail(f"{where} placeholder inside single quotes never expands", cmd)
+            if not cmd.startswith('powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/'):
+                fail(f"{where} powershell entry must run a plugin script with -File", cmd)
+            if re.search(r"scriptblock|Invoke-Expression|\biex\b|&", cmd, re.I):
+                fail(f"{where} powershell entry the plugin directory cannot read", cmd)
+        elif not cmd.startswith('sh "${CLAUDE_PLUGIN_ROOT}/scripts/'):
+            fail(f"{where} sh entry must run a plugin script directly", cmd)
 
     # Exactly-one-runs pairs: every group is either sh-only (warn) or sh+ps.
     for g in groups:
