@@ -1,3 +1,7 @@
+---
+trigger: always_on
+---
+
 # Rogue Security
 
 This workspace is protected by **Rogue Security AIDR** (AI Detection & Response).
