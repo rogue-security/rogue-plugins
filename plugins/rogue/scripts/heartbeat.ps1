@@ -55,8 +55,7 @@ $script:beaconUnthrottled = ($script:trigger -eq 'SessionStart')
 # Loaded as a SCRIPTBLOCK from the file's text, never dot-sourced by path and never
 # with -File: running a .ps1 directly is subject to ExecutionPolicy and to a
 # GPO-enforced policy that -ExecutionPolicy Bypass cannot override. Dot-invoking the
-# scriptblock defines the library's functions in THIS scope with no policy involved,
-# the same trick hooks.json uses for the dispatchers.
+# scriptblock defines the library's functions in THIS scope with no policy involved.
 #
 # A missing or unparseable library degrades to an UNTHROTTLED beacon - today's
 # behaviour on every plugin, and the safe direction: a beacon too often is noise,
@@ -245,8 +244,7 @@ if ($env:CLAUDE_CODE_ENTRYPOINT -and
 #   * ship-logs.ps1 ends in `exit 0`, which in-process would terminate the
 #     heartbeat instead of the shipper.
 # The child loads it via [scriptblock]::Create so ExecutionPolicy/GPO never
-# applies - the same trick hooks.json uses for the dispatchers, and the reason
-# -File is not used anywhere in this repo.
+# applies to the shipper.
 #
 # EVERY VALUE TRAVELS AS AN ENVIRONMENT VARIABLE and the command itself is a
 # constant, so there is no string interpolation to escape: a plugin path or a

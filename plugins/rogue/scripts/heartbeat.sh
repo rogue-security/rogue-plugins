@@ -127,7 +127,7 @@ fi
 # source from the identity fields the shipper itself sends - which is why shipping
 # is deliberately OUTSIDE the gate above rather than sequenced behind the POST.
 #
-# This script is ALREADY detached by hooks.json, so the upload delays nothing a user
+# This script is ALREADY detached by detach.sh, so the upload delays nothing a user
 # sees and needs no second backgrounding; and the shipper's own 15-minute throttle
 # means the common case is that it makes no request at all.
 #

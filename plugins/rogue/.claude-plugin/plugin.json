@@ -1,10 +1,11 @@
 {
   "name": "rogue",
-  "version": "1.0.32",
+  "version": "1.0.33",
   "description": "Rogue Security AIDR \u2014 real-time AI agent detection and response for Claude Code",
   "author": {
     "name": "Rogue Security",
     "url": "https://www.rogue.security"
   },
-  "homepage": "https://docs.rogue.security/integrations/claude-code"
+  "homepage": "https://docs.rogue.security/integrations/claude-code",
+  "icon": "./.claude-plugin/icon.png"
 }

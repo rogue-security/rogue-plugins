@@ -317,9 +317,9 @@ HJ="$REPO/plugins/rogue/hooks/hooks.json"
 check "Stop spawns the heartbeat with the Stop argument" "1" \
   "$(grep -c 'heartbeat.sh\\" Stop' "$HJ")"
 check "SessionStart still spawns it with no argument" "1" \
-  "$(grep -c 'heartbeat.sh\\" >/dev/null' "$HJ")"
+  "$(grep -c 'heartbeat.sh\\" ; exit 0' "$HJ")"
 check "the Stop heartbeat is detached" "1" \
-  "$(grep -c 'nohup sh \\"\$CLAUDE_PLUGIN_ROOT/scripts/heartbeat.sh\\" Stop' "$HJ")"
+  "$(grep -c 'detach.sh\\" \\"${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.sh\\" Stop' "$HJ")"
 
 echo
 if [ "$FAILS" = 0 ]; then echo "ALL HEARTBEAT SH TESTS PASSED"; else echo "$FAILS failure(s)"; fi
