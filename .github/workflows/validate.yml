@@ -375,6 +375,7 @@ jobs:
           pwsh -NoProfile -File tests/test_install_kiro_ps1.ps1
           pwsh -NoProfile -File tests/test_install_env_ps1.ps1
           pwsh -NoProfile -File tests/test_install_plugin_upgrade_ps1.ps1
+          pwsh -NoProfile -File tests/test_install_gemini_ps1.ps1
           pwsh -NoProfile -File tests/test_status_kiro_ps1.ps1
 
   windows:
@@ -443,6 +444,8 @@ jobs:
           powershell -NoProfile -File tests/test_install_env_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_install_plugin_upgrade_ps1.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          powershell -NoProfile -File tests/test_install_gemini_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
           powershell -NoProfile -File tests/test_status_kiro_ps1.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
