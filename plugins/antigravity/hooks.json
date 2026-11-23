@@ -3,26 +3,26 @@
     "PreToolUse": [
       { "matcher": ".*", "hooks": [
         { "type": "command", "command": "sh \"./scripts/hook.sh\" PreToolUse", "timeout": 30 },
-        { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PreToolUse (Get-Location).Path\"", "timeout": 30 }
+        { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \". ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PreToolUse (Get-Location).Path\"", "timeout": 30 }
       ] }
     ],
     "PostToolUse": [
       { "matcher": ".*", "hooks": [
         { "type": "command", "command": "sh \"./scripts/hook.sh\" PostToolUse", "timeout": 30 },
-        { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PostToolUse (Get-Location).Path\"", "timeout": 30 }
+        { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \". ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PostToolUse (Get-Location).Path\"", "timeout": 30 }
       ] }
     ],
     "PreInvocation": [
       { "type": "command", "command": "sh \"./scripts/hook.sh\" PreInvocation", "timeout": 30 },
-      { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PreInvocation (Get-Location).Path\"", "timeout": 30 }
+      { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \". ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PreInvocation (Get-Location).Path\"", "timeout": 30 }
     ],
     "PostInvocation": [
       { "type": "command", "command": "sh \"./scripts/hook.sh\" PostInvocation", "timeout": 30 },
-      { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PostInvocation (Get-Location).Path\"", "timeout": 30 }
+      { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \". ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) PostInvocation (Get-Location).Path\"", "timeout": 30 }
     ],
     "Stop": [
       { "type": "command", "command": "sh \"./scripts/hook.sh\" Stop", "timeout": 30 },
-      { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) Stop (Get-Location).Path\"", "timeout": 30 }
+      { "type": "command", "command": "powershell -NoProfile -NonInteractive -Command \". ([scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/hook.ps1'))) Stop (Get-Location).Path\"", "timeout": 30 }
     ]
   }
 }

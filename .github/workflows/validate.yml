@@ -404,6 +404,12 @@ jobs:
       - name: Log-shipper end to end (real ship-logs.ps1, real HTTP)
         run: pwsh -NoProfile -File tests/e2e_ship_logs.ps1
 
+      - name: Antigravity hook end to end (hooks.json launch, real HTTP)
+        shell: powershell
+        run: |
+          powershell -NoProfile -File tests/e2e_hook_antigravity.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: PowerShell unit tests under Windows PowerShell 5.1
         # NOT a duplicate of the pwsh run on ubuntu: Copilot and Claude both fall back
         # to Windows PowerShell 5.1 when pwsh 7 is absent, and 5.1 is a different
