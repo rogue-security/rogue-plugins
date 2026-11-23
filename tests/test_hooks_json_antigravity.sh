@@ -121,6 +121,9 @@ for event, arr in hooks.items():
                     fail(f"{where} powershell entry must reference hook.ps1", cmd)
                 if event not in cmd:
                     fail(f"{where} powershell entry must pass '{event}' as the Event arg", cmd)
+                # `&` gives hook.ps1 no script scope, so it never sees its API key (FIRE-3368).
+                if '-Command ". ([scriptblock]::Create(' not in cmd:
+                    fail(f"{where} powershell entry must dot-source hook.ps1, not call it with &", cmd)
             else:
                 fail(f"{where} command starts with neither 'sh ' nor 'powershell'", cmd)
 

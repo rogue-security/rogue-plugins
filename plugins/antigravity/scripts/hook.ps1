@@ -24,6 +24,10 @@
 # runs regardless of ExecutionPolicy/GPO. Because it is a scriptblock (not a
 # file), $PSCommandPath is empty — hooks.json passes the plugin root
 # ((Get-Location).Path) as the 2nd argument instead.
+# hooks.json DOT-SOURCES it (`. (...)`, never `& (...)`): `&` gives the scriptblock
+# no script scope, so every `$script:` write below lands in the global scope while
+# the top-level declarations shadow it, and each event logs outcome=unconfigured
+# (FIRE-3368, guarded by tests/e2e_hook_antigravity.ps1).
 #
 # Credential resolution: the first env file holding ROGUE_API_KEY is used alone,
 # and its values override the process env:
