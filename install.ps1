@@ -624,8 +624,17 @@ function Test-CortexInstalled {
     return (Test-Path -LiteralPath $config -PathType Container) -or (Test-CortexCliInstalled)
 }
 
+# Gemini prints its consent notice on stderr, which Windows PowerShell 5.1 would turn
+# into a terminating error under 'Stop', so both calls go through Invoke-PluginCli.
+function Install-GeminiExtension {
+    param([string]$SourceDir)
+    Invoke-PluginCli 'gemini' @('extensions', 'uninstall', 'rogue') | Out-Null
+    $install = Invoke-PluginCli 'gemini' @('extensions', 'install', $SourceDir, '--consent')
+    if ($install.ExitCode -ne 0) { throw "gemini extensions install failed: $($install.Output.Trim())" }
+}
+
 # Test seam: load only the functions above (tests/test_install_kiro_ps1.ps1,
-# tests/test_install_env_ps1.ps1).
+# tests/test_install_env_ps1.ps1, tests/test_install_gemini_ps1.ps1).
 if ($env:ROGUE_INSTALL_LIB_ONLY) { return }
 
 try {
@@ -799,9 +808,7 @@ if ($hasGemini) {
         $srcDir = $src.Directory.FullName
         # Reinstall cleanly so a re-run upgrades. Ignore uninstall errors (first run).
         $env:GEMINI_CLI_TRUST_WORKSPACE = 'true'
-        try { & gemini extensions uninstall rogue 2>&1 | Out-Null } catch {}
-        & gemini extensions install $srcDir --consent 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "gemini extensions install failed." }
+        Install-GeminiExtension $srcDir
         Ok "Extension installed via gemini extensions install"
         Warn2 'Gemini skips untrusted hooks - open /hooks in Gemini CLI and trust the Rogue entries once, then restart Gemini CLI.'
     } catch {
@@ -860,12 +867,13 @@ if ($hasAntigravity) {
         # it must not print is a dead recovery command — $srcDir lives under $tmp, which
         # the finally block deletes on the way out. Mirrors install.sh.
         if (Get-Command agy -ErrorAction SilentlyContinue) {
-            try { & agy plugin uninstall rogue 2>&1 | Out-Null } catch {}
-            $agyErr = (& agy plugin install $srcDir 2>&1 | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0) {
+            Invoke-PluginCli 'agy' @('plugin', 'uninstall', 'rogue') | Out-Null
+            $agyInstall = Invoke-PluginCli 'agy' @('plugin', 'install', $srcDir)
+            if ($agyInstall.ExitCode -eq 0) {
                 Ok "Plugin installed via agy plugin install"
             } else {
                 Warn2 "agy plugin install failed - the CLI still loads the plugin from $ideDir."
+                $agyErr = $agyInstall.Output.Trim()
                 if ($agyErr) { Log $agyErr }
                 Log "To retry the native registration: agy plugin install '$ideDir'"
             }
