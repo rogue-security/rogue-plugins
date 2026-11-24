@@ -898,6 +898,11 @@ main() {
   stand_down_on_git_bash
   parse_args "$@"
   load_env
+  # The pinned native bridge ships the same files with the same state once it is installed.
+  if [ "$SHIP_ALL_LOGS" != 1 ] && [ -r "$PLUGIN_ROOT/scripts/native-bridge.sh" ]; then
+    . "$PLUGIN_ROOT/scripts/native-bridge.sh"
+    rogue_native_handoff "$PLUGIN_ROOT" "$SHIPPER_SLUG" ship-logs "$SHIPPER_SLUG" "$SHIPPER_VERSION"
+  fi
   resolve_knobs
   [ -n "$API_KEY" ] || { debug 'not configured -> no-op'; exit 0; }
   command -v curl >/dev/null 2>&1 || { log 'outcome=fail reason=no-curl'; exit 0; }

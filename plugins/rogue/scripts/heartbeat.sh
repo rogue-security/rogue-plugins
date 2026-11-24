@@ -48,6 +48,12 @@ fi
 # Not configured → no-op (mirrors hook.sh fail-open on missing key).
 [ -n "${ROGUE_API_KEY:-}" ] || exit 0
 
+# The pinned native bridge sends the beacon and ships the log itself once it is installed.
+if [ -r "${CLAUDE_PLUGIN_ROOT:-}/scripts/native-bridge.sh" ]; then
+  . "${CLAUDE_PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "${CLAUDE_PLUGIN_ROOT}" claude heartbeat claude "$TRIGGER"
+fi
+
 # CLAUDE_CODE_ENTRYPOINT used to `exit 0` right here, ABOVE everything. It now
 # guards only the beacon POST below, because this script also ships the hook log
 # and those are different questions: the entrypoint decides whether there is a

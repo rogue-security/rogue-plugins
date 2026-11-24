@@ -290,6 +290,16 @@ function Initialize-KiroContext {
         break
     }
 
+    # The native bridge pinned in rogue-hook.json does this script's whole job once it is
+    # installed; until then this starts its download and carries on. See
+    # scripts/native-bridge.ps1. The 9.5 s budget sits past the binary's 8 s request
+    # timeout and inside the hook file's 10 s.
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+    if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+        Invoke-RogueNativeHandoff -Root $PluginRoot -Family kiro -Arguments @('kiro', $script:triggerArg, $SurfaceArg) `
+            -Settings $creds -BudgetMs 9500 -FailOpen ''
+    }
+
     # After the credential files (so they can relocate the log), before the API-key
     # check (so an unconfigured install still records outcome=unconfigured).
     Initialize-Logging $creds

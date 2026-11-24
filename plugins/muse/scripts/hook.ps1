@@ -54,6 +54,15 @@ foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $PluginRoot 'env'), (Joi
     if (([string]$vals['ROGUE_API_KEY']).Trim()) { foreach ($k in $vals.Keys) { $creds[$k] = $vals[$k] }; break }
 }
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# until then this starts its download and carries on. See scripts/native-bridge.ps1. The 5.5 s
+# budget sits past the binary's 5 s request timeout and inside Muse's 6 s hook timeout.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+    Invoke-RogueNativeHandoff -Root $PluginRoot -Family muse -Arguments @('muse', $EventName) `
+        -Settings $creds -BudgetMs 5500 -FailOpen "{}`n"
+}
+
 $logFile = $creds['ROGUE_LOG_FILE']
 if (-not $logFile) {
     $logDir = if ($creds['ROGUE_LOG_DIR']) { $creds['ROGUE_LOG_DIR'] } else { [IO.Path]::Combine($UserHome, '.rogue', 'logs') }

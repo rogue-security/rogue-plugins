@@ -19,6 +19,12 @@ const HOOK = path.join(
   "hook.mjs",
 );
 
+// tests/conformance.sh --native installs the binary under ROGUE_NATIVE_BRIDGE_DIR; the cases below
+// pass a scrubbed env, so it is carried over explicitly.
+const BRIDGE_ENV = process.env.ROGUE_NATIVE_BRIDGE_DIR
+  ? { ROGUE_NATIVE_BRIDGE_DIR: process.env.ROGUE_NATIVE_BRIDGE_DIR }
+  : {};
+
 // A throwaway HOME so the hook never reads the developer's real ~/.rogue-env.
 function freshHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "rogue-gem-"));
@@ -35,6 +41,7 @@ function runHook(event, payload, env, prepareHome) {
         PATH: process.env.PATH,
         HOME: home,
         USERPROFILE: home,
+        ...BRIDGE_ENV,
         ...env,
       },
     });
@@ -92,7 +99,7 @@ function runHookReadLog(event, payload, env) {
   return new Promise((resolve) => {
     const home = freshHome();
     const child = spawn(process.execPath, [HOOK, event], {
-      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ...env },
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ...BRIDGE_ENV, ...env },
     });
     let out = "";
     child.stdout.on("data", (c) => (out += c));
@@ -116,9 +123,13 @@ function runHookReadLog(event, payload, env) {
 test("every line carries surface=gemini_cli, between provider= and event=", async () => {
   const { lines } = await runHookReadLog("BeforeTool", "{}", {});
   assert.equal(lines.length, 1);
+  // The native bridge adds its bridge=native token after event=, as every native line does.
+  const bridge = process.env.ROGUE_TEST_BRIDGE === "native" ? " bridge=native" : "";
   assert.match(
     lines[0],
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z provider=gemini surface=gemini_cli event=BeforeTool outcome=unconfigured$/,
+    new RegExp(
+      `^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z provider=gemini surface=gemini_cli event=BeforeTool${bridge} outcome=unconfigured$`,
+    ),
   );
 });
 

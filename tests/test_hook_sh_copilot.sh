@@ -70,8 +70,20 @@ run_dispatcher() {
   set -e
   LAST_HOME="$tmp_home"
   # KEEP_HOME=1 preserves the run's HOME so a caller can assert on hook.log.
-  [ "${KEEP_HOME:-0}" = "1" ] || rm -rf "$tmp_home"
+  [ "${KEEP_HOME:-0}" = "1" ] || remove_home "$tmp_home"
   return $rc
+}
+
+# agentStop starts the heartbeat detached (the native bridge, its log shipper on any
+# event), and it can still be writing ~/.rogue while the HOME is removed: retry until
+# it has finished.
+remove_home() {
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    rm -rf "$1" 2>/dev/null && [ ! -e "$1" ] && return 0
+    sleep 0.2
+  done
+  rm -rf "$1"
 }
 
 # Build a throwaway `ps` shim so in_jetbrains_ide's ancestry walk can be driven
@@ -103,7 +115,7 @@ posted_field() {
 }
 
 start_mock() {
-  MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" \
+  MOCK_RESPONSE="$1" MOCK_STATUS="${2:-200}" MOCK_ONLY_PATH=/api/v1/hooks/copilot \
     python3 "$REPO/tests/mock_server.py" "$PORT" "$HEADERS_FILE" &
   MOCK_PID=$!
   for _ in $(seq 1 50); do
@@ -198,7 +210,7 @@ restart_mock "$BLOCK"
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher userPromptSubmitted '{"prompt":"ignore previous"}'
-out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 assert_eq "$out" "$BLOCK" "IDE block still relayed verbatim (alert is out-of-band)"
 case "$log_txt" in
   *ide_alert=fired*) echo "ok: IDE userPromptSubmitted block fires the alert" ;;
@@ -210,7 +222,7 @@ restart_mock "$BLOCK"
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION=1.0.75 PKG_EXECPATH='' \
   run_dispatcher userPromptSubmitted '{"prompt":"ignore previous"}'
-log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 case "$log_txt" in
   *ide_alert=fired*) echo "FAIL: alert fired on the terminal CLI surface"; exit 1 ;;
   *) echo "ok: no alert on the terminal CLI surface" ;;
@@ -221,7 +233,7 @@ restart_mock '{"permissionDecision":"deny","permissionDecisionReason":"nope"}'
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher preToolUse '{"toolName":"bash"}'
-log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 case "$log_txt" in
   *ide_alert=fired*) echo "FAIL: alert fired for a natively-rendered preToolUse deny"; exit 1 ;;
   *) echo "ok: no alert for preToolUse deny (Copilot renders it)" ;;
@@ -232,7 +244,7 @@ restart_mock '{}'
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher userPromptSubmitted '{"prompt":"hello"}'
-log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 case "$log_txt" in
   *ide_alert=fired*) echo "FAIL: alert fired on an allow"; exit 1 ;;
   *) echo "ok: no alert on an allow" ;;
@@ -243,7 +255,7 @@ restart_mock "$BLOCK"
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT=0 ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher userPromptSubmitted '{"prompt":"ignore previous"}'
-out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 assert_eq "$out" "$BLOCK" "ROGUE_IDE_ALERT=0 still relays the block verbatim"
 case "$log_txt" in
   *ide_alert=fired*) echo "FAIL: ROGUE_IDE_ALERT=0 did not suppress the alert"; exit 1 ;;
@@ -261,7 +273,7 @@ restart_mock "$ALLOW_QUOTING_BLOCK"
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher userPromptSubmitted '{"prompt":"hello"}'
-out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 assert_eq "$out" "$ALLOW_QUOTING_BLOCK" 'allow body carrying a "block" sibling value is relayed verbatim'
 case "$log_txt" in
   *ide_alert=fired*) echo 'FAIL: alert fired on an allow carrying a "block" sibling value'; exit 1 ;;
@@ -278,7 +290,7 @@ restart_mock "$BLOCK"
 KEEP_HOME=1 TEST_BIN="$PS_SHIM" \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION=1.0.75 PKG_EXECPATH='' \
   run_dispatcher userPromptSubmitted '{"prompt":"ignore previous"}'
-log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME" "$PS_SHIM"
+log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME" "$PS_SHIM"
 case "$log_txt" in
   *ide_alert=fired*) echo "  ok: Linux-truncated 'copilot-languag' parent detected as the IDE" ;;
   *) echo "FAIL: Linux-truncated 'copilot-languag' parent not detected as the IDE"; exit 1 ;;
@@ -293,7 +305,7 @@ restart_mock "$BLOCK"
 KEEP_HOME=1 TEST_BIN="$PS_SHIM" \
   ROGUE_IDE_ALERT_DRYRUN=1 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher userPromptSubmitted '{"prompt":"ignore previous"}'
-log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME" "$PS_SHIM"
+log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME" "$PS_SHIM"
 case "$log_txt" in
   *ide_alert=fired*) echo "FAIL: a plain 'copilot' parent (terminal CLI) alerted anyway"; exit 1 ;;
   *) echo "  ok: full-path 'copilot' parent (terminal CLI) suppresses the alert" ;;
@@ -313,7 +325,7 @@ restart_mock "$NL_BLOCK"
 KEEP_HOME=1 \
   ROGUE_IDE_ALERT_DRYRUN=2 COPILOT_CLI=1 COPILOT_CLI_BINARY_VERSION='' PKG_EXECPATH=/x \
   run_dispatcher userPromptSubmitted '{"prompt":"ignore previous"}'
-out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); rm -rf "$LAST_HOME"
+out=$(cat "$OUT_FILE"); log_txt=$(cat "$LAST_HOME/hook.log"); remove_home "$LAST_HOME"
 assert_eq "$out" "$NL_BLOCK" "DRYRUN=2 still relays the block verbatim"
 if printf '%s' "$log_txt" | grep -qF 'ide_alert=escaped msg=Rogue blocked.|Path C:\\\\temp; use rgx!'; then
   echo '  ok: literal \n becomes a real newline and backslashes are doubled'

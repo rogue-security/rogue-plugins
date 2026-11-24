@@ -286,6 +286,15 @@ function Start-LogShipper {
 
 # ── main ───────────────────────────────────────────────────────────────────
 # Same order as heartbeat.sh: stand down, configure, then fire and forget.
+# The pinned native bridge sends the beacon and ships the log itself once it is
+# installed. $Agent is the surface hook.ps1 resolved; the bridge validates it.
+function Invoke-NativeHandoff {
+    try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $script:pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) }
+    catch { return }
+    Invoke-RogueNativeHandoff -Root $script:pluginRoot -Family antigravity `
+        -Arguments @('heartbeat', 'antigravity', $Trigger, $Agent) -Settings $creds -BudgetMs 60000 -FailOpen ''
+}
+
 function Invoke-Main {
     Initialize-Tls
     Stop-OnNonWindows
@@ -306,6 +315,7 @@ function Invoke-Main {
     Import-Credentials
     Initialize-Beacon  # after the env files are parsed so they can set the interval
     Assert-ApiKey      # exits 0 when this install is not configured
+    Invoke-NativeHandoff
     Resolve-BaseUrl
     Resolve-Actor
     Resolve-Version

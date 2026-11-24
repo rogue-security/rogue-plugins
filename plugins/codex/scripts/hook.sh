@@ -25,6 +25,13 @@ if [ -r "$_env_lib" ]; then
   done
 fi
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# until then this starts its download and carries on. See scripts/native-bridge.sh.
+if [ -n "$EVENT" ] && [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ]; then
+  . "${PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "${PLUGIN_ROOT}" codex codex "$EVENT"
+fi
+
 # Log destination — ONE FILE PER AGENT. Every Rogue plugin shares ~/.rogue, so a
 # machine running Codex + Claude Code + Cursor + … used to interleave all of them
 # into a single hook.log with no way to tell whose line was whose. Precedence:

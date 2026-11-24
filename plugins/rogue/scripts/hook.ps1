@@ -420,6 +420,15 @@ foreach ($f in $credFiles) {
     break
 }
 
+# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# until then this starts its download and carries on. See scripts/native-bridge.ps1. The 18 s
+# budget sits past the binary's 15 s request timeout and inside the 20 s hook timeout.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
+if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
+    Invoke-RogueNativeHandoff -Root $pluginRoot -Family claude -Arguments @('claude', $EventName) `
+        -Settings $creds -BudgetMs 18000 -FailOpen '{}'
+}
+
 # Logging is initialised HERE - after the credential files are parsed, so they can
 # relocate the log - but BEFORE the API-key check below, so an unconfigured
 # install still records `outcome=unconfigured`.

@@ -49,6 +49,12 @@ fi
 # Not configured → no-op (mirrors hook.sh fail-open on missing key).
 [ -n "${ROGUE_API_KEY:-}" ] || exit 0
 
+# The pinned native bridge sends the beacon and ships the log itself once it is installed.
+if [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ]; then
+  . "${PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "${PLUGIN_ROOT}" codex heartbeat codex "$TRIGGER"
+fi
+
 [ -r "${PLUGIN_ROOT}/scripts/actor.sh" ] && . "${PLUGIN_ROOT}/scripts/actor.sh"
 # Host + version + surface. Shared with hook.sh, which sends the same three as
 # headers on every event: same values, same roster row. See install-id.sh.

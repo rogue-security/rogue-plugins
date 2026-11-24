@@ -58,6 +58,14 @@ require_api_key() {
   [ -n "${ROGUE_API_KEY:-}" ] || exit 0
 }
 
+# The pinned native bridge sends the beacon and ships the log itself once it is installed.
+# $1 = the surface argument.
+handoff_native() {
+  [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0
+  . "${PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "$PLUGIN_ROOT" kiro heartbeat kiro "$TRIGGER" "$1"
+}
+
 load_actor() {
   [ -r "${PLUGIN_ROOT}/scripts/actor.sh" ] && . "${PLUGIN_ROOT}/scripts/actor.sh"
   return 0
@@ -169,6 +177,7 @@ main() {
   locate_plugin_root
   load_env          # sources the env files, then normalises the base URL
   require_api_key   # exits 0 when this install is not configured
+  handoff_native "${1:-}"
   load_actor
   resolve_surface "${1:-}"
   resolve_version   # after the surface: install-id.sh keys the agent on it

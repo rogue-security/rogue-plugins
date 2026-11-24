@@ -168,11 +168,20 @@ ship_logs() {
   return 0
 }
 
+# The pinned native bridge sends the beacon and ships the log itself once it is
+# installed. $1 is the surface hook.sh resolved; the bridge validates it the same way.
+handoff_to_native() {
+  [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0
+  . "${PLUGIN_ROOT}/scripts/native-bridge.sh"
+  rogue_native_handoff "$PLUGIN_ROOT" antigravity heartbeat antigravity "$TRIGGER" "${1:-}"
+}
+
 main() {
   TRIGGER="${2:-SessionStart}"
   locate_plugin_root
   load_env          # sources the env files, then normalises the base URL
   require_api_key   # exits 0 when this install is not configured
+  handoff_to_native "${1:-}"
   load_actor
   resolve_version
   resolve_surface "${1:-}"
