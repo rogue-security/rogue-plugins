@@ -181,16 +181,17 @@ rm -f "$BIN"
 
 echo "an update lock held by the binary: the installer leaves the work to it"
 LOCKFILE="$HOME/.rogue/.self-update.lock"
+# Waited for, not killed: flock(1) hands the lock to its command, which would outlive it.
 if command -v flock >/dev/null 2>&1; then
-  flock "$LOCKFILE" sleep 5 & HOLDER=$!
+  flock "$LOCKFILE" sleep 3 & HOLDER=$!
 else
-  perl -MFcntl=:flock -e 'open(my $l, ">>", shift) or die; flock($l, LOCK_EX) or die; sleep 5' "$LOCKFILE" & HOLDER=$!
+  perl -MFcntl=:flock -e 'open(my $l, ">>", shift) or die; flock($l, LOCK_EX) or die; sleep 3' "$LOCKFILE" & HOLDER=$!
 fi
 sleep 1
 install
 check "no request while it is held" "" "$(cat "$SRV/requests")"
 check "nothing installed" "absent" "$(installed)"
-kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null || true
+wait "$HOLDER" 2>/dev/null || true
 install
 check "installed once it is free" "rogue-hook 0.1.0" "$(reported)"
 rm -f "$BIN"

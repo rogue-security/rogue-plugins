@@ -54,7 +54,9 @@ if [ "${ROGUE_NATIVE_BRIDGE_LOCKED:-}" != 1 ]; then
   ROGUE_NATIVE_BRIDGE_LOCKED=1; export ROGUE_NATIVE_BRIDGE_LOCKED
   LOCK="$HOME/.rogue/.self-update.lock"
   if command -v flock >/dev/null 2>&1; then
-    exec flock -n "$LOCK" sh "$0" "$ROOT"
+    # A held lock makes flock exit 1; this step always exits 0.
+    flock -n "$LOCK" sh "$0" "$ROOT"
+    exit 0
   elif command -v perl >/dev/null 2>&1; then
     # $^F keeps the lock's descriptor open across exec.
     exec perl -MFcntl=:flock -e '$^F = 255; open(my $l, ">>", shift) or exit 0; flock($l, LOCK_EX | LOCK_NB) or exit 0; exec @ARGV or exit 0' \
