@@ -58,7 +58,7 @@ require_api_key() {
   [ -n "${ROGUE_API_KEY:-}" ] || exit 0
 }
 
-# The pinned native bridge sends the beacon and ships the log itself once it is installed.
+# The native bridge sends the beacon and ships the log itself once it is installed.
 # $1 = the surface argument.
 handoff_native() {
   [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0

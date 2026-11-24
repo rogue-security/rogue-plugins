@@ -1,16 +1,17 @@
 #!/usr/bin/env node
-// Rogue Security — installs the native bridge pinned in <plugin>/rogue-hook.json. Started detached
-// by native-bridge.mjs whenever the pinned version is missing. Node twin of
-// scripts/shared/native-bridge-install.sh; read that file for the contract.
+// Rogue Security — installs the native bridge for the first time. Started detached by
+// native-bridge.mjs whenever ~/.rogue/bin/rogue-hook[.exe] is missing and the plugin ships
+// rogue-hook.json. Node twin of scripts/shared/native-bridge-install.sh; read that file for the
+// contract.
 //
 //   node native-bridge-install.mjs <plugin-root>
 //
 // Downloads through GET /api/v1/hooks/download with the API key, then installs only a file whose
-// sha256 matches the pin and whose --version reports the pinned version, by an atomic rename into
-// ~/.rogue/bin/rogue-hook/<version>/rogue-hook[.exe]. Any failure leaves nothing at that path, so
-// the script bridge keeps handling events. A failed attempt is retried after
-// ROGUE_NATIVE_BRIDGE_RETRY seconds (default 900, numeric zero = every time), never per event.
-// Every attempt's outcome is appended to ~/.rogue/hook-binary.log.
+// sha256 matches the pin and whose --version reports the pinned version, by an atomic rename onto
+// ~/.rogue/bin/rogue-hook[.exe], under the binary's own update lock and only while that path is
+// still empty. Any failure leaves nothing at that path, so the script bridge keeps handling events.
+// A failed attempt is retried after ROGUE_NATIVE_BRIDGE_RETRY seconds (default 900, numeric zero =
+// every time), never per event. Every attempt's outcome is appended to ~/.rogue/hook-binary.log.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -23,12 +24,39 @@ const ROOT = process.argv[2] || "";
 const now = () => Math.floor(Date.now() / 1000);
 
 let version = "";
-let lock = "";
 let tmp = "";
 process.on("exit", () => {
   if (tmp) fs.rmSync(tmp, { force: true });
-  if (lock) fs.rmSync(lock, { recursive: true, force: true });
 });
+
+// The lock is taken without waiting and released by the OS when its holder dies; the installer runs
+// again under it with ROGUE_NATIVE_BRIDGE_LOCKED=1.
+const PERL_LOCK =
+  '$^F = 255; open(my $l, ">>", shift) or exit 0; flock($l, LOCK_EX | LOCK_NB) or exit 0; exec @ARGV or exit 0';
+// std's LockFileEx in the binary covers the whole file, so this byte-range lock conflicts with it.
+const PS_LOCK =
+  "$f = [IO.File]::Open($env:ROGUE_NATIVE_BRIDGE_LOCK, 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); " +
+  "try { $f.Lock(0, 1) } catch { exit 0 }; & $env:ROGUE_NATIVE_BRIDGE_NODE $env:ROGUE_NATIVE_BRIDGE_SELF $env:ROGUE_NATIVE_BRIDGE_ROOT; exit 0";
+
+// Node has no file-lock API: flock(1) or perl takes the binary's own update lock on macOS and
+// Linux, PowerShell on Windows. Returns whether a locked run happened.
+function runLocked(lockFile) {
+  const self = [process.execPath, process.argv[1], ROOT];
+  const env = { ...process.env, ROGUE_NATIVE_BRIDGE_LOCKED: "1" };
+  const opts = { env, stdio: "ignore", windowsHide: true };
+  if (IS_WIN) {
+    Object.assign(env, {
+      ROGUE_NATIVE_BRIDGE_LOCK: lockFile,
+      ROGUE_NATIVE_BRIDGE_NODE: self[0],
+      ROGUE_NATIVE_BRIDGE_SELF: self[1],
+      ROGUE_NATIVE_BRIDGE_ROOT: self[2],
+    });
+    return !spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", PS_LOCK], opts).error;
+  }
+  const flock = spawnSync("flock", ["-n", lockFile, ...self], opts);
+  if (flock.error?.code !== "ENOENT") return true;
+  return !spawnSync("perl", ["-MFcntl=:flock", "-e", PERL_LOCK, lockFile, ...self], opts).error;
+}
 
 function say(msg) {
   const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -75,46 +103,26 @@ async function main() {
   if (!version) return;
   const env = loadEnvFiles();
   const dir = nativeDir(env);
-  const dest = path.join(dir, version, EXE);
+  const dest = path.join(dir, EXE);
   if (fs.existsSync(dest)) return;
-  // Same rule as the hand-off, before and after creating the install directory: another user must
-  // not be able to replace any directory above it.
-  const versionDir = path.join(dir, version);
-  const unsafe = () => giveUp(`${versionDir} is not protected from other users`);
   try {
     makeDir(path.join(HOME, ".rogue"));
   } catch {
     return;
   }
-  if (!nativePathIsProtected(dest)) unsafe();
-  try {
-    makeDir(dir);
-  } catch {
+  // One install or update at a time: the binary's own lock, so this never races a self-update.
+  if (process.env.ROGUE_NATIVE_BRIDGE_LOCKED !== "1") {
+    if (!runLocked(path.join(HOME, ".rogue", ".self-update.lock"))) giveUp("no flock or perl to take the update lock");
     return;
   }
+  // The holder before this one may have installed it.
+  if (fs.existsSync(dest)) return;
+  // Same rule as the hand-off, before and after creating the install directory: another user must
+  // not be able to replace any directory above it.
+  const unsafe = () => giveUp(`${dir} is not protected from other users`);
   if (!nativePathIsProtected(dest)) unsafe();
 
-  // One attempt at a time, and not again until the retry interval has passed.
-  const lockDir = path.join(dir, `.lock-${version}`);
-  try {
-    fs.mkdirSync(lockDir);
-  } catch {
-    let stale = false;
-    try {
-      stale = Date.now() - fs.statSync(lockDir).mtimeMs > 10 * 60 * 1000;
-    } catch {
-      /* gone meanwhile */
-    }
-    if (!stale) return;
-    try {
-      fs.rmSync(lockDir, { recursive: true, force: true });
-      fs.mkdirSync(lockDir);
-    } catch {
-      return;
-    }
-  }
-  lock = lockDir;
-  const stamp = path.join(dir, `.attempt-${version}`);
+  const stamp = path.join(HOME, ".rogue", ".native-bridge-attempt");
   const raw = process.env.ROGUE_NATIVE_BRIDGE_RETRY ?? "900";
   const retry = /^[0-9]{1,9}$/.test(raw) ? Number(raw) : 900;
   if (retry > 0) {
@@ -152,13 +160,16 @@ async function main() {
   }
   if (typeof url !== "string" || !url) giveUp(`no download URL for ${key}`);
 
+  // Staged beside the binary's own updates: on the same volume, so the rename is atomic.
+  const stage = path.join(HOME, ".rogue", "updates");
   try {
-    makeDir(versionDir);
+    makeDir(stage);
+    makeDir(dir);
   } catch {
-    giveUp(`cannot create ${versionDir}`);
+    giveUp(`cannot create ${dir}`);
   }
   if (!nativePathIsProtected(dest)) unsafe();
-  tmp = path.join(dir, version, `.rogue-hook.download.${process.pid}${IS_WIN ? ".exe" : ""}`);
+  tmp = path.join(stage, `rogue-hook.first.${process.pid}${IS_WIN ? ".exe" : ""}`);
   let data;
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(120000) });

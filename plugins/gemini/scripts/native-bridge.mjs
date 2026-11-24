@@ -3,17 +3,19 @@
 //
 //   nativeHandoff(EXT_ROOT, "gemini", ["gemini", EVENT], { settings, budgetMs, failOpen });
 //
-// The plugin pins one rogue-hook version in <root>/rogue-hook.json. When that version is installed
-// under ~/.rogue/bin/rogue-hook/<version>/, the binary does the caller's whole job: it reads this
-// process's stdin, and its stdout, stderr and exit code are relayed byte for byte. When it is not,
-// native-bridge-install.mjs is started detached to download it, and the caller carries on.
+// The binary lives at one fixed path, ~/.rogue/bin/rogue-hook[.exe], and updates itself there.
+// When it is installed, it does the caller's whole job: it reads this process's stdin, and its
+// stdout, stderr and exit code are relayed byte for byte. When it is not, and the plugin ships
+// <root>/rogue-hook.json (the first download's version and sha256), native-bridge-install.mjs is
+// started detached to download it, and the caller carries on.
 //
-// No pin, managed hooks, a relative plugin root, a kill switch or a binary (or any directory above
-// it) that another user could replace all mean: stay on the script. The last never starts the
+// Managed hooks, a relative plugin root, a kill switch or a binary (or any directory above it)
+// that another user could replace all mean: stay on the script. The last never starts the
 // installer.
 //   ROGUE_NATIVE_BRIDGE=0         every family stays on its script bridge
 //   ROGUE_NATIVE_BRIDGE_GEMINI=0  Gemini does
-//   ROGUE_NATIVE_BRIDGE_DIR       install root instead of ~/.rogue/bin/rogue-hook
+//   ROGUE_NATIVE_BRIDGE_DIR       directory instead of ~/.rogue/bin (tests); a binary there does
+//                                 not update itself
 
 import fs from "node:fs";
 import path from "node:path";
@@ -33,7 +35,7 @@ export function nativeDir(settings = {}) {
   return (
     settings.ROGUE_NATIVE_BRIDGE_DIR ||
     process.env.ROGUE_NATIVE_BRIDGE_DIR ||
-    path.join(HOME, ".rogue", "bin", "rogue-hook")
+    path.join(HOME, ".rogue", "bin")
   );
 }
 
@@ -81,16 +83,14 @@ export function nativeHandoff(root, family, args, { settings = {}, budgetMs = 18
   // A relative root resolves against the agent's working directory - a repository could plant its
   // own pin and binary there.
   if (!root || !path.isAbsolute(root)) return;
-  const version = pinnedVersion(root);
-  if (!version) return;
-  const bin = path.join(nativeDir(settings), version, EXE);
+  const bin = path.join(nativeDir(settings), EXE);
   // The binary gets the payload and the API key: it runs, or is installed, only where no other user
   // can replace it or any directory above it (on Windows: only under the per-user default root).
   if (!nativePathIsProtected(bin)) return;
 
   if (!runnable(bin)) {
     const installer = path.join(root, "scripts", "native-bridge-install.mjs");
-    if (fs.existsSync(installer)) {
+    if (pinnedVersion(root) && fs.existsSync(installer)) {
       try {
         spawn(process.execPath, [installer, root], {
           detached: true,

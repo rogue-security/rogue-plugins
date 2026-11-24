@@ -1207,6 +1207,29 @@ cortex_cli_installed() {
 }
 cortex_detected() { [ -d "/Applications/Cortex Code.app" ] || [ -d "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}" ] || cortex_cli_installed; }
 
+# ── Native bridge ─────────────────────────────────────────────────────────────
+# Installs ~/.rogue/bin/rogue-hook now, from the rogue-hook.json pin of a plugin this run
+# installed, so the first hook event already runs it. Every plugin of a release carries the same
+# pin, so any one will do. Non-fatal: when it fails, the hooks install it on their own.
+install_native_bridge() {
+  local pin root
+  for pin in "$CURSOR_INSTALL_DIR/rogue-hook.json" \
+             "$HOME"/.claude/plugins/cache/*/"$PLUGIN_NAME"/*/rogue-hook.json \
+             "$HOME"/.codex/plugins/cache/*/"$PLUGIN_NAME"/*/rogue-hook.json \
+             "$HOME/.gemini/config/plugins/$PLUGIN_NAME/rogue-hook.json" \
+             "$HOME"/.rogue/plugins/*/rogue-hook.json; do
+    root="${pin%/rogue-hook.json}"
+    [ -f "$pin" ] && [ -r "$root/scripts/native-bridge-install.sh" ] || continue
+    ROGUE_NATIVE_BRIDGE_RETRY=0 sh "$root/scripts/native-bridge-install.sh" "$root"
+    if [ -x "$HOME/.rogue/bin/rogue-hook" ]; then
+      ok "Native bridge → ${C_DIM}$HOME/.rogue/bin/rogue-hook${C_RESET}"
+    else
+      warn "The native bridge was not installed (see ~/.rogue/hook-binary.log); the hooks retry on their own."
+    fi
+    return 0
+  done
+}
+
 # ── Dispatch: detect installed agents, install for each ───────────────────────
 main() {
   parse_args "$@"
@@ -1273,6 +1296,8 @@ main() {
       cortex)      install_cortex || { [ -n "$WANT" ] && cortex_failed=1; } ;;
     esac
   done
+
+  install_native_bridge
 
   printf '\n' >&2
   if [ "$muse_failed" = 1 ]; then

@@ -76,12 +76,12 @@ export function nativePathIsProtected(file) {
     : dirChainIsProtected(path.dirname(file));
 }
 
-// `file` lies under <home>/.rogue/bin/rogue-hook (case-insensitive, at a separator boundary), and
+// `file` lies under <home>/.rogue/bin (case-insensitive, at a separator boundary), and
 // no symlink or junction stands anywhere along it: the nearest existing part resolves to itself.
 export function inUserRoot(file, home) {
   if (!home) return false;
   const lower = (s) => s.toLowerCase();
-  const root = path.resolve(home, ".rogue", "bin", "rogue-hook");
+  const root = path.resolve(home, ".rogue", "bin");
   const want = path.resolve(file);
   if (!lower(want).startsWith(lower(root) + path.sep)) return false;
   let up = want;

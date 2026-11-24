@@ -95,7 +95,7 @@ if [ -r "$_env_lib" ]; then
   done
 fi
 
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
 # until then this starts its download and carries on. See scripts/native-bridge.sh.
 _rn_root=""
 [ -n "$PLUGIN_ROOT" ] && _rn_root="$(CDPATH= cd -- "$PLUGIN_ROOT" 2>/dev/null && pwd)"

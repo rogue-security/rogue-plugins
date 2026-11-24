@@ -424,7 +424,7 @@ async function main() {
   const env = ENV;
   const apiKey = env.ROGUE_API_KEY || "";
 
-  // The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+  // The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
   // until then this starts its download and carries on. The 18 s budget sits past the binary's
   // 15 s request timeout and inside Gemini's 20 s hook timeout. See native-bridge.mjs.
   if (process.argv[2]) {

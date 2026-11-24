@@ -28,7 +28,7 @@ $work = Join-Path ([System.IO.Path]::GetTempPath()) ('rogue-native-' + [guid]::N
 $plugin = Join-Path $work 'plugin'
 $srv = Join-Path $work 'srv'
 $sbHome = Join-Path $work 'home'
-$binDir = Join-Path (Join-Path (Join-Path $sbHome '.rogue') 'bin') 'rogue-hook'
+$binDir = Join-Path (Join-Path $sbHome '.rogue') 'bin'
 New-Item -ItemType Directory -Force -Path $srv, $sbHome | Out-Null
 Copy-Item -Recurse -LiteralPath (Join-Path $repo 'plugins/rogue') -Destination $plugin
 Remove-Item -LiteralPath (Join-Path $plugin 'rogue-hook.json') -ErrorAction SilentlyContinue
@@ -135,7 +135,8 @@ function Invoke-Install {
     [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
     Invoke-Fresh -Code "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$installer'))) '$($plugin.Replace("'", "''"))'" -Env $Env | Out-Null
 }
-function Get-Installed { param([string]$Version, [string]$Dir = $binDir) Test-Path -LiteralPath (Join-Path (Join-Path $Dir $Version) $exe) -PathType Leaf }
+function Get-Installed { param([string]$Dir = $binDir) Test-Path -LiteralPath (Join-Path $Dir $exe) -PathType Leaf }
+function Get-Staged { @(Get-ChildItem -Force -LiteralPath (Join-Path (Join-Path $sbHome '.rogue') 'updates') -ErrorAction SilentlyContinue).Count }
 # Lets every identity write $Path (Everyone on Windows, group and other elsewhere), or restores it.
 function Set-Exposed {
     param([string]$Path, [bool]$On)
@@ -158,8 +159,8 @@ try {
     Set-Pin '0.1.0' (Get-Sha (Join-Path $srv 'blob'))
     Check 'kept while missing' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
     # The log line follows the rename, so wait for both.
-    foreach ($i in 1..100) { if ((Get-Installed '0.1.0') -and (Get-Log).Contains('installed')) { break }; Start-Sleep -Milliseconds 100 }
-    Check 'installed' $true (Get-Installed '0.1.0')
+    foreach ($i in 1..100) { if ((Get-Installed) -and (Get-Log).Contains('installed')) { break }; Start-Sleep -Milliseconds 100 }
+    Check 'installed' $true (Get-Installed)
     Contains 'log reports install' 'rogue-hook 0.1.0: installed' (Get-Log)
     Contains 'lookup carries version' '/api/v1/hooks/download?version=0.1.0&os=' (Get-Content -Raw (Join-Path $srv 'requests'))
     Contains 'lookup carries the API key' 'key=test-key' (Get-Content -Raw (Join-Path $srv 'requests'))
@@ -177,6 +178,11 @@ try {
     Check 'the family switch from the env file keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_CLAUDE = '0' }").Out
     Check 'a relative root never hands off' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} '@{}' 'plugin').Out
 
+    Write-Host 'an installed binary gets the event with no pin'
+    Remove-Item -LiteralPath (Join-Path $plugin 'rogue-hook.json')
+    Check 'no pin, binary present' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
+    Set-Pin '0.1.0' (Get-Sha (Join-Path $srv 'blob'))
+
     Write-Host 'a child that outlives the budget: only the fail-open answer is written'
     $r = Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ STUB_SLEEP = '5' } -BudgetMs 1500
     Check 'fail-open answer alone' '{}' $r.Out
@@ -193,10 +199,10 @@ try {
     [IO.File]::WriteAllText((Join-Path $altHome '.rogue-env'), "export ROGUE_API_KEY=test-key`nexport ROGUE_BASE_URL=http://127.0.0.1:$port`nexport ROGUE_NATIVE_BRIDGE_DIR=$altDir`n")
     if (-not $onWindows) { & chmod 600 (Join-Path $altHome '.rogue-env') }
     Invoke-Install @{ HOME = $altHome; USERPROFILE = $altHome }
-    Check 'the installer installs there' $true (Get-Installed '0.1.0' $altDir)
+    Check 'the installer installs there' $true (Get-Installed $altDir)
 
     Write-Host 'a binary another user could replace never runs'
-    $bin = Join-Path (Join-Path $binDir '0.1.0') $exe
+    $bin = Join-Path $binDir $exe
     Set-Exposed $bin $true
     Check 'exposed binary keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
     Set-Exposed $bin $false
@@ -214,43 +220,48 @@ try {
     [IO.File]::WriteAllText((Join-Path $probeRoot 'rogue-hook.json'), "{`n  `"version`": `"0.9.0`"`n}`n")
     $started = Join-Path $work 'installer-started'
     [IO.File]::WriteAllText((Join-Path $probeRoot 'scripts/native-bridge-install.ps1'), "[IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'yes')")
-    [IO.File]::WriteAllText((Join-Path $binDir '.attempt-0.9.0'), '0')
+    Move-Item -LiteralPath $bin -Destination (Join-Path $work 'saved-bin')
+    [IO.File]::WriteAllText((Join-Path (Join-Path $sbHome '.rogue') '.native-bridge-attempt'), '0')
     Check 'kept' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ ROGUE_NATIVE_BRIDGE_RETRY = '900' } -Root $probeRoot).Out
     Start-Sleep -Seconds 3
     Check 'no installer started' $false (Test-Path -LiteralPath $started)
     Check 'kept' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{ ROGUE_NATIVE_BRIDGE_RETRY = '0' } -Root $probeRoot).Out
     foreach ($i in 1..100) { if (Test-Path -LiteralPath $started) { break }; Start-Sleep -Milliseconds 100 }
     Check 'with no retry interval it is' $true (Test-Path -LiteralPath $started)
+    Move-Item -LiteralPath (Join-Path $work 'saved-bin') -Destination $bin
 
     if (-not $onWindows) {
         # On Windows the exe alone is held to the ACL rule; off Windows every directory above it too.
         Write-Host 'an install root with a directory above it another user could replace: no exec, no installer'
-        $above = Join-Path (Join-Path $sbHome '.rogue') 'bin'
+        $above = Join-Path $sbHome '.rogue'
         Set-Exposed $above $true
         Check 'group-writable ancestor keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
-        Set-Pin '0.6.0' (Get-Sha (Join-Path $srv 'blob'))
+        Move-Item -LiteralPath $bin -Destination (Join-Path $work 'saved-bin')
         [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
         Check 'a missing binary there keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
         Start-Sleep -Seconds 3
         Check 'no installer was started' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
         Invoke-Install
         Check 'the installer refuses it too' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
-        Contains 'and logs why' "rogue-hook 0.6.0: $(Join-Path $binDir '0.6.0') is not protected from other users" (Get-Log)
-        Check 'nothing written for it' 0 @(Get-ChildItem -Force -LiteralPath $binDir | Where-Object { $_.Name -like '*0.6.0' }).Count
+        Contains 'and logs why' "rogue-hook 0.1.0: $binDir is not protected from other users" (Get-Log)
+        Check 'nothing written for it' $false (Get-Installed)
         Set-Exposed $above $false
+        Move-Item -LiteralPath (Join-Path $work 'saved-bin') -Destination $bin
 
         Write-Host "an install root reached through a symlink: only root's own link is followed"
         $link = Join-Path $work 'link'
         New-Item -ItemType SymbolicLink -Path $link -Target $binDir | Out-Null
         $viaLink = "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($link.Replace("'", "''"))' }"
         Check 'our own symlink keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} $viaLink).Out
-        Set-Pin '0.7.0' (Get-Sha (Join-Path $srv 'blob'))
+        $emptyBin = Join-Path $work 'empty-bin'
+        New-Item -ItemType Directory -Force -Path $emptyBin | Out-Null
+        $emptyLink = Join-Path $work 'empty-link'
+        New-Item -ItemType SymbolicLink -Path $emptyLink -Target $emptyBin | Out-Null
         [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
-        Check 'a missing binary under it keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} $viaLink).Out
+        Check 'a missing binary under it keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($emptyLink.Replace("'", "''"))' }").Out
         Start-Sleep -Seconds 3
         Check 'and starts no installer' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
-        Check 'nothing written under it' 0 @(Get-ChildItem -Force -LiteralPath $binDir | Where-Object { $_.Name -like '*0.7.0' }).Count
-        Set-Pin '0.1.0' (Get-Sha (Join-Path $srv 'blob'))
+        Check 'nothing written under it' 0 @(Get-ChildItem -Force -LiteralPath $emptyBin).Count
         # Only root can chown a link, so a stat wrapper reports root as its owner when asked without -L.
         # (On macOS every case here also runs through /var, a link root owns.)
         $wrapDir = Join-Path $work 'root-stat'
@@ -265,11 +276,10 @@ try {
         Check 'a root-owned symlink is followed' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" $r.Out
         Remove-Item -LiteralPath $link -Force
     } else {
-        Write-Host 'Windows: every directory from the version directory up to the install root'
-        $verDir = Join-Path $binDir '0.1.0'
-        Set-Exposed $verDir $true
+        Write-Host 'Windows: the install directory itself'
+        Set-Exposed $binDir $true
         Check 'a directory another user can write keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
-        Set-Exposed $verDir $false
+        Set-Exposed $binDir $false
         $junction = Join-Path $work 'jbin'
         New-Item -ItemType Junction -Path $junction -Target $binDir | Out-Null
         Check 'a junction in the chain keeps the script' 'kept' (Invoke-Handoff @('claude', 'PreToolUse') '{}' @{} "@{ ROGUE_NATIVE_BRIDGE_DIR = '$($junction.Replace("'", "''"))' }").Out
@@ -299,17 +309,39 @@ try {
         Check 'the default path still hands off' "{`"native`":`"claude PreToolUse root=$root`",`"stdin`":{}}" (Invoke-Handoff @('claude', 'PreToolUse') '{}').Out
     }
 
+    Write-Host 'already installed: no download, and a binary that updated itself is never replaced'
+    [IO.File]::WriteAllText((Join-Path $srv 'requests'), '')
+    [IO.File]::WriteAllText($bin, 'newer')
+    Invoke-Install
+    Check 'no request' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
+    Check 'the newer binary stays' 'newer' ([IO.File]::ReadAllText($bin))
+    Remove-Item -LiteralPath $bin -Force
+
+    # Off Windows the sh installer runs, and test_native_bridge_sh.sh holds its lock.
+    if ($onWindows) {
+        Write-Host 'an update lock held by the binary: the installer leaves the work to it'
+        $held = [IO.File]::Open((Join-Path (Join-Path $sbHome '.rogue') '.self-update.lock'), 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+        $held.Lock(0, 1)
+        Invoke-Install
+        Check 'no request while it is held' '' ([IO.File]::ReadAllText((Join-Path $srv 'requests')))
+        Check 'nothing installed' $false (Get-Installed)
+        $held.Dispose()
+        Invoke-Install
+        Check 'installed once it is free' $true (Get-Installed)
+        Remove-Item -LiteralPath $bin -Force
+    }
+
     Write-Host 'a download that does not match the pin is never installed'
     New-Stub '0.2.0'
     Set-Pin '0.2.0' ('0' * 64)
     Invoke-Install
-    Check 'no binary' $false (Get-Installed '0.2.0')
+    Check 'no binary' $false (Get-Installed)
     Contains 'log reports mismatch' 'sha256 mismatch' (Get-Log)
 
     Write-Host 'a binary that reports another version is not installed'
     Set-Pin '0.3.0' (Get-Sha (Join-Path $srv 'blob'))
     Invoke-Install
-    Check 'no binary' $false (Get-Installed '0.3.0')
+    Check 'no binary' $false (Get-Installed)
     Contains 'log reports it' 'does not run here' (Get-Log)
 
     Write-Host 'a failed attempt is not retried inside the retry interval'
@@ -320,10 +352,9 @@ try {
     New-Stub '0.5.0'
     Set-Pin '0.5.0' (Get-Sha (Join-Path $srv 'blob'))
     Invoke-Install @{ STUB_HANG = '1' }
-    Check 'no binary' $false (Get-Installed '0.5.0')
+    Check 'no binary' $false (Get-Installed)
     Contains 'log reports it' '0.5.0: downloaded binary does not run here' (Get-Log)
-    Check 'no temp file left' 0 @(Get-ChildItem -Force -LiteralPath (Join-Path $binDir '0.5.0')).Count
-    Check 'the lock is released' $false (Test-Path -LiteralPath (Join-Path $binDir '.lock-0.5.0'))
+    Check 'no temp file left' 0 (Get-Staged)
 } finally {
     if ($server) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -Recurse -Force -LiteralPath $work -ErrorAction SilentlyContinue

@@ -44,7 +44,7 @@ if [ -f "${CLAUDE_PLUGIN_ROOT:-}/env" ]; then
   exit 0
 fi
 
-# The pinned native bridge runs the same check once it is installed.
+# The native bridge runs the same check once it is installed.
 if [ -r "${CLAUDE_PLUGIN_ROOT:-}/scripts/native-bridge.sh" ]; then
   . "${CLAUDE_PLUGIN_ROOT}/scripts/native-bridge.sh"
   rogue_native_handoff "${CLAUDE_PLUGIN_ROOT}" claude update claude

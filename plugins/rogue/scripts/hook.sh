@@ -29,7 +29,7 @@ fi
 
 [ -z "${CLAUDE_CODE_ENTRYPOINT:-}" ] && echo '{}' && exit 0
 
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
 # until then this starts its download and carries on. See scripts/native-bridge.sh.
 if [ -n "$EVENT" ] && [ -r "${CLAUDE_PLUGIN_ROOT:-}/scripts/native-bridge.sh" ]; then
   . "${CLAUDE_PLUGIN_ROOT}/scripts/native-bridge.sh"

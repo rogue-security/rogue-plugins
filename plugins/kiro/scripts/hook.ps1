@@ -290,7 +290,7 @@ function Initialize-KiroContext {
         break
     }
 
-    # The native bridge pinned in rogue-hook.json does this script's whole job once it is
+    # The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is
     # installed; until then this starts its download and carries on. See
     # scripts/native-bridge.ps1. The 9.5 s budget sits past the binary's 8 s request
     # timeout and inside the hook file's 10 s.

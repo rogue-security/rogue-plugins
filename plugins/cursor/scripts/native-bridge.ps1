@@ -24,7 +24,7 @@ function Get-RogueNativeDir {
     if ($Settings -and $Settings['ROGUE_NATIVE_BRIDGE_DIR']) { return [string]$Settings['ROGUE_NATIVE_BRIDGE_DIR'] }
     if ($env:ROGUE_NATIVE_BRIDGE_DIR) { return $env:ROGUE_NATIVE_BRIDGE_DIR }
     $home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
-    return (Join-Path (Join-Path (Join-Path $home_ '.rogue') 'bin') 'rogue-hook')
+    return (Join-Path (Join-Path $home_ '.rogue') 'bin')
 }
 
 function Get-RogueNativeExe {
@@ -52,21 +52,21 @@ function Invoke-RogueNativeHandoff {
     if ((& $setting 'ROGUE_NATIVE_BRIDGE') -eq '0') { return }
     if ((& $setting ('ROGUE_NATIVE_BRIDGE_' + $Family.ToUpperInvariant())) -eq '0') { return }
     if (-not $Root -or -not [System.IO.Path]::IsPathRooted($Root)) { return }
-    $version = Get-RogueNativeVersion $Root
-    if (-not $version) { return }
     $dir = Get-RogueNativeDir $Settings
-    $bin = Join-Path (Join-Path $dir $version) (Get-RogueNativeExe)
+    $bin = Join-Path $dir (Get-RogueNativeExe)
     # The binary gets the payload and the API key: it runs, or is installed, only where no other user
     # can replace it or a directory above it (Test-RogueDirChain in env-file.ps1 has the rule).
     if (-not (Get-Command Test-RogueDirChain -ErrorAction SilentlyContinue)) {
         try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/env-file.ps1') -ErrorAction Stop))) } catch { return }
     }
-    if (-not (Test-RogueDirChain (Split-Path -Parent $bin) $dir)) { return }
+    if (-not (Test-RogueDirChain $dir $dir)) { return }
     if (-not (Test-Path -LiteralPath $bin -PathType Leaf)) {
+        if (-not (Get-RogueNativeVersion $Root)) { return }
         $installer = Join-Path $Root 'scripts/native-bridge-install.ps1'
         # Inside the retry interval the installer would stand down at once: do not start a PowerShell for it.
         $retry = if ($env:ROGUE_NATIVE_BRIDGE_RETRY -match '^[0-9]{1,9}$') { [int]$env:ROGUE_NATIVE_BRIDGE_RETRY } else { 900 }
-        $stamp = Get-Item -Force -LiteralPath (Join-Path $dir ".attempt-$version") -ErrorAction SilentlyContinue
+        $home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+        $stamp = Get-Item -Force -LiteralPath (Join-Path (Join-Path $home_ '.rogue') '.native-bridge-attempt') -ErrorAction SilentlyContinue
         $now = (Get-Date).ToUniversalTime()
         if ($retry -gt 0 -and $stamp -and $stamp.LastWriteTimeUtc -le $now -and $stamp.LastWriteTimeUtc -gt $now.AddSeconds(-$retry)) { return }
         if (Test-Path -LiteralPath $installer -PathType Leaf) {

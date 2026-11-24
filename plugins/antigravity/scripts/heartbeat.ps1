@@ -286,7 +286,7 @@ function Start-LogShipper {
 
 # ── main ───────────────────────────────────────────────────────────────────
 # Same order as heartbeat.sh: stand down, configure, then fire and forget.
-# The pinned native bridge sends the beacon and ships the log itself once it is
+# The native bridge sends the beacon and ships the log itself once it is
 # installed. $Agent is the surface hook.ps1 resolved; the bridge validates it.
 function Invoke-NativeHandoff {
     try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $script:pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) }

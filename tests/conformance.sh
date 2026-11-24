@@ -7,12 +7,12 @@
 #   tests/conformance.sh --native BIN --family claude --family codex
 #   tests/conformance.sh --native BIN --family codex --suite test_ship_logs.sh
 #
-# Native mode goes through the REAL hand-off: it installs BIN as the pinned version under a
-# temporary ROGUE_NATIVE_BRIDGE_DIR and writes a temporary rogue-hook.json pin into each selected
-# plugin that has none, so every script bridge of a selected family execs the binary exactly as it
-# would on a user's machine. Unselected families keep no pin and stay on their scripts, which lets
-# the cross-family suites run against a binary that serves only some families. A wrapper counts
-# hand-offs; a native run with none fails, so it can never pass silently on the script path.
+# Native mode goes through the REAL hand-off: it installs BIN as rogue-hook under a temporary
+# ROGUE_NATIVE_BRIDGE_DIR, so every script bridge of a selected family execs the binary exactly as
+# it would on a user's machine. Unselected families get their kill switch
+# (ROGUE_NATIVE_BRIDGE_<FAMILY>=0) and stay on their scripts, which lets the cross-family suites run
+# against a binary that serves only some families. A wrapper counts hand-offs; a native run with
+# none fails, so it can never pass silently on the script path.
 #
 # The same cases and expectations run in both modes. A native-only difference must be written into
 # the test it affects, keyed on ROGUE_TEST_BRIDGE=native, with the reason.
@@ -48,10 +48,8 @@ suites() {
 }
 SHARED_SUITES="test_hook_logs.sh test_ship_logs.sh"
 
-PINNED=()
 WORK=""
 cleanup() {
-  for p in ${PINNED[@]+"${PINNED[@]}"}; do rm -f "$p"; done
   [ -n "$WORK" ] && rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -64,21 +62,12 @@ if [ -n "$NATIVE_BIN" ]; then
   export ROGUE_TEST_BRIDGE=native
   COUNTER="$WORK/handoffs"
   : > "$COUNTER"
-  for f in "${FAMILIES[@]}"; do
-    pin="$REPO/plugins/$(plugin_dir "$f")/rogue-hook.json"
-    if [ -f "$pin" ]; then
-      ver="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pin" | head -n 1)"
-    else
-      ver="0.0.0-conformance"
-      printf '{\n  "version": "%s",\n  "sha256": {}\n}\n' "$ver" > "$pin"
-      PINNED+=("$pin")
-    fi
-    if [ ! -e "$ROGUE_NATIVE_BRIDGE_DIR/$ver/rogue-hook" ]; then
-      mkdir -p "$ROGUE_NATIVE_BRIDGE_DIR/$ver"
-      printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$COUNTER" "$NATIVE_BIN" \
-        > "$ROGUE_NATIVE_BRIDGE_DIR/$ver/rogue-hook"
-      chmod 755 "$ROGUE_NATIVE_BRIDGE_DIR/$ver/rogue-hook"
-    fi
+  mkdir -p "$ROGUE_NATIVE_BRIDGE_DIR"
+  printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$COUNTER" "$NATIVE_BIN" \
+    > "$ROGUE_NATIVE_BRIDGE_DIR/rogue-hook"
+  chmod 755 "$ROGUE_NATIVE_BRIDGE_DIR/rogue-hook"
+  for f in claude codex cursor copilot gemini antigravity kiro muse; do
+    case " ${FAMILIES[*]} " in *" $f "*) ;; *) export "ROGUE_NATIVE_BRIDGE_$(printf '%s' "$f" | tr '[:lower:]' '[:upper:]')=0" ;; esac
   done
   echo "native bridge: $("$NATIVE_BIN" --version) for: ${FAMILIES[*]}"
 else

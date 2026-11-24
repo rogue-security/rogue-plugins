@@ -898,7 +898,7 @@ main() {
   stand_down_on_git_bash
   parse_args "$@"
   load_env
-  # The pinned native bridge ships the same files with the same state once it is installed.
+  # The native bridge ships the same files with the same state once it is installed.
   if [ "$SHIP_ALL_LOGS" != 1 ] && [ -r "$PLUGIN_ROOT/scripts/native-bridge.sh" ]; then
     . "$PLUGIN_ROOT/scripts/native-bridge.sh"
     rogue_native_handoff "$PLUGIN_ROOT" "$SHIPPER_SLUG" ship-logs "$SHIPPER_SLUG" "$SHIPPER_VERSION"

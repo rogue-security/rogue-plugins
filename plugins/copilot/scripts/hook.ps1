@@ -301,7 +301,7 @@ foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $PluginRoot 'env'), (Joi
     break
 }
 
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
 # until then this starts its download and carries on. See scripts/native-bridge.ps1. The 25 s
 # budget covers the binary's subagent and transcript waits plus its 15 s request, inside the 30 s
 # hook timeout.

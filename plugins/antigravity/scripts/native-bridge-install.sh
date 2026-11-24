@@ -1,17 +1,20 @@
 #!/bin/sh
-# Installs the native bridge pinned in <plugin>/rogue-hook.json - SHARED, started detached by
-# native-bridge.sh whenever the pinned version is missing.
+# Installs the native bridge for the first time - SHARED, started detached by native-bridge.sh
+# whenever ~/.rogue/bin/rogue-hook is missing and the plugin ships rogue-hook.json.
 #
 #   sh native-bridge-install.sh <plugin-root>
 #
 # ONE COPY IS EDITABLE: scripts/shared/native-bridge-install.sh (see sync-shared-scripts.sh).
 #
-# Downloads through GET /api/v1/hooks/download with the API key, then installs only a file whose
-# sha256 matches the pin and whose --version reports the pinned version, by an atomic rename into
-# ~/.rogue/bin/rogue-hook/<version>/rogue-hook. Any failure leaves nothing at that path, so the
-# script bridge keeps handling events. A failed attempt is retried after
-# ROGUE_NATIVE_BRIDGE_RETRY seconds (default 900, numeric zero = every time), never per event.
-# Every attempt's outcome is appended to ~/.rogue/hook-binary.log.
+# rogue-hook.json is the trust root for this first download only: once installed, the binary
+# updates itself from the Rogue API and checks each release's signature. Downloads through
+# GET /api/v1/hooks/download with the API key, then installs only a file whose sha256 matches the
+# pin and whose --version reports the pinned version, by an atomic rename onto
+# ~/.rogue/bin/rogue-hook. It holds the binary's own update lock (~/.rogue/.self-update.lock) and
+# installs only while that path is still empty, so it never replaces a binary that updated itself.
+# Any failure leaves nothing at that path, so the script bridge keeps handling events. A failed
+# attempt is retried after ROGUE_NATIVE_BRIDGE_RETRY seconds (default 900, numeric zero = every
+# time), never per event. Every attempt's outcome is appended to ~/.rogue/hook-binary.log.
 
 ROOT="${1:-}"
 case "$ROOT" in /*) ;; *) exit 0 ;; esac
@@ -34,31 +37,41 @@ fi
 VERSION="$(rogue_native_pinned_version "$ROOT")"
 [ -n "$VERSION" ] || exit 0
 DIR="$(rogue_native_dir)"
-DEST="$DIR/$VERSION/rogue-hook"
-[ -x "$DEST" ] && exit 0
+DEST="$DIR/rogue-hook"
+[ -e "$DEST" ] && exit 0
 
 # The hand-off runs only a binary in a directory nobody else can write.
 umask 022
 mkdir -p "$HOME/.rogue" 2>/dev/null || exit 0
 LOG="$HOME/.rogue/hook-binary.log"
 say() { printf '%s rogue-hook %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION" "$1" >> "$LOG" 2>/dev/null; }
+give_up() { say "$1; the script bridge handles events"; exit 0; }
+
+# One install or update at a time: the binary's own OS file lock, so this never races a
+# self-update. Taken without waiting (whoever holds it is already doing the work), and released by
+# the OS if this process dies. The script runs again under it.
+if [ "${ROGUE_NATIVE_BRIDGE_LOCKED:-}" != 1 ]; then
+  ROGUE_NATIVE_BRIDGE_LOCKED=1; export ROGUE_NATIVE_BRIDGE_LOCKED
+  LOCK="$HOME/.rogue/.self-update.lock"
+  if command -v flock >/dev/null 2>&1; then
+    exec flock -n "$LOCK" sh "$0" "$ROOT"
+  elif command -v perl >/dev/null 2>&1; then
+    # $^F keeps the lock's descriptor open across exec.
+    exec perl -MFcntl=:flock -e '$^F = 255; open(my $l, ">>", shift) or exit 0; flock($l, LOCK_EX | LOCK_NB) or exit 0; exec @ARGV or exit 0' \
+      "$LOCK" sh "$0" "$ROOT"
+  fi
+  give_up "no flock or perl to take the update lock"
+fi
+# The holder before this one may have installed it.
+[ -e "$DEST" ] && exit 0
+
 # Same rule as the hand-off, before and after creating the install directory: another user must not
 # be able to replace any directory above it.
-unsafe() { say "$DIR/$VERSION is not protected from other users; the script bridge handles events"; exit 0; }
 command -v rogue_nearest_dir_is_protected >/dev/null 2>&1 || exit 0
-rogue_nearest_dir_is_protected "$DIR/$VERSION" || unsafe
-mkdir -p "$DIR" 2>/dev/null || exit 0
-rogue_nearest_dir_is_protected "$DIR/$VERSION" || unsafe
+unsafe() { say "$DIR is not protected from other users; the script bridge handles events"; exit 0; }
+rogue_nearest_dir_is_protected "$DEST" || unsafe
 
-# One attempt at a time, and not again until the retry interval has passed.
-LOCK="$DIR/.lock-$VERSION"
-if ! mkdir "$LOCK" 2>/dev/null; then
-  [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ] || exit 0
-  rmdir "$LOCK" 2>/dev/null; mkdir "$LOCK" 2>/dev/null || exit 0
-fi
-TMP=""
-trap 'rmdir "$LOCK" 2>/dev/null; [ -n "$TMP" ] && rm -f "$TMP" "$TMP.version"' EXIT
-STAMP="$DIR/.attempt-$VERSION"
+STAMP="$HOME/.rogue/.native-bridge-attempt"
 RETRY="${ROGUE_NATIVE_BRIDGE_RETRY:-900}"
 case "$RETRY" in ''|*[!0-9]*) RETRY=900 ;; esac
 [ "${#RETRY}" -gt 9 ] && RETRY=900
@@ -71,8 +84,6 @@ if [ "$RETRY" -gt 0 ] && [ -r "$STAMP" ]; then
   fi
 fi
 date -u +%s > "$STAMP" 2>/dev/null
-
-give_up() { say "$1; the script bridge handles events"; exit 0; }
 
 pinned() { sed -n "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\"\([0-9a-f]*\)\".*/\1/p" "$ROOT/rogue-hook.json" 2>/dev/null | head -n 1; }
 sha256() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1" 2>/dev/null; } | cut -d ' ' -f 1; }
@@ -96,9 +107,12 @@ URL="$(curl -fsS --max-time 15 -H "x-rogue-api-key: $ROGUE_API_KEY" \
   sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\u0026/\&/g')"
 [ -n "$URL" ] || give_up "no download URL for $PLATFORM"
 
-mkdir -p "$DIR/$VERSION" 2>/dev/null || give_up "cannot create $DIR/$VERSION"
-rogue_nearest_dir_is_protected "$DIR/$VERSION" || give_up "$DIR/$VERSION is not protected from other users"
-TMP="$DIR/$VERSION/.rogue-hook.download.$$"
+# Staged beside the binary's own updates: on the same volume, so the rename is atomic.
+STAGE="$HOME/.rogue/updates"
+mkdir -p "$STAGE" "$DIR" 2>/dev/null || give_up "cannot create $DIR"
+rogue_nearest_dir_is_protected "$DEST" || give_up "$DIR is not protected from other users"
+TMP="$STAGE/rogue-hook.first.$$"
+trap 'rm -f "$TMP" "$TMP.version"' EXIT
 curl -fsS --max-time 120 -o "$TMP" "$URL" 2>/dev/null || give_up "download failed"
 GOT="$(sha256 "$TMP")"
 [ "$GOT" = "$WANT" ] || give_up "sha256 mismatch: got $GOT, pinned $WANT"
@@ -112,10 +126,8 @@ while kill -0 "$PROBE" 2>/dev/null && [ "$WAITED" -lt 10 ]; do sleep 1; WAITED=$
 kill -9 "$PROBE" 2>/dev/null
 wait "$PROBE" 2>/dev/null
 REPORTED="$(cat "$TMP.version" 2>/dev/null)"
-rm -f "$TMP.version"
 [ "$REPORTED" = "rogue-hook $VERSION" ] || give_up "downloaded binary does not run here"
 mv -f "$TMP" "$DEST" 2>/dev/null || give_up "cannot install $DEST"
-TMP=""
 rm -f "$STAMP" 2>/dev/null
 say "installed ($PLATFORM)"
 exit 0

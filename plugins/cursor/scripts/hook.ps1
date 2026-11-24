@@ -793,7 +793,7 @@ foreach ($f in $credFiles) {
     break
 }
 
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
 # until then this starts its download and carries on. See scripts/native-bridge.ps1. The 30 s
 # budget covers the binary's 10 s request and 3 s subagent wait, inside the 120 s hook timeout.
 try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}

@@ -285,7 +285,7 @@ function Assert-ApiKey {
     exit 0
 }
 
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is
 # installed; until then this starts its download and carries on. See
 # scripts/native-bridge.ps1. The 25 s budget covers the binary's transcript waits and
 # its 15 s request, inside the 30 s hook timeout.
@@ -973,7 +973,7 @@ function Invoke-Main {
     # machine records `outcome=unconfigured` before it exits.
     Import-Credentials
     Initialize-Logging $script:creds
-    Invoke-NativeHandoff   # exits through the native bridge when its pinned version is installed
+    Invoke-NativeHandoff   # exits through the native bridge when it is installed
     Assert-ApiKey          # exits before stdin is read when there is no key
     Resolve-Url
     Resolve-Actor

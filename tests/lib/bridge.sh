@@ -46,14 +46,11 @@ bridge_capture() { # <cap-dir> <code> [calls-file]
   printf '%s' "$BRIDGE_URL"
 }
 
-# bridge_pin <dest-plugin-root> <plugin-dir-name> — for suites that run a copied plugin tree: in
-# native mode, carry over the hand-off library and the pin tests/conformance.sh wrote, when it
-# selected that family. Without a pin the copy stays on its script, as it would for a user.
-bridge_pin() {
+# bridge_handoff <dest-plugin-root> <plugin-dir-name> — for suites that run a copied plugin tree: in
+# native mode, carry over the hand-off library, so the copy execs the binary tests/conformance.sh
+# installed unless that family's kill switch is set.
+bridge_handoff() {
   bridge_native || return 0
-  _pin="$(dirname "${BASH_SOURCE[0]}")/../../plugins/$2/rogue-hook.json"
-  [ -f "$_pin" ] || return 0
   mkdir -p "$1/scripts"
-  cp "$_pin" "$1/rogue-hook.json"
   cp "$(dirname "${BASH_SOURCE[0]}")/../../plugins/$2/scripts/native-bridge.sh" "$1/scripts/"
 }

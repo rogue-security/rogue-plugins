@@ -8,7 +8,7 @@ for file in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
     . "$file"; break
   fi
 done
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
 # until then this starts its download and carries on. See scripts/native-bridge.sh.
 if [ -r "$PLUGIN_ROOT/scripts/native-bridge.sh" ]; then
   . "$PLUGIN_ROOT/scripts/native-bridge.sh"

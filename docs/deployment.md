@@ -294,6 +294,25 @@ GitHub — every update to a compiled bundle is admin-controlled. The compiled
 release older than the bundled-`env` check obeys. Every other install updates
 itself; there is no opt-out.
 
+### The native bridge
+
+Each user's hooks hand their events to one native binary, `rogue-hook`, when it
+is installed. It lives at one fixed path: `~/.rogue/bin/rogue-hook` on macOS and
+Linux, `%USERPROFILE%\.rogue\bin\rogue-hook.exe` on Windows.
+
+- **First install.** `install.sh` and `install.ps1` install it. On an existing
+  install, the first hook event downloads it in the background from the Rogue
+  API and checks it against the plugin's `rogue-hook.json` (version and sha256).
+  The hooks handle events themselves until it is in place, so no event waits.
+- **Updates.** After the first install, the binary updates itself from the Rogue
+  API and checks each release's signature. `rogue-hook.json` is not used again.
+- **Logs.** The first install writes `~/.rogue/hook-binary.log`; the binary's own
+  updates write `~/.rogue/auto-update.log`.
+- **Turning it off.** `ROGUE_NATIVE_BRIDGE=0` in the env file in use keeps every
+  hook on its scripts; `ROGUE_NATIVE_BRIDGE_<FAMILY>=0` (for example
+  `ROGUE_NATIVE_BRIDGE_CURSOR=0`) does it for one agent.
+- **Managed hooks** (`--managed`) never hand events to the binary.
+
 ### User reassignment / device transfer
 
 Kandji and Jamf re-run scripts on every enforcement cycle (default

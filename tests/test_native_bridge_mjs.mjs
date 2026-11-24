@@ -1,7 +1,7 @@
 // tests/test_native_bridge_mjs.mjs — the Gemini hand-off seam, Node twin of test_native_bridge_sh.sh:
-// native-bridge-install.mjs downloads the pinned native bridge through a mock
-// /api/v1/hooks/download, verifies it against the pin and installs it under
-// ~/.rogue/bin/rogue-hook/<version>/; hook.mjs, heartbeat.mjs and ship-logs.mjs then hand their job
+// native-bridge-install.mjs downloads the native bridge for the first time through a mock
+// /api/v1/hooks/download, verifies it against the pin and installs it at ~/.rogue/bin/rogue-hook;
+// hook.mjs, heartbeat.mjs and ship-logs.mjs then hand their job
 // to it. A stub script stands in for the binary so this needs no Rust build.
 //   node --test tests/test_native_bridge_mjs.mjs
 import { test } from "node:test";
@@ -20,7 +20,8 @@ const WORK = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rogue-nb-mjs
 const PLUGIN = path.join(WORK, "plugin");
 const HOME = path.join(WORK, "home");
 const EMPTY = path.join(WORK, "empty");
-const BIN_DIR = path.join(HOME, ".rogue", "bin", "rogue-hook");
+const BIN_DIR = path.join(HOME, ".rogue", "bin");
+const BIN = path.join(BIN_DIR, "rogue-hook");
 const PLATFORM =
   process.platform === "darwin"
     ? "darwin-universal"
@@ -71,7 +72,8 @@ function pin(version, digest) {
   );
 }
 const EXE_NAME = process.platform === "win32" ? "rogue-hook.exe" : "rogue-hook";
-const installed = (v) => fs.existsSync(path.join(BIN_DIR, v, "rogue-hook"));
+const installed = () => fs.existsSync(BIN);
+const staged = () => (fs.existsSync(path.join(HOME, ".rogue", "updates")) ? fs.readdirSync(path.join(HOME, ".rogue", "updates")) : []);
 const binaryLog = () => {
   try {
     return fs.readFileSync(path.join(HOME, ".rogue", "hook-binary.log"), "utf8");
@@ -136,14 +138,23 @@ test("pin, binary missing: hook.mjs answers itself and starts the download", pos
   assert.equal(r.out, "{}");
   // The log line follows the rename, so wait for both.
   assert.ok(
-    await until(() => installed("0.1.0") && binaryLog().includes("installed")),
+    await until(() => installed() && binaryLog().includes("installed")),
     "the detached download installed it",
   );
   assert.match(binaryLog(), /rogue-hook 0\.1\.0: installed/);
   assert.match(requests[0], /^\/api\/v1\/hooks\/download\?version=0\.1\.0&os=/);
   assert.match(requests[0], /key=test-key$/);
   assert.match(requests[1], /^\/blob\?X-Amz-Signature=abc&X-Amz-Expires=300 /);
-  assert.equal(fs.statSync(path.join(BIN_DIR, "0.1.0", "rogue-hook")).mode & 0o111, 0o111);
+  assert.equal(fs.statSync(BIN).mode & 0o111, 0o111);
+});
+
+test("an installed binary gets the event with no pin", posix, async () => {
+  fs.rmSync(path.join(PLUGIN, "rogue-hook.json"));
+  try {
+    assert.equal((await hook("BeforeTool", "{}")).out, `{"native":"gemini BeforeTool root=${PLUGIN}","stdin":{}}`);
+  } finally {
+    pin("0.1.0", sha(blob));
+  }
 });
 
 test("binary present: every script hands its job, payload and plugin root to it", posix, async () => {
@@ -178,7 +189,7 @@ test("a binary that outlives the budget is killed and the fail-open answer writt
 });
 
 test("a binary another user could replace never runs", posix, async () => {
-  const bin = path.join(BIN_DIR, "0.1.0", "rogue-hook");
+  const bin = BIN;
   const native = `{"native":"gemini BeforeTool root=${PLUGIN}","stdin":{}}`;
   fs.chmodSync(bin, 0o757);
   assert.equal((await hook("BeforeTool", "{}", { ROGUE_API_KEY: "" })).out, "{}");
@@ -190,11 +201,12 @@ test("a binary another user could replace never runs", posix, async () => {
 });
 
 test("an install root with a directory above it another user could replace: no exec, no installer", posix, async () => {
-  const above = path.join(HOME, ".rogue", "bin");
+  const above = path.join(HOME, ".rogue");
+  const saved = path.join(WORK, "saved-bin");
   fs.chmodSync(above, 0o775);
   try {
     assert.equal((await hook("BeforeTool", "{}", { ROGUE_API_KEY: "" })).out, "{}");
-    pin("0.6.0", sha(blob));
+    fs.renameSync(BIN, saved);
     requests = [];
     const r = await hook("BeforeTool", "{}", { ROGUE_API_KEY: "", ROGUE_NATIVE_BRIDGE_RETRY: "0" });
     assert.equal(r.out, "{}", "a missing binary there keeps the script");
@@ -202,11 +214,11 @@ test("an install root with a directory above it another user could replace: no e
     assert.deepEqual(requests, [], "no installer was started");
     await install();
     assert.deepEqual(requests, [], "the installer refuses it too");
-    assert.ok(binaryLog().includes(`0.6.0: ${path.join(BIN_DIR, "0.6.0")} is not protected from other users`));
-    assert.deepEqual(fs.readdirSync(BIN_DIR).filter((f) => f.includes("0.6.0")), [], "nothing written");
+    assert.ok(binaryLog().includes(`0.1.0: ${BIN_DIR} is not protected from other users`));
+    assert.equal(installed(), false, "nothing written");
   } finally {
     fs.chmodSync(above, 0o755);
-    pin("0.1.0", sha(blob));
+    fs.renameSync(saved, BIN);
   }
 });
 
@@ -216,12 +228,19 @@ test("an install root reached through a symlink: only root's own link is followe
   try {
     const viaLink = { ROGUE_NATIVE_BRIDGE_DIR: link, ROGUE_API_KEY: "", ROGUE_NATIVE_BRIDGE_RETRY: "0" };
     assert.equal((await hook("BeforeTool", "{}", viaLink)).out, "{}", "our own symlink keeps the script");
-    pin("0.7.0", sha(blob));
+    const emptyBin = path.join(WORK, "empty-bin");
+    const emptyLink = path.join(WORK, "empty-link");
+    fs.mkdirSync(emptyBin, { recursive: true });
+    fs.symlinkSync(emptyBin, emptyLink);
     requests = [];
-    assert.equal((await hook("BeforeTool", "{}", viaLink)).out, "{}", "a missing binary under it too");
+    assert.equal(
+      (await hook("BeforeTool", "{}", { ...viaLink, ROGUE_NATIVE_BRIDGE_DIR: emptyLink })).out,
+      "{}",
+      "a missing binary under it too",
+    );
     await new Promise((res) => setTimeout(res, 2000));
     assert.deepEqual(requests, [], "and starts no installer");
-    assert.deepEqual(fs.readdirSync(BIN_DIR).filter((f) => f.includes("0.7.0")), [], "nothing written");
+    assert.deepEqual(fs.readdirSync(emptyBin), [], "nothing written");
     // Only root can chown a link: report root as this one's owner to the rule itself.
     const { dirChainIsProtected } = await import(pathToFileURL(path.join(PLUGIN, "scripts", "shared.mjs")).href);
     const lstat = fs.lstatSync;
@@ -230,11 +249,11 @@ test("an install root reached through a symlink: only root's own link is followe
       return p === link ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, { uid: 0 }) : st;
     };
     try {
-      assert.equal(dirChainIsProtected(path.join(link, "0.1.0")), true, "a root-owned symlink is followed");
+      assert.equal(dirChainIsProtected(link), true, "a root-owned symlink is followed");
     } finally {
       fs.lstatSync = lstat;
     }
-    assert.equal(dirChainIsProtected(path.join(link, "0.1.0")), false);
+    assert.equal(dirChainIsProtected(link), false);
     // macOS keeps /var as a link root owns: the real thing, end to end.
     if (process.platform === "darwin" && BIN_DIR.startsWith("/private/var/")) {
       const viaVar = BIN_DIR.slice("/private".length);
@@ -275,19 +294,48 @@ test("managed hooks, kill switches and a relative root keep the script", posix, 
   );
 });
 
-test("already installed: no download", posix, async () => {
+test("already installed: no download, and a binary that updated itself is never replaced", posix, async () => {
+  const before = fs.readFileSync(BIN);
+  fs.writeFileSync(BIN, '#!/bin/sh\necho "rogue-hook 9.9.9"\n', { mode: 0o755 });
+  try {
+    await install();
+    assert.deepEqual(requests, []);
+    assert.match(fs.readFileSync(BIN, "utf8"), /9\.9\.9/, "the newer binary stays");
+  } finally {
+    fs.writeFileSync(BIN, before, { mode: 0o755 });
+  }
+});
+
+test("an update lock held by the binary: the installer leaves the work to it", posix, async () => {
+  fs.rmSync(BIN);
+  const lock = path.join(HOME, ".rogue", ".self-update.lock");
+  const holder = spawn(
+    "perl",
+    ["-MFcntl=:flock", "-e", '$| = 1; open(my $l, ">>", shift) or die; flock($l, LOCK_EX) or die; print "held\n"; sleep 30', lock],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const closed = new Promise((res) => holder.once("close", res));
+  await new Promise((res) => holder.stdout.once("data", res));
+  try {
+    await install();
+    assert.deepEqual(requests, [], "no request while it is held");
+    assert.equal(installed(), false);
+  } finally {
+    holder.kill("SIGKILL");
+    await closed;
+  }
   await install();
-  assert.deepEqual(requests, []);
+  assert.equal(installed(), true, "installed once it is free");
 });
 
 test("a download that does not match the pin is never installed", posix, async () => {
+  fs.rmSync(BIN, { force: true });
   stub("0.2.0");
   pin("0.2.0", "0".repeat(64));
   await install();
-  assert.equal(installed("0.2.0"), false);
+  assert.equal(installed(), false);
   assert.match(binaryLog(), /sha256 mismatch/);
-  assert.deepEqual(fs.readdirSync(path.join(BIN_DIR, "0.2.0")), [], "no temp file left");
-  assert.equal(fs.existsSync(path.join(BIN_DIR, ".lock-0.2.0")), false, "the lock is released");
+  assert.deepEqual(staged(), [], "no temp file left");
   const r = await hook("BeforeTool", "{}", {
     ROGUE_API_KEY: "",
     HOME: EMPTY,
@@ -300,7 +348,7 @@ test("a download that does not match the pin is never installed", posix, async (
 test("a binary that reports another version is not installed", posix, async () => {
   pin("0.3.0", sha(blob));
   await install();
-  assert.equal(installed("0.3.0"), false);
+  assert.equal(installed(), false);
   assert.match(binaryLog(), /0\.3\.0: downloaded binary does not run here/);
 });
 
@@ -313,7 +361,7 @@ test("no API key installs nothing", posix, async () => {
   stub("0.4.0");
   pin("0.4.0", sha(blob));
   await install({ HOME: EMPTY });
-  assert.equal(installed("0.4.0"), false);
+  assert.equal(installed(), false);
   assert.deepEqual(requests, []);
 });
 
@@ -322,27 +370,21 @@ test("no API key installs nothing", posix, async () => {
 test("Windows rule: only the per-user default root, with no link along the way", async () => {
   const { inUserRoot } = await import(pathToFileURL(path.join(PLUGIN, "scripts", "shared.mjs")).href);
   const home = path.join(WORK, "win-home");
-  const root = path.join(home, ".rogue", "bin", "rogue-hook");
-  fs.mkdirSync(path.join(root, "0.1.0"), { recursive: true });
-  fs.writeFileSync(path.join(root, "0.1.0", EXE_NAME), "");
-  assert.equal(inUserRoot(path.join(root, "0.1.0", EXE_NAME), home), true, "installed binary");
-  assert.equal(inUserRoot(path.join(root, "0.9.0", EXE_NAME), home), true, "not installed yet");
-  assert.equal(
-    inUserRoot(path.join(home, ".ROGUE", "bin", "rogue-hook", "0.9.0", EXE_NAME), home),
-    true,
-    "compared case-insensitively",
-  );
-  assert.equal(inUserRoot(path.join(root, "0.1.0", EXE_NAME), ""), false, "no user profile");
-  assert.equal(inUserRoot(path.join(WORK, "custom", "0.1.0", EXE_NAME), home), false, "custom root");
-  assert.equal(
-    inUserRoot(path.join(`${root}-other`, "0.1.0", EXE_NAME), home),
-    false,
-    "a sibling that only shares the prefix",
-  );
+  const root = path.join(home, ".rogue", "bin");
+  assert.equal(inUserRoot(path.join(root, EXE_NAME), home), true, "not installed yet");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, EXE_NAME), "");
+  assert.equal(inUserRoot(path.join(root, EXE_NAME), home), true, "installed binary");
+  assert.equal(inUserRoot(path.join(home, ".ROGUE", "bin", EXE_NAME), home), true, "compared case-insensitively");
+  assert.equal(inUserRoot(path.join(root, EXE_NAME), ""), false, "no user profile");
+  assert.equal(inUserRoot(path.join(WORK, "custom", EXE_NAME), home), false, "custom root");
+  assert.equal(inUserRoot(path.join(`${root}-other`, EXE_NAME), home), false, "a sibling that only shares the prefix");
   if (process.platform !== "win32") {
+    const linked = path.join(WORK, "linked-home");
     fs.mkdirSync(path.join(WORK, "elsewhere"), { recursive: true });
-    fs.symlinkSync(path.join(WORK, "elsewhere"), path.join(root, "0.2.0"));
-    assert.equal(inUserRoot(path.join(root, "0.2.0", EXE_NAME), home), false, "a link along the way");
+    fs.mkdirSync(path.join(linked, ".rogue"), { recursive: true });
+    fs.symlinkSync(path.join(WORK, "elsewhere"), path.join(linked, ".rogue", "bin"));
+    assert.equal(inUserRoot(path.join(linked, ".rogue", "bin", EXE_NAME), linked), false, "a link along the way");
   }
 });
 
@@ -359,7 +401,7 @@ test("under umask 002 the installer still creates directories the hand-off accep
     const child = spawn("/bin/sh", ["-c", 'umask 002; exec "$0" "$@"', process.execPath, script("native-bridge-install.mjs"), PLUGIN], { env });
     child.on("close", resolve);
   });
-  const bin = path.join(home, ".rogue", "bin", "rogue-hook", "0.1.0", "rogue-hook");
+  const bin = path.join(home, ".rogue", "bin", "rogue-hook");
   assert.ok(fs.existsSync(bin), "installed");
   for (let d = path.dirname(bin); d !== home; d = path.dirname(d)) {
     assert.equal(fs.statSync(d).mode & 0o022, 0, `${d} is writable by group or other`);

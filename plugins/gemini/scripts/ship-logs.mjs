@@ -760,7 +760,7 @@ class Shipper {
 
   async run() {
     this.env = loadEnv(this.pluginRoot);
-    // The pinned native bridge ships the same files with the same state once it is installed.
+    // The native bridge ships the same files with the same state once it is installed.
     if (!this.shipAllLogs) {
       nativeHandoff(this.pluginRoot, this.shipperSlug, ["ship-logs", this.shipperSlug, this.shipperVersion], {
         settings: this.env,

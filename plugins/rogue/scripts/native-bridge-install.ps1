@@ -1,6 +1,7 @@
-# Installs the native bridge pinned in <plugin>\rogue-hook.json - SHARED, started detached by
-# native-bridge.ps1 whenever the pinned version is missing. Twin of native-bridge-install.sh; read
-# that file for the contract.
+# Installs the native bridge for the first time - SHARED, started detached by native-bridge.ps1
+# whenever %USERPROFILE%\.rogue\bin\rogue-hook.exe is missing and the plugin ships rogue-hook.json.
+# Twin of native-bridge-install.sh; read that file for the contract. On Windows the first download
+# is the standalone rogue-hook.exe; its first self-update moves the install to the launcher layout.
 #
 # ONE COPY IS EDITABLE: scripts/shared/native-bridge-install.ps1 (see sync-shared-scripts.sh).
 param([string]$Root = '')
@@ -13,6 +14,12 @@ try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root '
 $version = Get-RogueNativeVersion $Root
 if (-not $version) { exit 0 }
 $onWindows = -not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)
+# macOS and Linux have one installer, the sh one (.NET cannot lock a file on macOS).
+if (-not $onWindows) {
+    $sh = Join-Path $Root 'scripts/native-bridge-install.sh'
+    if (Test-Path -LiteralPath $sh -PathType Leaf) { & /bin/sh $sh $Root }
+    exit 0
+}
 $home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 
 # Same env file rule as the hooks, read first so ROGUE_NATIVE_BRIDGE_DIR resolves as theirs does: the
@@ -33,8 +40,8 @@ foreach ($f in $files) {
 }
 
 $dir = Get-RogueNativeDir $creds
-$dest = Join-Path (Join-Path $dir $version) (Get-RogueNativeExe)
-if (Test-Path -LiteralPath $dest -PathType Leaf) { exit 0 }
+$dest = Join-Path $dir (Get-RogueNativeExe)
+if (Test-Path -LiteralPath $dest) { exit 0 }
 
 # The hand-off runs only a binary in directories nobody else can write, whatever the umask.
 function New-RogueDir {
@@ -46,31 +53,30 @@ $rogueDir = Join-Path $home_ '.rogue'
 New-RogueDir $rogueDir
 $logPath = Join-Path $rogueDir 'hook-binary.log'
 function Say { param([string]$Msg) Add-Content -LiteralPath $logPath -Encoding UTF8 -Value "$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) rogue-hook ${version}: $Msg" }
+function Give-Up { param([string]$Why) Say "$Why; the script bridge handles events"; exit 0 }
+
+# One install or update at a time: the binary's own OS file lock (std's LockFileEx over the whole
+# file, which this byte-range lock overlaps), so this never races a self-update. Taken without
+# waiting, and released by the OS if this process dies.
+$lockStream = $null
+try {
+    $lockStream = [System.IO.File]::Open((Join-Path $rogueDir '.self-update.lock'), 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+    $lockStream.Lock(0, 1)
+} catch {
+    if ($lockStream) { $lockStream.Dispose() }
+    exit 0
+}
+# The holder before this one may have installed it.
+if (Test-Path -LiteralPath $dest) { exit 0 }
+
 # Same rule as the hand-off, before and after creating the install directory: another user must not
 # be able to replace any directory above it.
 if (-not (Get-Command Test-RogueDirChain -ErrorAction SilentlyContinue)) { exit 0 }
-$versionDir = Join-Path $dir $version
-function Test-Unsafe { if (-not (Test-RogueDirChain $versionDir $dir)) { Say "$versionDir is not protected from other users; the script bridge handles events"; exit 0 } }
-Test-Unsafe
-New-RogueDir $dir
-Test-Unsafe
+if (-not (Test-RogueDirChain $dir $dir)) { Give-Up "$dir is not protected from other users" }
 
-# One attempt at a time, and not again until the retry interval has passed.
-$lock = Join-Path $dir ".lock-$version"
-# The lock is a file opened CreateNew, which fails atomically when it exists; one older than 10
-# minutes is a crashed attempt's and is broken once.
-function Lock-RogueInstall {
-    try { [System.IO.File]::Open($lock, 'CreateNew', 'Write').Dispose(); return $true } catch { return $false }
-}
-if (-not (Lock-RogueInstall)) {
-    $lockItem = Get-Item -Force -LiteralPath $lock -ErrorAction SilentlyContinue
-    if ($lockItem -and $lockItem.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-10)) { exit 0 }
-    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
-    if (-not (Lock-RogueInstall)) { exit 0 }
-}
 $tmp = ''
 try {
-    $stamp = Join-Path $dir ".attempt-$version"
+    $stamp = Join-Path $rogueDir '.native-bridge-attempt'
     $retry = 900
     if ($env:ROGUE_NATIVE_BRIDGE_RETRY -match '^[0-9]{1,9}$') { $retry = [int]$env:ROGUE_NATIVE_BRIDGE_RETRY }
     $last = Get-Item -Force -LiteralPath $stamp -ErrorAction SilentlyContinue
@@ -78,7 +84,6 @@ try {
         $last.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddSeconds(-$retry)) { exit 0 }
     Set-Content -LiteralPath $stamp -Value ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
 
-    function Give-Up { param([string]$Why) Say "$Why; the script bridge handles events"; exit 0 }
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch {}
@@ -109,9 +114,12 @@ try {
     } catch { Give-Up "no download URL for $platform" }
     if (-not $resp.url) { Give-Up "no download URL for $platform" }
 
-    New-RogueDir $versionDir
-    if (-not (Test-RogueDirChain $versionDir $dir)) { Give-Up "$versionDir is not protected from other users" }
-    $tmp = Join-Path (Join-Path $dir $version) ".rogue-hook.download.$PID$(if ($onWindows) { '.exe' })"
+    # Staged beside the binary's own updates: on the same volume, so the move is a rename.
+    $stage = Join-Path $rogueDir 'updates'
+    New-RogueDir $stage
+    New-RogueDir $dir
+    if (-not (Test-RogueDirChain $dir $dir)) { Give-Up "$dir is not protected from other users" }
+    $tmp = Join-Path $stage "rogue-hook.first.$PID$(if ($onWindows) { '.exe' })"
     try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $resp.url -OutFile $tmp } catch { Give-Up 'download failed' }
     $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
     if ($got -ne $want) { Give-Up "sha256 mismatch: got $got, pinned $want" }
@@ -137,6 +145,6 @@ try {
     Say "installed ($platform)"
 } finally {
     if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+    $lockStream.Dispose()
 }
 exit 0

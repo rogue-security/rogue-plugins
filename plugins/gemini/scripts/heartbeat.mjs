@@ -111,7 +111,7 @@ async function main() {
   const apiKey = env.ROGUE_API_KEY || "";
   if (!apiKey) return; // not configured → no-op
 
-  // The pinned native bridge sends the beacon and ships the log itself once it is installed.
+  // The native bridge sends the beacon and ships the log itself once it is installed.
   nativeHandoff(EXT_ROOT, "gemini", ["heartbeat", "gemini", process.argv[2] || "SessionStart"], {
     settings: env,
     budgetMs: 60000,

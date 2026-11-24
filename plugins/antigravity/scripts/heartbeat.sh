@@ -168,7 +168,7 @@ ship_logs() {
   return 0
 }
 
-# The pinned native bridge sends the beacon and ships the log itself once it is
+# The native bridge sends the beacon and ships the log itself once it is
 # installed. $1 is the surface hook.sh resolved; the bridge validates it the same way.
 handoff_to_native() {
   [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0

@@ -44,7 +44,7 @@ cp "$REPO/plugins/rogue/scripts/heartbeat.sh" \
    "$REPO/plugins/rogue/scripts/env-file.sh" \
    "$REPO/plugins/rogue/scripts/actor.sh" "$ROOT/scripts/"
 echo '{"version":"9.9.9"}' > "$ROOT/.claude-plugin/plugin.json"
-bridge_pin "$ROOT" rogue
+bridge_handoff "$ROOT" rogue
 printf '#!/bin/sh\necho POST >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/bin/curl"
 chmod +x "$TMPROOT/bin/curl"
 echo 'export ROGUE_API_KEY=k' > "$HOME_SB/.rogue-env"
@@ -250,7 +250,7 @@ cp "$REPO/plugins/kiro/scripts/heartbeat.sh" "$REPO/plugins/kiro/scripts/beacon.
    "$REPO/plugins/kiro/scripts/actor.sh" "$REPO/plugins/kiro/scripts/install-id.sh" \
    "$REPO/plugins/kiro/scripts/kiro-host.sh" "$REPO/plugins/kiro/scripts/env-file.sh" "$KIRO_ROOT/scripts/"
 echo '{"name":"rogue","version":"9.9.9"}' > "$KIRO_ROOT/plugin.json"
-bridge_pin "$KIRO_ROOT" kiro
+bridge_handoff "$KIRO_ROOT" kiro
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$SB_CALLS"\nexit 0\n' > "$TMPROOT/kiro-bin/curl"
 chmod +x "$TMPROOT/kiro-bin/curl"
 # kiro-cli 2.21.0's shape: `--version` prints "kiro-cli <X.Y.Z>", and

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# tests/test_native_bridge_sh.sh — the hand-off seam: native-bridge-install.sh downloads the pinned
-# native bridge through a mock /api/v1/hooks/download, verifies it against the pin and installs it
-# under ~/.rogue/bin/rogue-hook/<version>/; hook.sh then hands every event to it. A stub script
-# stands in for the binary so this needs no Rust build.
+# tests/test_native_bridge_sh.sh — the hand-off seam: native-bridge-install.sh downloads the
+# native bridge for the first time through a mock /api/v1/hooks/download, verifies it against the
+# pin and installs it at ~/.rogue/bin/rogue-hook; hook.sh then hands every event to it. A stub
+# script stands in for the binary so this needs no Rust build.
 #
 # Override with TEST_SH=dash to catch bashisms (hooks.json runs every script via `sh`).
 set -euo pipefail
@@ -13,7 +13,8 @@ WORK="$(mktemp -d)"
 PLUGIN="$WORK/plugin"
 SRV="$WORK/srv"
 export HOME="$WORK/home"
-BIN_DIR="$HOME/.rogue/bin/rogue-hook"
+BIN_DIR="$HOME/.rogue/bin"
+BIN="$BIN_DIR/rogue-hook"
 mkdir -p "$HOME" "$SRV"
 cp -R "$REPO/plugins/rogue" "$PLUGIN"
 rm -f "$PLUGIN/rogue-hook.json"
@@ -72,7 +73,9 @@ hook() { # <event> <payload> [extra env...]
     ROGUE_BASE_URL=http://127.0.0.1:9 "$@" "$SH" "$PLUGIN/scripts/hook.sh" "$event"
 }
 log() { cat "$HOME/.rogue/hook-binary.log" 2>/dev/null; }
-installed() { [ -x "$BIN_DIR/$1/rogue-hook" ] && echo present || echo absent; }
+installed() { [ -x "$BIN" ] && echo present || echo absent; }
+reported() { "$BIN" --version 2>/dev/null; }
+staged() { ls -A "$HOME/.rogue/updates" 2>/dev/null; }
 
 fails=0
 check() { # <label> <expected> <actual>
@@ -93,8 +96,9 @@ pin 0.1.0 "$(sha "$SRV/blob")"
 # Under a group-writable umask too: the install must still be one the hand-off accepts.
 check "script answer" "{}" "$(umask 002; hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
 # The log line follows the rename, so wait for both.
-for _ in $(seq 1 100); do [ "$(installed 0.1.0)" = present ] && case "$(log)" in *installed*) break ;; esac; sleep 0.1; done
-check "the detached download installed it" "present" "$(installed 0.1.0)"
+for _ in $(seq 1 100); do [ "$(installed)" = present ] && case "$(log)" in *installed*) break ;; esac; sleep 0.1; done
+check "the detached download installed it" "present" "$(installed)"
+check "at the fixed path" "rogue-hook 0.1.0" "$(reported)"
 contains "log reports install" "rogue-hook 0.1.0: installed" "$(log)"
 contains "lookup carries version and platform" "/api/v1/hooks/download?version=0.1.0&os=" "$(head -n 1 "$SRV/requests")"
 contains "lookup carries the API key" "key=test-key" "$(head -n 1 "$SRV/requests")"
@@ -108,47 +112,49 @@ check "ROGUE_NATIVE_BRIDGE_CLAUDE=0 keeps the script" '{}' "$(hook PreToolUse '{
 check "a relative plugin root never hands off" '{}' "$(cd "$WORK" && printf '{}' | env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT=plugin ROGUE_API_KEY='' HOME="$WORK/empty" "$SH" plugin/scripts/hook.sh PreToolUse)"
 printf 'export ROGUE_NATIVE_BRIDGE=0\nexport ROGUE_API_KEY=test-key\nexport ROGUE_BASE_URL=http://127.0.0.1:9\n' > "$WORK/kill-env"
 mkdir -p "$WORK/kill-home"; cp "$WORK/kill-env" "$WORK/kill-home/.rogue-env"; chmod 600 "$WORK/kill-home/.rogue-env"
-mkdir -p "$WORK/kill-home/.rogue/bin"; cp -R "$BIN_DIR" "$WORK/kill-home/.rogue/bin/"
+mkdir -p "$WORK/kill-home/.rogue/bin"; cp "$BIN" "$WORK/kill-home/.rogue/bin/"
 check "the kill switch works from the env file" '{}' "$(hook PreToolUse '{}' HOME="$WORK/kill-home")"
+rm -f "$PLUGIN/rogue-hook.json"
+check "an installed binary gets the event with no pin" "{\"native\":\"claude PreToolUse root=$PLUGIN\",\"stdin\":{}}" "$(hook PreToolUse '{}')"
+pin 0.1.0 "$(sha "$SRV/blob")"
 check "heartbeat hands off" "{\"native\":\"heartbeat claude root=$PLUGIN\",\"stdin\":}" \
   "$(env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$PLUGIN" "$SH" "$PLUGIN/scripts/heartbeat.sh" SessionStart </dev/null)"
 
 echo "a binary another user could replace never runs"
-chmod o+w "$BIN_DIR/0.1.0/rogue-hook"
+chmod o+w "$BIN"
 check "other-writable binary keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
-chmod 755 "$BIN_DIR/0.1.0/rogue-hook"
-chmod g+w "$BIN_DIR/0.1.0"
+chmod 755 "$BIN"
+chmod g+w "$BIN_DIR"
 check "group-writable directory keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
-chmod 755 "$BIN_DIR/0.1.0"
+chmod 755 "$BIN_DIR"
 check "a protected binary runs again" "{\"native\":\"claude PreToolUse root=$PLUGIN\",\"stdin\":{}}" "$(hook PreToolUse '{}')"
 
 echo "an install root with a directory above it another user could replace: no exec, no installer"
-chmod g+w "$HOME/.rogue/bin"
+chmod g+w "$HOME/.rogue"
 check "group-writable ancestor keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
-pin 0.6.0 "$(sha "$SRV/blob")"
+mv "$BIN" "$WORK/saved-bin"
 : > "$SRV/requests"
 check "a missing binary there keeps the script" '{}' "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
 sleep 2
 check "no installer was started" "" "$(cat "$SRV/requests")"
 install
 check "the installer refuses it too" "" "$(cat "$SRV/requests")"
-contains "and logs why" "rogue-hook 0.6.0: $BIN_DIR/0.6.0 is not protected from other users" "$(log)"
-check "nothing written for it" "" "$(ls -A "$BIN_DIR" | grep 0.6.0)"
-chmod g-w "$HOME/.rogue/bin"
-pin 0.1.0 "$(sha "$SRV/blob")"
+contains "and logs why" "rogue-hook 0.1.0: $BIN_DIR is not protected from other users" "$(log)"
+check "nothing written for it" "absent" "$(installed)"
+chmod g-w "$HOME/.rogue"
+mv "$WORK/saved-bin" "$BIN"
 
 echo "an install root reached through a symlink: only root's own link is followed"
 ln -s "$BIN_DIR" "$WORK/link"
 check "our own symlink keeps the script" '{}' \
   "$(hook PreToolUse '{}' ROGUE_NATIVE_BRIDGE_DIR="$WORK/link" ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
-pin 0.7.0 "$(sha "$SRV/blob")"
+mkdir -p "$WORK/empty-bin"; ln -s "$WORK/empty-bin" "$WORK/empty-link"
 : > "$SRV/requests"
 check "a missing binary under it keeps the script" '{}' \
-  "$(hook PreToolUse '{}' ROGUE_NATIVE_BRIDGE_DIR="$WORK/link" ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
+  "$(hook PreToolUse '{}' ROGUE_NATIVE_BRIDGE_DIR="$WORK/empty-link" ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0)"
 sleep 2
 check "and starts no installer" "" "$(cat "$SRV/requests")"
-check "nothing written under it" "" "$(ls -A "$BIN_DIR" | grep 0.7.0)"
-pin 0.1.0 "$(sha "$SRV/blob")"
+check "nothing written under it" "" "$(ls -A "$WORK/empty-bin")"
 # Only root can chown a link, so a stat wrapper reports root as its owner when asked without -L.
 # (On macOS every case here also runs through /var, a link root owns.)
 mkdir -p "$WORK/root-stat"
@@ -166,23 +172,42 @@ check "a root-owned symlink is followed" "{\"native\":\"claude PreToolUse root=$
   "$(hook PreToolUse '{}' ROGUE_NATIVE_BRIDGE_DIR="$WORK/link" PATH="$WORK/root-stat:$PATH")"
 rm "$WORK/link"
 
-echo "already installed: no download"
+echo "already installed: no download, and a binary that updated itself is never replaced"
+printf '#!/bin/sh\necho "rogue-hook 9.9.9"\n' > "$BIN"
 install
 check "no request" "" "$(cat "$SRV/requests")"
+check "the newer binary stays" "rogue-hook 9.9.9" "$(reported)"
+rm -f "$BIN"
+
+echo "an update lock held by the binary: the installer leaves the work to it"
+LOCKFILE="$HOME/.rogue/.self-update.lock"
+if command -v flock >/dev/null 2>&1; then
+  flock "$LOCKFILE" sleep 5 & HOLDER=$!
+else
+  perl -MFcntl=:flock -e 'open(my $l, ">>", shift) or die; flock($l, LOCK_EX) or die; sleep 5' "$LOCKFILE" & HOLDER=$!
+fi
+sleep 1
+install
+check "no request while it is held" "" "$(cat "$SRV/requests")"
+check "nothing installed" "absent" "$(installed)"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null || true
+install
+check "installed once it is free" "rogue-hook 0.1.0" "$(reported)"
+rm -f "$BIN"
 
 echo "a download that does not match the pin is never installed"
 stub 0.2.0
 pin 0.2.0 "0000000000000000000000000000000000000000000000000000000000000000"
 install
-check "no binary" "absent" "$(installed 0.2.0)"
+check "no binary" "absent" "$(installed)"
 contains "log reports mismatch" "sha256 mismatch" "$(log)"
-check "no temp file left" "" "$(ls "$BIN_DIR/0.2.0" 2>/dev/null)"
+check "no temp file left" "" "$(staged)"
 check "the event stays on the script" "{}" "$(hook PreToolUse '{}' ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=999999 ROGUE_NATIVE_BRIDGE_DIR="$BIN_DIR" HOME="$WORK/empty")"
 
 echo "a binary that reports another version is not installed"
 pin 0.3.0 "$(sha "$SRV/blob")"
 install
-check "no binary" "absent" "$(installed 0.3.0)"
+check "no binary" "absent" "$(installed)"
 contains "log reports it" "does not run here" "$(log)"
 
 echo "a failed attempt is not retried inside the retry interval"
@@ -193,17 +218,25 @@ echo "a binary that never answers --version is killed and not installed"
 stub 0.5.0
 pin 0.5.0 "$(sha "$SRV/blob")"
 install STUB_HANG=1
-check "no binary" "absent" "$(installed 0.5.0)"
+check "no binary" "absent" "$(installed)"
 contains "log reports it" "0.5.0: downloaded binary does not run here" "$(log)"
-check "no temp file left" "" "$(ls -A "$BIN_DIR/0.5.0" 2>/dev/null)"
-check "the lock is released" "absent" "$([ -e "$BIN_DIR/.lock-0.5.0" ] && echo present || echo absent)"
+check "no temp file left" "" "$(staged)"
 
 echo "a missing route answer installs nothing"
 stub 0.4.0
 pin 0.4.0 "$(sha "$SRV/blob")"
 env ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0 ROGUE_BASE_URL='' HOME="$WORK/nokey" \
   "$SH" "$PLUGIN/scripts/native-bridge-install.sh" "$PLUGIN"
-check "no binary without an API key" "absent" "$(installed 0.4.0)"
+check "no binary without an API key" "absent" "$(installed)"
+
+echo "install.sh installs the binary from the pin of a plugin it installed"
+stub 0.1.0
+pin 0.1.0 "$(sha "$SRV/blob")"
+rm -f "$BIN" "$HOME/.rogue/.native-bridge-attempt"
+OUT="$(env ROGUE_API_KEY='' ROGUE_BASE_URL='' ROGUE_INSTALL_LIB_ONLY=1 \
+  bash -c '. "$1/install.sh"; CURSOR_INSTALL_DIR="$2"; install_native_bridge' sh "$REPO" "$PLUGIN" 2>&1)"
+check "installed at the fixed path" "rogue-hook 0.1.0" "$(reported)"
+contains "and says so" "Native bridge" "$OUT"
 
 [ "$fails" -eq 0 ] || { echo "FAIL: $fails check(s)"; exit 1; }
 echo "OK: native bridge hand-off and install"

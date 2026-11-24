@@ -56,7 +56,7 @@ load_env() {
   done
 }
 
-# The native bridge pinned in rogue-hook.json does this script's whole job once it is installed;
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
 # until then this starts its download and carries on. See scripts/native-bridge.sh.
 handoff_native() {
   [ -r "${PLUGIN_ROOT}/scripts/native-bridge.sh" ] || return 0

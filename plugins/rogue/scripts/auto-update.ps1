@@ -125,7 +125,7 @@ if ($env:CLAUDE_PLUGIN_ROOT -and (Test-Path -LiteralPath (Join-Path $env:CLAUDE_
     LogLine 'compiled bundle, updated by the admin; skipping'; exit 0
 }
 
-# The pinned native bridge runs the same check once it is installed.
+# The native bridge runs the same check once it is installed.
 if ($env:CLAUDE_PLUGIN_ROOT) {
     try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $env:CLAUDE_PLUGIN_ROOT 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
     if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {

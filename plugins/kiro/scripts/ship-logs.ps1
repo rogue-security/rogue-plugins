@@ -928,7 +928,7 @@ function Invoke-Main {
 
     Initialize-Args
     Import-ShipEnv
-    # The pinned native bridge ships the same files with the same state once it is installed.
+    # The native bridge ships the same files with the same state once it is installed.
     if ($script:shipAllLogs -ne 1) {
         try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $script:PluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
         if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {

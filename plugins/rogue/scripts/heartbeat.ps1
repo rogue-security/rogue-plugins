@@ -143,7 +143,7 @@ foreach ($f in @('C:\ProgramData\rogue\env', (Join-Path $pluginRoot 'env'), (Joi
 # API-key check below so the ordering cannot regress into reading it too early again.
 Initialize-RogueBeacon $creds
 
-# The pinned native bridge sends the beacon and ships the log itself once it is installed.
+# The native bridge sends the beacon and ships the log itself once it is installed.
 if ($creds['ROGUE_API_KEY']) {
     try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch {}
     if (Get-Command Invoke-RogueNativeHandoff -ErrorAction SilentlyContinue) {
