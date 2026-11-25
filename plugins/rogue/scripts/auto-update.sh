@@ -44,10 +44,10 @@ if [ -f "${CLAUDE_PLUGIN_ROOT:-}/env" ]; then
   exit 0
 fi
 
-# The native bridge runs the same check once it is installed.
+# The native bridge runs the same check once it is installed. Its hook answer is not log text.
 if [ -r "${CLAUDE_PLUGIN_ROOT:-}/scripts/native-bridge.sh" ]; then
   . "${CLAUDE_PLUGIN_ROOT}/scripts/native-bridge.sh"
-  rogue_native_handoff "${CLAUDE_PLUGIN_ROOT}" claude update claude
+  rogue_native_handoff "${CLAUDE_PLUGIN_ROOT}" claude update claude >/dev/null
 fi
 
 # Rate-limit to once per day.
