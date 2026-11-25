@@ -84,13 +84,19 @@ function giveUp(why) {
   process.exit(0);
 }
 
-// macOS ships one universal binary, so its arch is only a label for the route. An x64 Node on an
-// ARM64 Windows machine reports x64 and keeps the real arch in PROCESSOR_ARCHITEW6432.
+// Under x64 emulation on ARM64 Windows (an x64 Git Bash starts the hooks), the process environment
+// and process.arch both say x64; the registry keeps the machine's own arch.
+function windowsArch() {
+  const key = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment";
+  const r = spawnSync("reg", ["query", key, "/v", "PROCESSOR_ARCHITECTURE"], { encoding: "utf8", windowsHide: true });
+  const native = /PROCESSOR_ARCHITECTURE\s+REG_SZ\s+(\S+)/.exec(r.stdout || "")?.[1];
+  return native || process.env.PROCESSOR_ARCHITEW6432 || process.env.PROCESSOR_ARCHITECTURE || "";
+}
+
+// macOS ships one universal binary, so its arch is only a label for the route.
 function platform() {
   if (process.platform === "darwin") return { os: "darwin", arch: "arm64", key: "darwin-universal" };
-  const cpu = IS_WIN
-    ? process.env.PROCESSOR_ARCHITEW6432 || process.env.PROCESSOR_ARCHITECTURE || ""
-    : process.arch;
+  const cpu = IS_WIN ? windowsArch() : process.arch;
   const arch = { x64: "amd64", AMD64: "amd64", arm64: "arm64", ARM64: "arm64" }[cpu];
   const os = IS_WIN ? "windows" : process.platform;
   if (!arch || !["linux", "windows"].includes(os)) giveUp(`unsupported platform ${os}-${cpu}`);

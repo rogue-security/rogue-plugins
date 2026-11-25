@@ -89,8 +89,10 @@ try {
     } catch {}
 
     if ($onWindows) {
-        # An x64 PowerShell on an ARM64 machine reports AMD64 and keeps the real arch in PROCESSOR_ARCHITEW6432.
-        $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+        # Under x64 emulation on ARM64 (an x64 Git Bash starts the hooks), the process environment and
+        # .NET both say AMD64; the registry keeps the machine's own arch.
+        $cpu = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -ErrorAction SilentlyContinue).PROCESSOR_ARCHITECTURE
+        if (-not $cpu) { $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
         $os = 'windows'
         $arch = switch ($cpu) { 'AMD64' { 'amd64' } 'ARM64' { 'arm64' } default { '' } }
         $platform = "windows-$arch"
