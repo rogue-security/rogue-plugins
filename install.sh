@@ -1217,7 +1217,8 @@ install_native_bridge() {
              "$HOME"/.claude/plugins/cache/*/"$PLUGIN_NAME"/*/rogue-hook.json \
              "$HOME"/.codex/plugins/cache/*/"$PLUGIN_NAME"/*/rogue-hook.json \
              "$HOME/.gemini/config/plugins/$PLUGIN_NAME/rogue-hook.json" \
-             "$HOME"/.rogue/plugins/*/rogue-hook.json; do
+             "$HOME"/.rogue/plugins/*/rogue-hook.json \
+             "${CORTEX_HOME:-${SNOWFLAKE_HOME:-$HOME/.snowflake}/cortex}/plugins/rogue-security/rogue-hook.json"; do
     root="${pin%/rogue-hook.json}"
     [ -f "$pin" ] && [ -r "$root/scripts/native-bridge-install.sh" ] || continue
     ROGUE_NATIVE_BRIDGE_RETRY=0 sh "$root/scripts/native-bridge-install.sh" "$root"

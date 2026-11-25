@@ -19,7 +19,7 @@
 # installer.
 #   ROGUE_NATIVE_BRIDGE=0           every family stays on its script bridge
 #   ROGUE_NATIVE_BRIDGE_<FAMILY>=0  one family does (CLAUDE, CODEX, CURSOR, COPILOT, ANTIGRAVITY,
-#                                   KIRO, MUSE, GEMINI)
+#                                   KIRO, MUSE, CORTEX, GEMINI)
 #   ROGUE_NATIVE_BRIDGE_DIR         directory instead of ~/.rogue/bin (tests); a binary there
 #                                   does not update itself
 #
@@ -49,6 +49,7 @@ rogue_native_handoff() {
     antigravity) _rn_off="${ROGUE_NATIVE_BRIDGE_ANTIGRAVITY:-1}" ;;
     kiro)        _rn_off="${ROGUE_NATIVE_BRIDGE_KIRO:-1}" ;;
     muse)        _rn_off="${ROGUE_NATIVE_BRIDGE_MUSE:-1}" ;;
+    cortex)      _rn_off="${ROGUE_NATIVE_BRIDGE_CORTEX:-1}" ;;
     *)           return 0 ;;
   esac
   [ "$_rn_off" = 0 ] && return 0

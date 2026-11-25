@@ -30,7 +30,7 @@ while [ $# -gt 0 ]; do
     *) echo "usage: $0 [--native BIN] [--family F]... [--suite FILE]..." >&2; exit 2 ;;
   esac
 done
-[ ${#FAMILIES[@]} -gt 0 ] || FAMILIES=(claude codex cursor copilot gemini antigravity kiro muse)
+[ ${#FAMILIES[@]} -gt 0 ] || FAMILIES=(claude codex cursor copilot gemini antigravity kiro muse cortex)
 
 # family -> plugin directory and the suites that exercise it.
 plugin_dir() { case "$1" in claude) echo rogue ;; *) echo "$1" ;; esac; }
@@ -42,6 +42,7 @@ suites() {
     kiro) echo "test_hook_sh_kiro.sh test_heartbeat_sh.sh test_status_kiro_sh.sh" ;;
     antigravity) echo "test_hook_sh_antigravity.sh" ;;
     muse) echo "test_muse_sh.sh" ;;
+    cortex) echo "test_cortex_sh.sh" ;;
     gemini) echo "test_hook_mjs.mjs" ;;
     codex) echo "test_hook_sh_codex.sh" ;;
   esac
@@ -66,7 +67,7 @@ if [ -n "$NATIVE_BIN" ]; then
   printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$COUNTER" "$NATIVE_BIN" \
     > "$ROGUE_NATIVE_BRIDGE_DIR/rogue-hook"
   chmod 755 "$ROGUE_NATIVE_BRIDGE_DIR/rogue-hook"
-  for f in claude codex cursor copilot gemini antigravity kiro muse; do
+  for f in claude codex cursor copilot gemini antigravity kiro muse cortex; do
     case " ${FAMILIES[*]} " in *" $f "*) ;; *) export "ROGUE_NATIVE_BRIDGE_$(printf '%s' "$f" | tr '[:lower:]' '[:upper:]')=0" ;; esac
   done
   echo "native bridge: $("$NATIVE_BIN" --version) for: ${FAMILIES[*]}"

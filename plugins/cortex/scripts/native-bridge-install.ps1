@@ -1,0 +1,152 @@
+# Installs the native bridge for the first time - SHARED, started detached by native-bridge.ps1
+# whenever %USERPROFILE%\.rogue\bin\rogue-hook.exe is missing and the plugin ships rogue-hook.json.
+# Twin of native-bridge-install.sh; read that file for the contract. On Windows the first download
+# is the standalone rogue-hook.exe; its first self-update moves the install to the launcher layout.
+#
+# ONE COPY IS EDITABLE: scripts/shared/native-bridge-install.ps1 (see sync-shared-scripts.sh).
+param([string]$Root = '')
+
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+
+if (-not $Root -or -not [System.IO.Path]::IsPathRooted($Root)) { exit 0 }
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/native-bridge.ps1') -ErrorAction Stop))) } catch { exit 0 }
+$version = Get-RogueNativeVersion $Root
+if (-not $version) { exit 0 }
+$onWindows = -not ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows)
+# macOS and Linux have one installer, the sh one (.NET cannot lock a file on macOS).
+if (-not $onWindows) {
+    $sh = Join-Path $Root 'scripts/native-bridge-install.sh'
+    if (Test-Path -LiteralPath $sh -PathType Leaf) { & /bin/sh $sh $Root }
+    exit 0
+}
+$home_ = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+
+# Same env file rule as the hooks, read first so ROGUE_NATIVE_BRIDGE_DIR resolves as theirs does: the
+# first trusted file holding ROGUE_API_KEY is used alone. Without the trust helper no file is read.
+try { . ([scriptblock]::Create((Get-Content -Raw -LiteralPath (Join-Path $Root 'scripts/env-file.ps1') -ErrorAction Stop))) } catch {}
+$creds = @{ ROGUE_API_KEY = $env:ROGUE_API_KEY; ROGUE_BASE_URL = $env:ROGUE_BASE_URL; ROGUE_NATIVE_BRIDGE_DIR = $env:ROGUE_NATIVE_BRIDGE_DIR }
+$machine = if ($onWindows) { Join-Path $env:ProgramData 'rogue\env' } else { '/etc/rogue/env' }
+$files = if (Get-Command Test-RogueEnvFile -ErrorAction SilentlyContinue) { @($machine, (Join-Path $Root 'env'), (Join-Path $home_ '.rogue-env')) } else { @() }
+foreach ($f in $files) {
+    if (-not (Test-RogueEnvFile $f -System:($f -eq $machine))) { continue }
+    $vals = @{}
+    foreach ($line in (Get-Content -LiteralPath $f)) {
+        if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { $vals[$Matches[1]] = $Matches[2].Trim().Trim("'").Trim('"') }
+    }
+    if (-not ([string]$vals['ROGUE_API_KEY']).Trim()) { continue }
+    foreach ($k in @($creds.Keys)) { if ($vals.ContainsKey($k)) { $creds[$k] = $vals[$k] } }
+    break
+}
+
+$dir = Get-RogueNativeDir $creds
+$dest = Join-Path $dir (Get-RogueNativeExe)
+if (Test-Path -LiteralPath $dest) { exit 0 }
+
+# The hand-off runs only a binary in directories nobody else can write, whatever the umask.
+function New-RogueDir {
+    param([string]$Path)
+    if ($onWindows) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
+    else { & /bin/sh -c 'umask 022; mkdir -p -- "$1"' sh $Path }
+}
+$rogueDir = Join-Path $home_ '.rogue'
+New-RogueDir $rogueDir
+$logPath = Join-Path $rogueDir 'hook-binary.log'
+function Say { param([string]$Msg) Add-Content -LiteralPath $logPath -Encoding UTF8 -Value "$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) rogue-hook ${version}: $Msg" }
+function Give-Up { param([string]$Why) Say "$Why; the script bridge handles events"; exit 0 }
+
+# One install or update at a time: the binary's own OS file lock (std's LockFileEx over the whole
+# file, which this byte-range lock overlaps), so this never races a self-update. Taken without
+# waiting, and released by the OS if this process dies.
+$lockStream = $null
+try {
+    $lockStream = [System.IO.File]::Open((Join-Path $rogueDir '.self-update.lock'), 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+    $lockStream.Lock(0, 1)
+} catch {
+    if ($lockStream) { $lockStream.Dispose() }
+    exit 0
+}
+# The holder before this one may have installed it.
+if (Test-Path -LiteralPath $dest) { exit 0 }
+
+# Same rule as the hand-off, before and after creating the install directory: another user must not
+# be able to replace any directory above it.
+if (-not (Get-Command Test-RogueDirChain -ErrorAction SilentlyContinue)) { exit 0 }
+if (-not (Test-RogueDirChain $dir $dir)) { Give-Up "$dir is not protected from other users" }
+
+$tmp = ''
+try {
+    $stamp = Join-Path $rogueDir '.native-bridge-attempt'
+    $retry = 900
+    if ($env:ROGUE_NATIVE_BRIDGE_RETRY -match '^[0-9]{1,9}$') { $retry = [int]$env:ROGUE_NATIVE_BRIDGE_RETRY }
+    $last = Get-Item -Force -LiteralPath $stamp -ErrorAction SilentlyContinue
+    if ($retry -gt 0 -and $last -and $last.LastWriteTimeUtc -le (Get-Date).ToUniversalTime() -and
+        $last.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddSeconds(-$retry)) { exit 0 }
+    Set-Content -LiteralPath $stamp -Value ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    } catch {}
+
+    if ($onWindows) {
+        # Under x64 emulation on ARM64 (an x64 Git Bash starts the hooks), the process environment and
+        # .NET both say AMD64; the registry keeps the machine's own arch.
+        $cpu = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -ErrorAction SilentlyContinue).PROCESSOR_ARCHITECTURE
+        if (-not $cpu) { $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
+        $os = 'windows'
+        $arch = switch ($cpu) { 'AMD64' { 'amd64' } 'ARM64' { 'arm64' } default { '' } }
+        $platform = "windows-$arch"
+    } elseif ($IsMacOS) {
+        $os = 'darwin'; $arch = 'arm64'; $platform = 'darwin-universal'
+    } else {
+        $os = 'linux'
+        $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) { 'X64' { 'amd64' } 'Arm64' { 'arm64' } default { '' } }
+        $platform = "linux-$arch"
+    }
+    if (-not $arch) { Give-Up "unsupported architecture" }
+    $m = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $Root 'rogue-hook.json')), '"' + [regex]::Escape($platform) + '"\s*:\s*"([0-9a-f]+)"')
+    if (-not $m.Success) { Give-Up "no pinned sha256 for $platform" }
+    $want = $m.Groups[1].Value
+
+    if (-not $creds.ROGUE_API_KEY) { Give-Up 'no ROGUE_API_KEY' }
+    $base = if ($creds.ROGUE_BASE_URL) { $creds.ROGUE_BASE_URL.TrimEnd('/') } else { 'https://api.rogue.security' }
+    try {
+        $resp = Invoke-RestMethod -Method Get -TimeoutSec 15 -Headers @{ 'x-rogue-api-key' = $creds.ROGUE_API_KEY } `
+            -Uri "$base/api/v1/hooks/download?version=$version&os=$os&arch=$arch"
+    } catch { Give-Up "no download URL for $platform" }
+    if (-not $resp.url) { Give-Up "no download URL for $platform" }
+
+    # Staged beside the binary's own updates: on the same volume, so the move is a rename.
+    $stage = Join-Path $rogueDir 'updates'
+    New-RogueDir $stage
+    New-RogueDir $dir
+    if (-not (Test-RogueDirChain $dir $dir)) { Give-Up "$dir is not protected from other users" }
+    $tmp = Join-Path $stage "rogue-hook.first.$PID$(if ($onWindows) { '.exe' })"
+    try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $resp.url -OutFile $tmp } catch { Give-Up 'download failed' }
+    $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
+    if ($got -ne $want) { Give-Up "sha256 mismatch: got $got, pinned $want" }
+    if (-not $onWindows) { & chmod 755 $tmp }
+    # Catches a binary this machine cannot run before a hook would hand events to it. Bounded like
+    # native-bridge-install.mjs: one that stalls is killed rather than holding the lock.
+    $reported = ''
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo $tmp, '--version'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $probe = [System.Diagnostics.Process]::Start($psi)
+        $read = $probe.StandardOutput.ReadToEndAsync()
+        if ($probe.WaitForExit(10000)) { $reported = $read.Result.TrimEnd("`r", "`n") }
+        else { try { $probe.Kill() } catch {}; [void]$probe.WaitForExit(5000) }
+    } catch {}
+    if ($reported -ne "rogue-hook $version") { Give-Up 'downloaded binary does not run here' }
+    Move-Item -LiteralPath $tmp -Destination $dest -Force
+    if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) { Give-Up "cannot install $dest" }
+    $tmp = ''
+    Remove-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue
+    Say "installed ($platform)"
+} finally {
+    if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    $lockStream.Dispose()
+}
+exit 0

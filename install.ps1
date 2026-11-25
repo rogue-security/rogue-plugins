@@ -1020,9 +1020,11 @@ if ($hasCopilot) {
 # Native bridge: installs %USERPROFILE%\.rogue\bin\rogue-hook.exe now, from the rogue-hook.json pin
 # of a plugin this run installed, so the first hook event already runs it. Every plugin of a release
 # carries the same pin. Non-fatal: when it fails, the hooks install it on their own.
+$nativeCortexDir = if ($env:CORTEX_HOME) { $env:CORTEX_HOME } elseif ($env:SNOWFLAKE_HOME) { Join-Path $env:SNOWFLAKE_HOME 'cortex' } else { [IO.Path]::Combine($env:USERPROFILE, '.snowflake', 'cortex') }
 $nativePins = @(
     (Join-Path $env:USERPROFILE '.cursor\plugins\local\rogue\rogue-hook.json'),
-    (Join-Path $env:USERPROFILE '.gemini\config\plugins\rogue\rogue-hook.json')
+    (Join-Path $env:USERPROFILE '.gemini\config\plugins\rogue\rogue-hook.json'),
+    [IO.Path]::Combine($nativeCortexDir, 'plugins', 'rogue-security', 'rogue-hook.json')
 ) + @(Get-ChildItem -Path (Join-Path $env:USERPROFILE '.claude\plugins\cache\*\rogue\*\rogue-hook.json'),
     (Join-Path $env:USERPROFILE '.codex\plugins\cache\*\rogue\*\rogue-hook.json'),
     (Join-Path $env:USERPROFILE '.rogue\plugins\*\rogue-hook.json') -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })

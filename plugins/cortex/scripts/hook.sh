@@ -11,6 +11,12 @@ for file in /etc/rogue/env "$PLUGIN_ROOT/env" "$HOME/.rogue-env"; do
     . "$file"; break
   fi
 done
+# The native bridge (~/.rogue/bin/rogue-hook) does this script's whole job once it is installed;
+# until then this starts its download and carries on. See scripts/native-bridge.sh.
+if [ -r "$PLUGIN_ROOT/scripts/native-bridge.sh" ]; then
+  . "$PLUGIN_ROOT/scripts/native-bridge.sh"
+  rogue_native_handoff "$PLUGIN_ROOT" cortex cortex "$EVENT"
+fi
 . "$PLUGIN_ROOT/scripts/install-id.sh"
 ROGUE_LOG_FILE="${ROGUE_LOG_FILE:-${ROGUE_LOG_DIR:-$HOME/.rogue/logs}/cortex.log}"
 log() {
