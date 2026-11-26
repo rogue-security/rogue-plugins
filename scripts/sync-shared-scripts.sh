@@ -43,6 +43,10 @@ ROWS=(
   "env-file.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
   "git-identity.sh|rogue codex cursor copilot antigravity kiro muse cortex"
   "git-identity.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
+  "native-bridge.sh|rogue codex cursor copilot antigravity kiro muse cortex"
+  "native-bridge.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
+  "native-bridge-install.sh|rogue codex cursor copilot antigravity kiro muse cortex"
+  "native-bridge-install.ps1|rogue codex cursor copilot antigravity kiro muse cortex"
   "actor.sh|codex cursor copilot antigravity kiro muse cortex"
   "actor.ps1|codex cursor copilot antigravity kiro muse cortex"
 )

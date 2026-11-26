@@ -17,7 +17,8 @@ function Read-Text { param([string]$Path) [IO.File]::ReadAllText($Path) }
 
 $H = Join-Path ([IO.Path]::GetTempPath()) ("muse-ps1 ' home-" + [IO.Path]::GetRandomFileName())
 New-Item -ItemType Directory -Path $H | Out-Null
-$env:USERPROFILE = $H; $env:XDG_CONFIG_HOME = Join-Path $H '.config'
+# HOME too: off Windows, a native child resolves the home from it.
+$env:USERPROFILE = $H; $env:HOME = $H; $env:XDG_CONFIG_HOME = Join-Path $H '.config'
 $S = [IO.Path]::Combine($H, '.config', 'muse', 'settings.json')
 $Hooks = [IO.Path]::Combine($H, '.rogue', 'plugins', 'muse', 'hooks.json')
 try {
@@ -49,6 +50,19 @@ try {
     [IO.File]::WriteAllText($S, '{}'); New-Item -ItemType Directory -Path "$S.rogue-lock" | Out-Null
     Check 'refuses while locked' { -not (Run @()) -and (Read-Text $S) -ceq '{}' }
     Remove-Item "$S.rogue-lock"
+    # A bundle without a pin removes the installed one; when that fails the install does too, or the
+    # hooks would keep handing events to the old binary. A directory stands in for an undeletable pin.
+    if (-not (Test-Path ([IO.Path]::Combine($Repo, 'plugins', 'muse', 'rogue-hook.json')))) {
+        $pinDir = [IO.Path]::Combine($H, '.rogue', 'plugins', 'muse', 'rogue-hook.json')
+        New-Item -ItemType Directory -Force -Path (Join-Path $pinDir 'x') | Out-Null
+        Check 'an old pin that cannot be removed fails the install' {
+            $ErrorActionPreference = 'Continue'
+            # Each stderr line as plain text: Windows PowerShell wraps an error record when formatting it.
+            $out = (& $PsExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Scripts 'install.ps1') 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            $LASTEXITCODE -ne 0 -and $out.Contains('Cannot remove the old native bridge pin') -and (Read-Text $S) -ceq '{}'
+        }
+        Remove-Item -Recurse -Force -LiteralPath $pinDir
+    }
 
     # hook.ps1 against an in-process mock of the Rogue API.
     Run @() | Out-Null

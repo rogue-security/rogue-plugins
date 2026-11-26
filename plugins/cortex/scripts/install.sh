@@ -46,6 +46,8 @@ mkdir "$LOCK" 2>/dev/null || die "Another Cortex Code installer is running, or a
 NEW="$CORTEX_DIR/plugins/.rogue-security.new-$$"
 trap 'rm -rf "$NEW" "$NEW.old" "$LOCK"' EXIT
 mkdir "$NEW" && cp -R "$SOURCE/.cortex-plugin" "$SOURCE/hooks" "$SOURCE/scripts" "$NEW/" || die "Cannot copy the bridge to $NEW"
+# The native bridge pin travels with the scripts; a bundle without one stays on them.
+[ ! -f "$SOURCE/rogue-hook.json" ] || cp "$SOURCE/rogue-hook.json" "$NEW/" || die "Cannot copy the bridge to $NEW"
 chmod -R go-w "$NEW"
 # An update keeps a credential file placed in the bridge folder.
 [ ! -f "$DEST/env" ] || cp -p "$DEST/env" "$NEW/env" || die "Cannot keep $DEST/env"

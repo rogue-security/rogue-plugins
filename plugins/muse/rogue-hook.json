@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "sha256": {
+    "darwin-universal": "ea00e044b52840d66b79e080ec6354e542986ce1ee015a9806b1c1a45428b788",
+    "linux-amd64": "5b832ad949bf9e305b45e2ada8fc29e65432a34dcebf6039e98ebfd9b442ad24",
+    "linux-arm64": "b667254b343608f453f699dad89cf781711216b27b1c937a10d30ba9d4097db3",
+    "windows-amd64": "7c0ca77ad3d981b86aa79edde456006fb34435cca0cc26ea07836d308003c521",
+    "windows-arm64": "35ea9d4e6da3eda850455000285e564d1b79fd3455aa390e966051dda53a7570"
+  }
+}

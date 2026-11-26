@@ -1,5 +1,5 @@
 {
   "name": "rogue-security",
-  "version": "0.2.0",
+  "version": "2.0.0",
   "description": "Rogue Security runtime hooks for Snowflake Cortex Code (CLI and Desktop)"
 }

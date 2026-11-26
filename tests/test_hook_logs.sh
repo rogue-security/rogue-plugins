@@ -87,7 +87,9 @@ fi
 fire() {
   _slug=$1; _home=$2; shift 2
   ( cd "$REPO" || exit 1
-    export HOME="$_home" ROGUE_API_KEY='' ROGUE_LOG_FILE='' ROGUE_LOG_DIR='' ROGUE_LOG_MAX_BYTES=''
+    # The plugins ship a rogue-hook.json pin, so with the bridge on, an event starts the first
+    # download in the background and it writes under ~/.rogue too. This suite tests the script logs.
+    export HOME="$_home" ROGUE_API_KEY='' ROGUE_LOG_FILE='' ROGUE_LOG_DIR='' ROGUE_LOG_MAX_BYTES='' ROGUE_NATIVE_BRIDGE=0
     for _kv in "$@"; do export "${_kv?}"; done
     printf '{}' | dispatch "$_slug" "$(event_for "$_slug")" >/dev/null 2>&1 )
 }
@@ -177,7 +179,7 @@ for pair in 'cli:cli' 'desktop:desktop' 'cowork:cowork' 'vscode-extension:cli' '
   _sfi=$((_sfi + 1))
   home="$TMPROOT/sf-$_sfi"; mkdir -p "$home"
   ( cd "$REPO" || exit 1
-    export HOME="$home" ROGUE_API_KEY='' ROGUE_LOG_FILE='' ROGUE_LOG_DIR='' ROGUE_LOG_MAX_BYTES=''
+    export HOME="$home" ROGUE_API_KEY='' ROGUE_LOG_FILE='' ROGUE_LOG_DIR='' ROGUE_LOG_MAX_BYTES='' ROGUE_NATIVE_BRIDGE=0
     export CLAUDE_CODE_ENTRYPOINT="$ep" CLAUDE_PLUGIN_ROOT="$REPO/plugins/rogue"
     printf '{}' | "$SH" "$REPO/plugins/rogue/scripts/hook.sh" PreToolUse >/dev/null 2>&1 )
   got=$(sed -n 's/.*provider=claude surface=\([a-z_]*\) event=.*/\1/p' "$home/.rogue/logs/claude.log" 2>/dev/null)

@@ -116,7 +116,6 @@ if [ -n "$KEY" ]; then
     printf 'export ROGUE_API_KEY=%q\n'              "$KEY"
     printf 'export ROGUE_PRETOOLUSE_ON_BLOCK=%q\n'  "$MODE"
     [ -n "$BASE_URL" ] && printf 'export ROGUE_BASE_URL=%q\n' "$BASE_URL"
-    echo 'export ROGUE_AUTO_UPDATE=0'
   } > "$STAGE/env"
   chmod 600 "$STAGE/env"
 fi

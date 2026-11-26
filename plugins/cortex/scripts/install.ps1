@@ -41,6 +41,9 @@ try {
     } else {
         New-Item -ItemType Directory -Path $New | Out-Null
         foreach ($dir in '.cortex-plugin', 'hooks', 'scripts') { Copy-Item -LiteralPath (Join-Path $Source $dir) -Destination $New -Recurse -Force }
+        # The native bridge pin travels with the scripts; a bundle without one stays on them.
+        $pin = Join-Path $Source 'rogue-hook.json'
+        if (Test-Path -LiteralPath $pin -PathType Leaf) { Copy-Item -LiteralPath $pin -Destination $New -Force }
         $map = [ordered]@{}
         foreach ($event in $Events) {
             $map[$event] = @([ordered]@{ matcher = '*'; hooks = @([ordered]@{ type = 'command'; command = (Get-HookCommand $event); timeout = 10 }) })

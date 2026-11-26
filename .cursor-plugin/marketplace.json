@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "rogue-security",
-      "version": "1.1.7",
+      "version": "2.0.0",
       "description": "Rogue Security AIDR — real-time AI agent detection and response for Cursor",
       "author": {
         "name": "Rogue Security",
