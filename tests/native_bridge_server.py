@@ -1,12 +1,14 @@
 """
 Mock of GET /api/v1/hooks/download and the presigned download it points to, for the
 native bridge install tests. Appends "<path> key=<x-rogue-api-key>" per request to
-<dir>/requests and serves <dir>/blob as the binary. POSTed hook events get {}.
+<dir>/requests and serves <dir>/blob as the binary, with <dir>/signature as the route's
+signature when that file exists. POSTed hook events get {}.
 
 Usage: python3 native_bridge_server.py <port> <dir>
 Port 0 picks a free port; once listening, the server writes the port it got to <dir>/port.
 """
 import http.server
+import json
 import socketserver
 import os
 import sys
@@ -26,8 +28,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with open(f"{srv}/requests", "a") as f:
             f.write(f"{self.path} key={self.headers.get('x-rogue-api-key')}\n")
         if self.path.startswith("/api/v1/hooks/download?"):
-            url = f"http://127.0.0.1:{port}/blob?X-Amz-Signature=abc&X-Amz-Expires=300"
-            body = f'{{"url":"{url}"}}'.encode()
+            answer = {"url": f"http://127.0.0.1:{port}/blob?X-Amz-Signature=abc&X-Amz-Expires=300"}
+            if os.path.exists(f"{srv}/signature"):
+                with open(f"{srv}/signature") as f:
+                    answer["signature"] = f.read()
+            body = json.dumps(answer).encode()
         else:
             with open(f"{srv}/blob", "rb") as f:
                 body = f.read()

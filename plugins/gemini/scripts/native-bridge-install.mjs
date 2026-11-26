@@ -8,8 +8,9 @@
 //
 // Downloads through GET /api/v1/hooks/download with the API key, then installs only a file whose
 // sha256 matches the pin and whose --version reports the pinned version, by an atomic rename onto
-// ~/.rogue/bin/rogue-hook[.exe], under the binary's own update lock and only while that path is
-// still empty. Any failure leaves nothing at that path, so the script bridge keeps handling events.
+// ~/.rogue/bin/rogue-hook[.exe], with the route's signature staged beside it for the macOS
+// endpoint, under the binary's own update lock and only while that path is still empty. Any
+// failure leaves nothing at that path, so the script bridge keeps handling events.
 // A failed attempt is retried after ROGUE_NATIVE_BRIDGE_RETRY seconds (default 900, numeric zero =
 // every time), never per event. Every attempt's outcome is appended to ~/.rogue/hook-binary.log.
 
@@ -26,7 +27,7 @@ const now = () => Math.floor(Date.now() / 1000);
 let version = "";
 let tmp = "";
 process.on("exit", () => {
-  if (tmp) fs.rmSync(tmp, { force: true });
+  if (tmp) for (const f of [tmp, `${tmp}.sig`]) fs.rmSync(f, { force: true });
 });
 
 // The lock is taken without waiting and released by the OS when its holder dies; the installer runs
@@ -155,12 +156,13 @@ async function main() {
   if (!apiKey) giveUp("no ROGUE_API_KEY");
   const base = (env.ROGUE_BASE_URL || "https://api.rogue.security").replace(/\/+$/, "");
   let url = "";
+  let signature = "";
   try {
     const resp = await fetch(
       `${base}/api/v1/hooks/download?version=${version}&os=${os}&arch=${arch}`,
       { headers: { "x-rogue-api-key": apiKey }, signal: AbortSignal.timeout(15000) },
     );
-    if (resp.ok) url = (await resp.json())?.url || "";
+    if (resp.ok) ({ url = "", signature = "" } = (await resp.json()) || {});
   } catch {
     /* handled below */
   }
@@ -185,6 +187,15 @@ async function main() {
   } catch {
     giveUp("download failed");
   }
+  // The macOS endpoint's extension denies every rename into ~/.rogue/bin. It installs the binary
+  // itself when the release's signature lies beside the source as <source>.sig.
+  if (typeof signature === "string" && signature) {
+    try {
+      fs.writeFileSync(`${tmp}.sig`, signature);
+    } catch {
+      giveUp("cannot stage the signature");
+    }
+  }
   const got = crypto.createHash("sha256").update(data).digest("hex");
   if (got !== want) giveUp(`sha256 mismatch: got ${got}, pinned ${want}`);
   if (!IS_WIN) fs.chmodSync(tmp, 0o755);
@@ -196,9 +207,15 @@ async function main() {
   try {
     fs.renameSync(tmp, dest);
   } catch {
-    giveUp(`cannot install ${dest}`);
+    // After the extension installs the binary, the rename still fails with EPERM.
+    let landed = "";
+    try {
+      landed = crypto.createHash("sha256").update(fs.readFileSync(dest)).digest("hex");
+    } catch {
+      /* handled below */
+    }
+    if (landed !== want) giveUp(`cannot install ${dest}`);
   }
-  tmp = "";
   fs.rmSync(stamp, { force: true });
   say(`installed (${key})`);
 }

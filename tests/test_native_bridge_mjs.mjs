@@ -33,8 +33,10 @@ fs.rmSync(path.join(PLUGIN, "rogue-hook.json"), { force: true });
 fs.mkdirSync(HOME, { recursive: true });
 fs.mkdirSync(EMPTY, { recursive: true });
 
-// The mock: the download route answers a presigned URL to /blob, which serves the stub binary.
+// The mock: the download route answers a presigned URL to /blob, which serves the stub binary, and
+// the release's signature when one is set.
 let blob = Buffer.alloc(0);
+let signature = "";
 let requests = [];
 const server = http.createServer((req, res) => {
   req.resume();
@@ -42,7 +44,7 @@ const server = http.createServer((req, res) => {
   requests.push(`${req.url} key=${req.headers["x-rogue-api-key"]}`);
   if (req.url.startsWith("/api/v1/hooks/download?")) {
     const url = `http://127.0.0.1:${server.address().port}/blob?X-Amz-Signature=abc&X-Amz-Expires=300`;
-    return res.end(JSON.stringify({ url }));
+    return res.end(JSON.stringify(signature ? { url, signature } : { url }));
   }
   res.end(blob);
 });
@@ -363,6 +365,50 @@ test("no API key installs nothing", posix, async () => {
   await install({ HOME: EMPTY });
   assert.equal(installed(), false);
   assert.deepEqual(requests, []);
+});
+
+// Stands in for the macOS endpoint's extension: every rename onto the hook fails with EPERM, and the
+// extension writes the source itself only when <source>.sig holds the release's signature.
+const SYSEXT = path.join(WORK, "sysext.mjs");
+fs.writeFileSync(
+  SYSEXT,
+  `import fs from "node:fs";
+import path from "node:path";
+const rename = fs.renameSync;
+fs.renameSync = (src, dest) => {
+  if (path.resolve(String(dest)) !== process.env.SYSEXT_HOOK) return rename(src, dest);
+  let sig = "";
+  try { sig = fs.readFileSync(src + ".sig", "utf8"); } catch {}
+  if (sig === process.env.SYSEXT_SIG) { fs.copyFileSync(src, dest); fs.chmodSync(dest, 0o755); }
+  throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+};
+`,
+);
+
+test("a protected Mac: the extension denies the rename and installs the binary from its .sig", posix, async () => {
+  const sysext = {
+    NODE_OPTIONS: `--import ${pathToFileURL(SYSEXT).href}`,
+    SYSEXT_HOOK: BIN,
+    SYSEXT_SIG: "dW50cnVzdGVk+IGNvbW1lbnQ6/c2lnbmF0dXJl=",
+  };
+  stub("0.1.0");
+  pin("0.1.0", sha(blob));
+  fs.rmSync(BIN, { force: true });
+  signature = sysext.SYSEXT_SIG;
+  try {
+    await install(sysext);
+    assert.equal(installed(), true, "the extension installed it");
+    assert.match(binaryLog().trimEnd().split("\n").at(-1), /rogue-hook 0\.1\.0: installed/);
+    assert.deepEqual(staged(), [], "no temp file or signature left");
+    fs.rmSync(BIN, { force: true });
+    signature = "";
+    await install(sysext);
+    assert.equal(installed(), false, "no signature from the route: nothing installed");
+    assert.match(binaryLog().trimEnd().split("\n").at(-1), /cannot install /);
+    assert.deepEqual(staged(), [], "no temp file left");
+  } finally {
+    signature = "";
+  }
 });
 
 // On Windows the hand-off accepts a binary only under the per-user default root (Node reads no ACL);

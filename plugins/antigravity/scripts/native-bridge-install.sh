@@ -10,8 +10,9 @@
 # updates itself from the Rogue API and checks each release's signature. Downloads through
 # GET /api/v1/hooks/download with the API key, then installs only a file whose sha256 matches the
 # pin and whose --version reports the pinned version, by an atomic rename onto
-# ~/.rogue/bin/rogue-hook. It holds the binary's own update lock (~/.rogue/.self-update.lock) and
-# installs only while that path is still empty, so it never replaces a binary that updated itself.
+# ~/.rogue/bin/rogue-hook, with the route's signature staged beside it for the macOS endpoint. It
+# holds the binary's own update lock (~/.rogue/.self-update.lock) and installs only while that
+# path is still empty, so it never replaces a binary that updated itself.
 # Any failure leaves nothing at that path, so the script bridge keeps handling events. A failed
 # attempt is retried after ROGUE_NATIVE_BRIDGE_RETRY seconds (default 900, numeric zero = every
 # time), never per event. Every attempt's outcome is appended to ~/.rogue/hook-binary.log.
@@ -104,9 +105,11 @@ WANT="$(pinned "$PLATFORM")"
 command -v curl >/dev/null 2>&1 || give_up "no curl"
 
 BASE="${ROGUE_BASE_URL:-https://api.rogue.security}"
-URL="$(curl -fsS --max-time 15 -H "x-rogue-api-key: $ROGUE_API_KEY" \
-  "${BASE%/}/api/v1/hooks/download?version=$VERSION&os=$OS&arch=$ARCH" 2>/dev/null |
-  sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\u0026/\&/g')"
+ANSWER="$(curl -fsS --max-time 15 -H "x-rogue-api-key: $ROGUE_API_KEY" \
+  "${BASE%/}/api/v1/hooks/download?version=$VERSION&os=$OS&arch=$ARCH" 2>/dev/null)"
+field() { printf '%s' "$ANSWER" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1; }
+URL="$(field url | sed 's/\\u0026/\&/g')"
+SIG="$(field signature)"
 [ -n "$URL" ] || give_up "no download URL for $PLATFORM"
 
 # Staged beside the binary's own updates: on the same volume, so the rename is atomic.
@@ -114,8 +117,11 @@ STAGE="$HOME/.rogue/updates"
 mkdir -p "$STAGE" "$DIR" 2>/dev/null || give_up "cannot create $DIR"
 rogue_nearest_dir_is_protected "$DEST" || give_up "$DIR is not protected from other users"
 TMP="$STAGE/rogue-hook.first.$$"
-trap 'rm -f "$TMP" "$TMP.version"' EXIT
+trap 'rm -f "$TMP" "$TMP.sig" "$TMP.version"' EXIT
 curl -fsS --max-time 120 -o "$TMP" "$URL" 2>/dev/null || give_up "download failed"
+# The macOS endpoint's extension denies every rename into ~/.rogue/bin. It installs the binary
+# itself when the release's signature lies beside the source as <source>.sig.
+[ -z "$SIG" ] || printf '%s' "$SIG" > "$TMP.sig" 2>/dev/null || give_up "cannot stage the signature"
 GOT="$(sha256 "$TMP")"
 [ "$GOT" = "$WANT" ] || give_up "sha256 mismatch: got $GOT, pinned $WANT"
 chmod 755 "$TMP" 2>/dev/null
@@ -129,7 +135,8 @@ kill -9 "$PROBE" 2>/dev/null
 wait "$PROBE" 2>/dev/null
 REPORTED="$(cat "$TMP.version" 2>/dev/null)"
 [ "$REPORTED" = "rogue-hook $VERSION" ] || give_up "downloaded binary does not run here"
-mv -f "$TMP" "$DEST" 2>/dev/null || give_up "cannot install $DEST"
+# After the extension installs the binary, the rename still fails with EPERM.
+mv -f "$TMP" "$DEST" 2>/dev/null || [ "$(sha256 "$DEST")" = "$WANT" ] || give_up "cannot install $DEST"
 rm -f "$STAMP" 2>/dev/null
 say "installed ($PLATFORM)"
 exit 0

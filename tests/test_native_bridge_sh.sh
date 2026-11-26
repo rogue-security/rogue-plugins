@@ -230,6 +230,35 @@ env ROGUE_API_KEY='' ROGUE_NATIVE_BRIDGE_RETRY=0 ROGUE_BASE_URL='' HOME="$WORK/n
   "$SH" "$PLUGIN/scripts/native-bridge-install.sh" "$PLUGIN"
 check "no binary without an API key" "absent" "$(installed)"
 
+echo "a protected Mac: the extension denies the rename and installs the binary from its .sig"
+# Stands in for the macOS endpoint's extension: every rename onto the hook fails with EPERM, and
+# the extension writes the source itself only when <source>.sig holds the release's signature.
+SIGNATURE='dW50cnVzdGVk+IGNvbW1lbnQ6/c2lnbmF0dXJl='
+mkdir -p "$WORK/sysext"
+cat > "$WORK/sysext/mv" <<SHIM
+#!/bin/sh
+for dest; do :; done
+src=""; for a; do case "\$a" in -*) ;; *) [ -n "\$src" ] || src=\$a ;; esac; done
+[ "\$dest" = "$BIN" ] || exec /bin/mv "\$@"
+[ "\$(cat "\$src.sig" 2>/dev/null)" = "$SIGNATURE" ] && cp "\$src" "\$dest"
+echo "mv: rename \$src to \$dest: Operation not permitted" >&2
+exit 1
+SHIM
+chmod 755 "$WORK/sysext/mv"
+stub 0.1.0
+pin 0.1.0 "$(sha "$SRV/blob")"
+rm -f "$BIN"
+printf '%s' "$SIGNATURE" > "$SRV/signature"
+install PATH="$WORK/sysext:$PATH"
+check "the extension installed it" "rogue-hook 0.1.0" "$(reported)"
+contains "log reports install" "rogue-hook 0.1.0: installed" "$(tail -n 1 "$HOME/.rogue/hook-binary.log")"
+check "no temp file or signature left" "" "$(staged)"
+rm -f "$BIN" "$SRV/signature"
+install PATH="$WORK/sysext:$PATH"
+check "no signature from the route: nothing installed" "absent" "$(installed)"
+contains "log reports it" "cannot install $BIN" "$(tail -n 1 "$HOME/.rogue/hook-binary.log")"
+check "no temp file left" "" "$(staged)"
+
 echo "install.sh installs the binary from the pin of a plugin it installed"
 stub 0.1.0
 pin 0.1.0 "$(sha "$SRV/blob")"
